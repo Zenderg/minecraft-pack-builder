@@ -153,22 +153,6 @@ CREATE TABLE IF NOT EXISTS construction_stages (
   UNIQUE (scheme_id, position)
 );
 
-CREATE TABLE IF NOT EXISTS change_requests (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  scheme_id INTEGER NOT NULL,
-  status TEXT NOT NULL DEFAULT 'pending',
-  body TEXT NOT NULL,
-  from_x INTEGER NOT NULL,
-  from_y INTEGER NOT NULL,
-  from_z INTEGER NOT NULL,
-  to_x INTEGER NOT NULL,
-  to_y INTEGER NOT NULL,
-  to_z INTEGER NOT NULL,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (scheme_id) REFERENCES schemes(id) ON DELETE CASCADE
-);
-
 CREATE TABLE IF NOT EXISTS settings_metadata (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL,

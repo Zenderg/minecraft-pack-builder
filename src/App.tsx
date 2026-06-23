@@ -4,9 +4,7 @@ import {
   ArrowRight,
   Bot,
   Box,
-  ChevronDown,
   CheckCircle2,
-  ClipboardList,
   Database,
   EyeOff,
   FolderOpen,
@@ -82,7 +80,8 @@ import {
   type ImportProgress,
 } from "./tauri";
 import { type StageOptionId } from "./renderViewer";
-import { ViewerWorkspace, type ViewerSelection, type ViewerToolContext } from "./ViewerWorkspace";
+import { RightToolPanel } from "./RightToolPanel";
+import { ViewerWorkspace, type ViewerToolContext } from "./ViewerWorkspace";
 import "./styles.css";
 
 const onboardingStorageKey = "mpb.onboardingComplete";
@@ -122,12 +121,8 @@ export function App() {
   const [importStageByModpack, setImportStageByModpack] = useState<Record<number, string>>({});
   const [expandedModpackIds, setExpandedModpackIds] = useState<Set<number>>(new Set());
   const [sidebarWidth, setSidebarWidth] = useState<number>(sidebarWidthLimits.default);
-  const [viewerSelection, setViewerSelection] = useState<ViewerSelection>(null);
   const [viewerStageId, setViewerStageId] = useState<StageOptionId | null>(null);
   const [viewerToolContext, setViewerToolContext] = useState<ViewerToolContext | null>(null);
-  const handleViewerSelectionChange = useCallback((selection: ViewerSelection) => {
-    setViewerSelection(selection);
-  }, []);
   const handleViewerStageChange = useCallback((stageId: StageOptionId | null) => {
     setViewerStageId(stageId);
   }, []);
@@ -581,7 +576,6 @@ export function App() {
         <div className="content-grid">
           <ViewerWorkspace
             modpack={selectedModpack}
-            onSelectionChange={handleViewerSelectionChange}
             onStageChange={handleViewerStageChange}
             onToolContextChange={handleViewerToolContextChange}
             scheme={selectedScheme}
@@ -591,7 +585,6 @@ export function App() {
 
           <RightToolPanel
             onStageChange={setViewerStageId}
-            selection={viewerSelection}
             t={t}
             toolContext={viewerToolContext}
           />
@@ -1072,132 +1065,6 @@ function LoaderIcon({ kind }: { kind: LoaderIconKind }) {
     <span aria-hidden="true" className={`loader-icon ${kind}`}>
       {label}
     </span>
-  );
-}
-
-function RightToolPanel({
-  onStageChange,
-  selection,
-  t,
-  toolContext,
-}: {
-  onStageChange: (stageId: StageOptionId) => void;
-  selection: ViewerSelection;
-  t: Translator;
-  toolContext: ViewerToolContext | null;
-}) {
-  const [openSections, setOpenSections] = useState({
-    materials: false,
-    review: false,
-    stages: true,
-  });
-  const materialTotal = toolContext?.materials.reduce((total, line) => total + line.count, 0) ?? 0;
-
-  function toggleSection(section: keyof typeof openSections) {
-    setOpenSections((current) => ({ ...current, [section]: !current[section] }));
-  }
-
-  return (
-    <aside className="right-rail tools-sidebar" aria-label={t("tools.sidebar")}>
-      <div className="tool-summary" aria-label="Render metrics">
-        <span>
-          {toolContext
-            ? `${toolContext.metrics.visibleBlocks} / ${toolContext.metrics.totalBlocks}`
-            : "--"}
-        </span>
-        <span>{toolContext ? `${toolContext.metrics.chunkCount} chunks` : "-- chunks"}</span>
-        <span>{toolContext ? `${toolContext.metrics.faceCount} faces` : "-- faces"}</span>
-      </div>
-      <div className="tool-tree">
-        <section className={openSections.stages ? "tool-node expanded" : "tool-node"}>
-          <div className="tree-item tool-row">
-            <button className="tree-label tool-label" onClick={() => toggleSection("stages")} type="button">
-              <Layers3 size={16} />
-              {t("tools.stages")}
-            </button>
-            <strong>
-              {toolContext
-                ? `${toolContext.metrics.visibleBlocks} / ${toolContext.metrics.totalBlocks}`
-                : "--"}
-            </strong>
-            <ChevronDown className={openSections.stages ? "open" : ""} size={16} />
-          </div>
-          {openSections.stages && (
-            <div className="tool-children">
-              <div className="tool-panel-stage-list">
-                {toolContext ? (
-                  toolContext.stageOptions.map((stage) => (
-                    <button
-                      className={stage.id === toolContext.selectedStageId ? "active" : ""}
-                      key={stage.id}
-                      onClick={() => onStageChange(stage.id)}
-                      type="button"
-                    >
-                      <span>{stage.label}</span>
-                      <strong>{stage.order ?? t("tools.unassigned")}</strong>
-                    </button>
-                  ))
-                ) : (
-                  <div className="empty-list">{t("tools.openScheme")}</div>
-                )}
-              </div>
-            </div>
-          )}
-        </section>
-
-        <section className={openSections.review ? "tool-node expanded" : "tool-node"}>
-          <div className="tree-item tool-row">
-            <button className="tree-label tool-label" onClick={() => toggleSection("review")} type="button">
-              <ClipboardList size={16} />
-              {t("tools.review")}
-            </button>
-            <strong>{t("review.pending")}: 0</strong>
-            <ChevronDown className={openSections.review ? "open" : ""} size={16} />
-          </div>
-          {openSections.review && (
-            <div className="tool-children">
-              <div className="selection-box">
-                <span>{t("review.selection")}</span>
-                <code>
-                  {selection
-                    ? `x: ${selection.coordinate[0]}, y: ${selection.coordinate[1]}, z: ${selection.coordinate[2]}`
-                    : "x: --, y: --, z: --"}
-                </code>
-                {selection && <span>{selection.blockId}</span>}
-              </div>
-              <div className="empty-list">{t("review.changeRequests")}</div>
-            </div>
-          )}
-        </section>
-
-        <section className={openSections.materials ? "tool-node expanded" : "tool-node"}>
-          <div className="tree-item tool-row">
-            <button className="tree-label tool-label" onClick={() => toggleSection("materials")} type="button">
-              <Database size={16} />
-              {t("tools.materials")}
-            </button>
-            <strong>{t("materials.total")}: {materialTotal}</strong>
-            <ChevronDown className={openSections.materials ? "open" : ""} size={16} />
-          </div>
-          {openSections.materials && (
-            <div className="tool-children">
-              {toolContext ? (
-                <ul className="materials-list">
-                  {toolContext.materials.map((material) => (
-                    <li key={material.blockId}>
-                      <span>{material.blockId}</span>
-                      <strong>{material.count}</strong>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <div className="empty-list">{t("tools.openScheme")}</div>
-              )}
-            </div>
-          )}
-        </section>
-      </div>
-    </aside>
   );
 }
 

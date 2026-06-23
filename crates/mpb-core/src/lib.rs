@@ -252,25 +252,11 @@ impl MaterialLine {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChangeRequest {
-    pub selection: Selection,
-    pub body: String,
-    pub status: ChangeRequestStatus,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ChangeRequestStatus {
-    Pending,
-    Resolved,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Scheme {
     name: String,
     dimensions: Dimensions,
     stages: Vec<ConstructionStage>,
     blocks: BTreeMap<Coordinate, SchemeBlock>,
-    change_requests: Vec<ChangeRequest>,
     next_stage_id: u32,
 }
 
@@ -281,7 +267,6 @@ impl Scheme {
             dimensions,
             stages: Vec::new(),
             blocks: BTreeMap::new(),
-            change_requests: Vec::new(),
             next_stage_id: 1,
         }
     }

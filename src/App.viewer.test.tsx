@@ -172,6 +172,17 @@ describe("phase 7 viewer workspace", () => {
 
     expect(container.querySelector(".tool-tree")?.textContent).toContain("minecraft:stone_bricks");
   });
+
+  it("does not expose the deferred review or change-request flow", async () => {
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".scheme-label")?.click();
+    });
+
+    expect(await screenText(container, "Materials")).toBe(true);
+    expect(container.textContent).not.toContain("Review");
+    expect(container.textContent).not.toContain("Change requests");
+    expect(container.textContent).not.toContain("Move the machine wall two blocks east");
+  });
 });
 
 function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {

@@ -470,7 +470,9 @@ button.loading:disabled {
 .content-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 348px;
+  grid-template-rows: minmax(0, 1fr);
   gap: 14px;
+  height: 100%;
   min-height: 0;
   padding: 14px;
 }
@@ -614,13 +616,13 @@ button.loading:disabled {
   transform: rotateX(58deg) rotateZ(45deg);
 }
 
-.selection-overlay,
+.block-hover-overlay,
 .viewer-state-message {
   position: absolute;
   z-index: 2;
 }
 
-.selection-overlay {
+.block-hover-overlay {
   right: 14px;
   bottom: 14px;
   display: grid;
@@ -634,7 +636,7 @@ button.loading:disabled {
   font-size: 12px;
 }
 
-.selection-overlay span {
+.block-hover-overlay span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -736,6 +738,8 @@ button.loading:disabled {
 .tools-sidebar {
   grid-template-rows: auto minmax(0, 1fr);
   gap: 12px;
+  min-height: 0;
+  overflow: hidden;
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -762,7 +766,8 @@ button.loading:disabled {
   align-content: start;
   gap: 2px;
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .tool-node + .tool-node {
@@ -848,17 +853,6 @@ button.loading:disabled {
   color: var(--muted);
   font-size: 10px;
   font-weight: 720;
-}
-
-.selection-box {
-  display: grid;
-  gap: 8px;
-  margin: 16px 0;
-  padding: 12px;
-  border-radius: 8px;
-  background: var(--panel-soft);
-  color: var(--muted);
-  font-size: 12px;
 }
 
 code {

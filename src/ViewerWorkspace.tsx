@@ -21,7 +21,7 @@ import { getSchemeRenderScene } from "./tauri";
 
 type Translator = (key: Parameters<typeof translate>[1]) => string;
 
-export type ViewerSelection = {
+type HoveredBlock = {
   coordinate: [number, number, number];
   blockId: string;
 } | null;
@@ -47,7 +47,6 @@ type ThreeRuntime = {
 export function ViewerWorkspace({
   modpack,
   onStageChange,
-  onSelectionChange,
   onToolContextChange,
   scheme,
   selectedStageId,
@@ -55,7 +54,6 @@ export function ViewerWorkspace({
 }: {
   modpack: LibraryModpack | null;
   onStageChange: (stageId: StageOptionId | null) => void;
-  onSelectionChange: (selection: ViewerSelection) => void;
   onToolContextChange: (context: ViewerToolContext | null) => void;
   scheme: LibraryScheme | null;
   selectedStageId: StageOptionId | null;
@@ -65,7 +63,6 @@ export function ViewerWorkspace({
 
   useEffect(() => {
     let active = true;
-    onSelectionChange(null);
     onToolContextChange(null);
 
     if (!scheme) {
@@ -94,7 +91,7 @@ export function ViewerWorkspace({
     return () => {
       active = false;
     };
-  }, [onSelectionChange, onStageChange, onToolContextChange, scheme]);
+  }, [onStageChange, onToolContextChange, scheme]);
 
   const effectiveStageId =
     viewerState.kind === "ready"
@@ -120,7 +117,6 @@ export function ViewerWorkspace({
       {viewerState.kind === "ready" ? (
         <ReadyViewer
           modpack={modpack}
-          onSelectionChange={onSelectionChange}
           scene={viewerState.scene}
           selectedStageId={effectiveStageId}
           t={t}
@@ -134,13 +130,11 @@ export function ViewerWorkspace({
 
 function ReadyViewer({
   modpack,
-  onSelectionChange,
   scene,
   selectedStageId,
   t,
 }: {
   modpack: LibraryModpack | null;
-  onSelectionChange: (selection: ViewerSelection) => void;
   scene: RenderScene;
   selectedStageId: StageOptionId;
   t: Translator;
@@ -150,28 +144,19 @@ function ReadyViewer({
     () => getVisibleRenderBlocks(scene, selectedStageId),
     [scene, selectedStageId],
   );
-  const [selectedBlock, setSelectedBlock] = useState<RenderBlock | null>(null);
+  const [hoveredBlock, setHoveredBlock] = useState<HoveredBlock>(null);
 
   useEffect(() => {
-    setSelectedBlock(null);
-    onSelectionChange(null);
-  }, [onSelectionChange, selectedStageId]);
-
-  function handleSelectBlock(block: RenderBlock) {
-    setSelectedBlock(block);
-    onSelectionChange({
-      coordinate: block.coordinate,
-      blockId: block.blockId,
-    });
-  }
+    setHoveredBlock(null);
+  }, [selectedStageId]);
 
   return (
     <>
       <ThreeSchemeViewer
         blocks={visibleBlocks}
         dimensions={scene.dimensions}
-        onSelectBlock={handleSelectBlock}
-        selectedBlock={selectedBlock}
+        hoveredBlock={hoveredBlock}
+        onHoverBlock={setHoveredBlock}
       />
 
       <div className="viewer-footer">
@@ -225,18 +210,18 @@ function ViewerStatus({
 function ThreeSchemeViewer({
   blocks,
   dimensions,
-  onSelectBlock,
-  selectedBlock,
+  hoveredBlock,
+  onHoverBlock,
 }: {
   blocks: RenderBlock[];
   dimensions: [number, number, number];
-  onSelectBlock: (block: RenderBlock) => void;
-  selectedBlock: RenderBlock | null;
+  hoveredBlock: HoveredBlock;
+  onHoverBlock: (block: HoveredBlock) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const blocksRef = useRef(blocks);
-  const onSelectBlockRef = useRef(onSelectBlock);
+  const onHoverBlockRef = useRef(onHoverBlock);
   const runtimeRef = useRef<ThreeRuntime | null>(null);
 
   useEffect(() => {
@@ -245,8 +230,8 @@ function ThreeSchemeViewer({
   }, [blocks]);
 
   useEffect(() => {
-    onSelectBlockRef.current = onSelectBlock;
-  }, [onSelectBlock]);
+    onHoverBlockRef.current = onHoverBlock;
+  }, [onHoverBlock]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -348,7 +333,7 @@ function ThreeSchemeViewer({
         camera.updateProjectionMatrix();
       }
 
-      function handlePointerDown(event: PointerEvent) {
+      function pickBlock(event: PointerEvent): RenderBlock | null {
         const rect = liveCanvas.getBoundingClientRect();
         pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
         pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
@@ -356,18 +341,32 @@ function ThreeSchemeViewer({
         const hits = raycaster.intersectObjects(interactiveMeshes.map((item) => item.mesh));
         const hit = hits[0];
         if (!hit || hit.instanceId === undefined) {
-          return;
+          return null;
         }
         const item = interactiveMeshes.find((entry) => entry.mesh === hit.object);
-        const block = item?.blocks[hit.instanceId];
-        if (block) {
-          onSelectBlockRef.current(block);
-        }
+        return item?.blocks[hit.instanceId] ?? null;
+      }
+
+      function handlePointerMove(event: PointerEvent) {
+        const block = pickBlock(event);
+        onHoverBlockRef.current(
+          block
+            ? {
+                blockId: block.blockId,
+                coordinate: block.coordinate,
+              }
+            : null,
+        );
+      }
+
+      function handlePointerLeave() {
+        onHoverBlockRef.current(null);
       }
 
       const resizeObserver = new ResizeObserver(resize);
       resizeObserver.observe(liveViewport);
-      liveCanvas.addEventListener("pointerdown", handlePointerDown);
+      liveCanvas.addEventListener("pointermove", handlePointerMove);
+      liveCanvas.addEventListener("pointerleave", handlePointerLeave);
       rebuildBlocks();
       resize();
       runtimeRef.current = { rebuildBlocks };
@@ -389,7 +388,8 @@ function ThreeSchemeViewer({
         }
         window.cancelAnimationFrame(frame);
         resizeObserver.disconnect();
-        liveCanvas.removeEventListener("pointerdown", handlePointerDown);
+        liveCanvas.removeEventListener("pointermove", handlePointerMove);
+        liveCanvas.removeEventListener("pointerleave", handlePointerLeave);
         controls.dispose();
         for (const item of interactiveMeshes) {
           item.mesh.geometry.dispose();
@@ -428,10 +428,10 @@ function ThreeSchemeViewer({
           ))}
         </div>
       )}
-      {selectedBlock && (
-        <div className="selection-overlay">
-          <span>{selectedBlock.blockId}</span>
-          <code>{selectedBlock.coordinate.join(", ")}</code>
+      {hoveredBlock && (
+        <div className="block-hover-overlay">
+          <span>{hoveredBlock.blockId}</span>
+          <code>{hoveredBlock.coordinate.join(", ")}</code>
         </div>
       )}
     </div>
