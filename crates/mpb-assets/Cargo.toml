@@ -1,0 +1,7 @@
+[package]
+name = "mpb-assets"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]

@@ -1,0 +1,21 @@
+[package]
+name = "app-tauri"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[lib]
+name = "app_tauri_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "minecraft-pack-builder"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+mpb-storage = { path = "../crates/mpb-storage" }
+serde.workspace = true
+tauri = { version = "2", features = [] }
