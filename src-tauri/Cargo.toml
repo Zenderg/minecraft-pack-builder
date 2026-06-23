@@ -16,6 +16,11 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+mpb-core = { path = "../crates/mpb-core" }
 mpb-storage = { path = "../crates/mpb-storage" }
 serde.workspace = true
+serde_json.workspace = true
 tauri = { version = "2", features = [] }
+
+[dev-dependencies]
+tempfile = "3"

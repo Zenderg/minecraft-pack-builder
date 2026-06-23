@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { LibraryModpack } from "./library";
+import { browserDomainDemoArtifact, type DomainDemoArtifact } from "./phase4Demo";
 
 export type AppDataPaths = {
   appDataDir: string;
@@ -191,6 +192,14 @@ export async function deleteImportedModpack(modpackId: number): Promise<LibraryM
   }
 
   return invoke<LibraryModpack[]>("delete_imported_modpack", { modpackId });
+}
+
+export async function generateDomainDemoReport(): Promise<DomainDemoArtifact> {
+  if (!isTauriRuntime()) {
+    return structuredClone(browserDomainDemoArtifact);
+  }
+
+  return invoke<DomainDemoArtifact>("generate_domain_demo_report");
 }
 
 function browserUniqueModpackName(requestedName: string, excludingId: number): string {

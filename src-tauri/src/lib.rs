@@ -1,9 +1,14 @@
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use credentials::{curseforge_key_status, save_curseforge_key, CurseForgeCredentialStatus};
+use mpb_core::DomainDemoReport;
+use mpb_storage::{
+    ensure_app_data_dirs, AppDataPaths, LibraryModpack, LibraryRepository, NewScheme,
+};
 #[cfg(debug_assertions)]
 use mpb_storage::{ImportStatus, NewImportedModpack};
-use mpb_storage::{ensure_app_data_dirs, AppDataPaths, LibraryModpack, LibraryRepository, NewScheme};
+use serde::Serialize;
 use tauri::Manager;
 
 mod credentials;
@@ -38,6 +43,32 @@ fn open_app_data_folder(app: tauri::AppHandle) -> Result<AppDataPaths, String> {
     Ok(paths)
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DomainDemoReportArtifact {
+    pub path: PathBuf,
+    pub report: DomainDemoReport,
+}
+
+pub fn write_domain_demo_report(
+    diagnostics_dir: impl AsRef<Path>,
+) -> Result<DomainDemoReportArtifact, String> {
+    std::fs::create_dir_all(diagnostics_dir.as_ref()).map_err(|error| error.to_string())?;
+    let report = mpb_core::domain_demo_report();
+    let path = diagnostics_dir
+        .as_ref()
+        .join("phase-4-domain-demo-report.json");
+    let json = serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?;
+    std::fs::write(&path, json).map_err(|error| error.to_string())?;
+    Ok(DomainDemoReportArtifact { path, report })
+}
+
+#[tauri::command]
+fn generate_domain_demo_report(app: tauri::AppHandle) -> Result<DomainDemoReportArtifact, String> {
+    let paths = discover_app_paths(app)?;
+    write_domain_demo_report(paths.diagnostics_dir)
+}
+
 #[tauri::command]
 fn get_curseforge_key_status() -> CurseForgeCredentialStatus {
     curseforge_key_status()
@@ -51,9 +82,7 @@ fn save_curseforge_api_key(api_key: String) -> Result<CurseForgeCredentialStatus
 #[tauri::command]
 fn list_library(app: tauri::AppHandle) -> Result<Vec<LibraryModpack>, String> {
     let (_, repository) = library_repository(&app)?;
-    repository
-        .list_library()
-        .map_err(|error| error.to_string())
+    repository.list_library().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -106,9 +135,7 @@ fn seed_local_library_fixture(app: tauri::AppHandle) -> Result<Vec<LibraryModpac
         })
         .map_err(|error| error.to_string())?;
 
-    repository
-        .list_library()
-        .map_err(|error| error.to_string())
+    repository.list_library().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -130,9 +157,7 @@ fn create_scheme(
             size_z,
         })
         .map_err(|error| error.to_string())?;
-    repository
-        .list_library()
-        .map_err(|error| error.to_string())
+    repository.list_library().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -145,9 +170,7 @@ fn rename_scheme(
     repository
         .rename_scheme(scheme_id, &name)
         .map_err(|error| error.to_string())?;
-    repository
-        .list_library()
-        .map_err(|error| error.to_string())
+    repository.list_library().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -156,9 +179,7 @@ fn delete_scheme(app: tauri::AppHandle, scheme_id: i64) -> Result<Vec<LibraryMod
     repository
         .delete_scheme(scheme_id)
         .map_err(|error| error.to_string())?;
-    repository
-        .list_library()
-        .map_err(|error| error.to_string())
+    repository.list_library().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -171,9 +192,7 @@ fn rename_imported_modpack(
     repository
         .rename_imported_modpack(modpack_id, &name)
         .map_err(|error| error.to_string())?;
-    repository
-        .list_library()
-        .map_err(|error| error.to_string())
+    repository.list_library().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -190,9 +209,7 @@ fn delete_imported_modpack(
             std::fs::remove_dir_all(cache_dir).map_err(|error| error.to_string())?;
         }
     }
-    repository
-        .list_library()
-        .map_err(|error| error.to_string())
+    repository.list_library().map_err(|error| error.to_string())
 }
 
 pub fn open_folder_command_for_platform() -> &'static str {
@@ -210,32 +227,34 @@ pub fn run() {
 
     #[cfg(debug_assertions)]
     let builder = builder.invoke_handler(tauri::generate_handler![
-            discover_app_paths,
-            open_app_data_folder,
-            get_curseforge_key_status,
-            save_curseforge_api_key,
-            list_library,
-            seed_local_library_fixture,
-            create_scheme,
-            rename_scheme,
-            delete_scheme,
-            rename_imported_modpack,
-            delete_imported_modpack
-        ]);
+        discover_app_paths,
+        open_app_data_folder,
+        get_curseforge_key_status,
+        save_curseforge_api_key,
+        generate_domain_demo_report,
+        list_library,
+        seed_local_library_fixture,
+        create_scheme,
+        rename_scheme,
+        delete_scheme,
+        rename_imported_modpack,
+        delete_imported_modpack
+    ]);
 
     #[cfg(not(debug_assertions))]
     let builder = builder.invoke_handler(tauri::generate_handler![
-            discover_app_paths,
-            open_app_data_folder,
-            get_curseforge_key_status,
-            save_curseforge_api_key,
-            list_library,
-            create_scheme,
-            rename_scheme,
-            delete_scheme,
-            rename_imported_modpack,
-            delete_imported_modpack
-        ]);
+        discover_app_paths,
+        open_app_data_folder,
+        get_curseforge_key_status,
+        save_curseforge_api_key,
+        generate_domain_demo_report,
+        list_library,
+        create_scheme,
+        rename_scheme,
+        delete_scheme,
+        rename_imported_modpack,
+        delete_imported_modpack
+    ]);
 
     builder
         .run(tauri::generate_context!())
