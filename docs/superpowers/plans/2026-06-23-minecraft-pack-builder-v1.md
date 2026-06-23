@@ -99,7 +99,7 @@ The user should never need to infer what changed from code. They should be able 
 
 **Build:**
 
-- Add SQLite migrations for imported modpacks, schemes, scheme dimensions, construction stages, change requests, settings metadata, and import status.
+- Add SQLite migrations for imported modpacks, schemes, scheme dimensions, construction stages, settings metadata, and import status.
 - Add repositories for modpack and scheme CRUD.
 - Add sidebar tree with imported modpacks and schemes.
 - Add create, rename, and delete flows for schemes.
@@ -132,7 +132,7 @@ The user should never need to infer what changed from code. They should be able 
 
 **Build:**
 
-- Implement scheme dimensions, block coordinates, block identifiers, block states, stages, `Unassigned`, selections, and change requests in `mpb-core`.
+- Implement scheme dimensions, block coordinates, block identifiers, block states, stages, `Unassigned`, and selections in `mpb-core`.
 - Implement atomic operations for placing, deleting, replacing, and bulk-changing blocks.
 - Implement resize validation and rejection of operations that would move blocks out of bounds.
 - Implement construction stage ordering and cumulative visibility rules.
@@ -265,39 +265,31 @@ The user should never need to infer what changed from code. They should be able 
 - Playwright screenshot smoke tests for nonblank viewer output.
 - Manual macOS viewer interaction recording.
 
-## Phase 8: Review Tools, Change Requests, And Materials Panel
+## Phase 8: Viewer Selection And Materials Panel
 
-**Purpose:** Complete the user review workflow around the 3D viewer.
+**Purpose:** Complete the user inspection workflow around the 3D viewer.
 
 **Build:**
 
 - Allow selecting a single block or rectangular area in the viewer.
 - Show selection coordinates in the UI.
-- Create change requests only when a selection exists.
-- Store change requests with `pending` or `resolved` status.
-- Add a change requests panel.
-- Focus the corresponding viewer area when clicking a change request.
 - Add a materials panel with block type and count for the current scheme.
-- Keep materials and change requests updated after successful user or agent operations.
+- Keep materials updated after successful user or agent operations.
 
 **User Opens:**
 
-- A scheme with several blocks, stages, materials, and change requests.
+- A scheme with several blocks, stages, and materials.
 
 **User Validates:**
 
 - Selecting an area shows exact coordinates.
-- A change request can be created for that selection.
-- Pending and resolved states are visible.
-- Clicking a change request focuses the viewer on its selection.
 - Materials show block identifiers/names and counts.
 - Materials update after scheme changes.
 
 **Engineering Validation:**
 
-- Rust tests for change request persistence and status transitions.
 - Frontend tests for panel state.
-- Playwright flow for selection, request creation, request focus, and materials panel.
+- Playwright flow for selection display and materials panel.
 
 ## Phase 9: MCP-Compatible AI Integration And Tool Surface
 
@@ -309,7 +301,7 @@ The user should never need to infer what changed from code. They should be able 
 - Support exactly one active external client at a time.
 - Show server and active-client status in the main window and settings.
 - Add connection instructions for Codex, Claude Code, opencode, and compatible clients.
-- Implement tools to list imported modpacks, add a modpack, list schemes, create/rename/delete schemes, read scheme content, read current selection, read pending change requests, resolve change requests, mutate blocks, bulk mutate areas, resize schemes, manage stages, assign blocks to stages, validate, get materials, and export.
+- Implement tools to list imported modpacks, add a modpack, list schemes, create/rename/delete schemes, read scheme content, read current selection, mutate blocks, bulk mutate areas, resize schemes, manage stages, assign blocks to stages, validate, get materials, and export.
 - Route every mutating tool through Rust core validation.
 - Reject invalid commands atomically with structured errors.
 - Emit UI update events after successful mutations.
@@ -327,7 +319,6 @@ The user should never need to infer what changed from code. They should be able 
 - The external client can create a scheme through tools.
 - The external client can modify blocks and stages.
 - Invalid operations are rejected without partial changes.
-- Pending change requests can be read and marked resolved by the client.
 - The viewer updates after successful agent operations.
 
 **Engineering Validation:**
@@ -448,7 +439,7 @@ The user should never need to infer what changed from code. They should be able 
 **Build:**
 
 - Run the full user journey on macOS using the AOC modpack.
-- Verify first launch, settings, CurseForge key storage, import, asset parsing, scheme creation, AI tool mutation, 3D review, change request resolution, material list, validation, and export.
+- Verify first launch, settings, CurseForge key storage, import, asset parsing, scheme creation, AI tool mutation, 3D inspection, material list, validation, and export.
 - Run automated test suites across Rust and frontend.
 - Run packaging and smoke checks.
 - Produce a final v1 acceptance report.
@@ -466,8 +457,7 @@ The user should never need to infer what changed from code. They should be able 
 - A CurseForge URL imports a real modpack with real blocks and textures.
 - An external AI client can create or modify a scheme through tools.
 - The user can inspect the result in 3D.
-- The user can create a selected-area change request.
-- The AI client can resolve the request through tools.
+- The user can inspect selected areas and discuss requested edits in the external AI client.
 - The materials list is correct for the visible completed scheme.
 - Exported `.schem` and `.litematic` files open in target tools.
 
@@ -491,7 +481,7 @@ The user should never need to infer what changed from code. They should be able 
 5. CurseForge release discovery and modpack download
 6. Modpack asset parsing, block index, and texture preparation
 7. Render preparation and Three.js 3D viewer
-8. Review tools, change requests, and materials panel
+8. Viewer selection and materials panel
 9. MCP-compatible AI integration and tool surface
 10. Export to `.schem` and `.litematic`
 11. Error handling, diagnostics, and data integrity
@@ -518,8 +508,7 @@ V1 is complete only when all of the following are true:
 - The user can import the AOC CurseForge modpack release as a local fixed snapshot.
 - The app parses enough real block/model/texture data to render imported modpack blocks.
 - The user can create and open schemes under imported modpacks.
-- The user can review a scheme in 3D with stage switching and selection.
-- The user can create selected-area change requests.
+- The user can inspect a scheme in 3D with stage switching and selection.
 - A single external AI client can connect and mutate schemes through controlled tools.
 - Invalid AI operations are rejected atomically with useful structured errors.
 - Materials list and validation are available.

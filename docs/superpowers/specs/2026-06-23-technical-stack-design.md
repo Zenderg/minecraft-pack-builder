@@ -114,7 +114,7 @@ The Rust side should start as a Cargo workspace with focused crates. The goal is
 
 Initial crates:
 
-- `mpb-core`: scheme model, block references, stages, change requests, operations, validation contracts, domain errors;
+- `mpb-core`: scheme model, block references, stages, selections, operations, validation contracts, domain errors;
 - `mpb-storage`: SQLite connection management, migrations, repositories, app data paths, atomic persistence helpers;
 - `mpb-assets`: CurseForge import, downloaded archive handling, modpack parsing, blockstate/model/texture indexing, asset cache metadata;
 - `mpb-render`: chunking, mesh preparation, visibility checks, render buffer generation, picking metadata, texture atlas metadata;
@@ -192,7 +192,6 @@ SQLite should contain:
 - scheme dimensions and metadata;
 - block data or chunked block data;
 - construction stages;
-- change requests;
 - material summaries or cached derivations if useful;
 - import status and asset index metadata;
 - application settings that are not secrets.
@@ -266,7 +265,7 @@ Agent tool responsibilities:
 - reject invalid operations atomically;
 - call Rust core operations rather than duplicating logic;
 - emit UI events after successful mutations;
-- expose pending change requests, current selection, material lists, validation results, and export actions.
+- expose current selection, material lists, validation results, and export actions.
 
 The v1 architecture should target official MCP protocol compatibility. If the Rust MCP ecosystem has gaps during implementation, the exact transport and library choice is a technical validation item, but the product should not invent a private non-MCP protocol as its default integration.
 
@@ -330,7 +329,7 @@ Frontend tests should be focused:
 
 - component tests for complex UI state and panels;
 - Three.js viewer tests only where behavior can be reliably asserted without overfitting to pixels;
-- Playwright smoke/e2e tests for onboarding, settings, mocked import flow, scheme open, viewer load, change request panel, and export action.
+- Playwright smoke/e2e tests for onboarding, settings, mocked import flow, scheme open, viewer load, selection display, materials, and export action.
 
 Fixtures should include small synthetic schemes and small synthetic modpack-like asset sets. Real modpacks can be used for manual and exploratory validation, but the automated test suite should avoid depending on large external downloads.
 

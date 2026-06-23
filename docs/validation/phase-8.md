@@ -1,20 +1,19 @@
-# Phase 8 Validation: Deferred
+# Phase 8 Validation: Viewer Selection And Materials
 
 Date: 2026-06-24
 
-Status: deferred, not implemented, not accepted as complete.
+Status: scoped to viewer inspection and materials.
 
 ## Decision Note
 
-Phase 8 remains in the main implementation plan, but the review workflow is intentionally not implemented in the current codebase.
+Phase 8 covers viewer inspection around the existing 3D workspace. It does not add an in-app note or status workflow for selected areas; users discuss edits with the external AI client.
 
-An initial experimental slice for block/area selection and change requests was removed because the interaction model was not good enough to keep as product behavior. The phase should be resumed only after a separate UX/design pass defines the intended behavior for:
+The phase should be resumed only after a separate UX/design pass defines the intended behavior for:
 
 - block hover information;
 - optional block or area selection;
-- change request creation;
 - camera behavior;
-- how review state should interact with AI tooling.
+- how selection state should interact with AI tooling.
 
 ## Current Accepted Scope
 
@@ -22,21 +21,20 @@ An initial experimental slice for block/area selection and change requests was r
 - Materials remain available in the right tools rail.
 - Hovering a rendered block may show transient block information without changing the camera.
 
-## Not Accepted
+## Out Of Scope
 
-- No Review section is exposed in the UI.
-- No change request creation, listing, focusing, or resolving flow is exposed.
-- No click-to-select review workflow is considered accepted.
+- No separate in-app note list or status workflow is exposed for selected areas.
+- No click-to-select workflow is considered accepted until the UX contract is approved.
 - No camera movement should happen as a result of inspecting a block.
 
 ## Validation Checklist
 
-- [x] The app does not expose a `Review` section in the right tools rail.
-- [x] The app does not expose change request controls.
+- [x] The app does not expose a separate note/status section in the right tools rail.
+- [x] The app does not expose selected-area note controls.
 - [x] Materials remain visible for the current scheme.
 - [x] The right tools rail is bounded so expanded sections scroll inside the sidebar.
-- [ ] Phase 8 has an approved UX contract.
-- [ ] Phase 8 has accepted manual desktop validation.
+- [ ] Selection UX has an approved contract.
+- [ ] Selection UX has accepted manual desktop validation.
 
 ## Verification Commands
 

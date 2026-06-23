@@ -45,7 +45,7 @@
 - [x] Scheme rows can be selected by clicking the full row, not only the text/icon cluster.
 - [x] Imported modpack rows use compact vertical spacing.
 - [x] A scheme belongs to exactly one imported modpack.
-- [x] SQLite migrations include imported modpacks, schemes, dimensions, stages, change requests, settings metadata, and import status.
+- [x] SQLite migrations include imported modpacks, schemes, dimensions, stages, settings metadata, and import status.
 - [x] Scheme create, rename, and delete operations autosave through Rust storage.
 - [x] Imported modpack rename/delete operations autosave through Rust storage.
 - [x] Deleting an imported modpack cascades schemes and returns the local cache path for removal.
