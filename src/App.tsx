@@ -5,24 +5,47 @@ import {
   Bot,
   Box,
   CheckCircle2,
-  ChevronDown,
   Database,
   EyeOff,
   FolderOpen,
   Globe2,
+  Info,
   KeyRound,
   Layers3,
   Languages,
+  MoreHorizontal,
   PackagePlus,
+  Pencil,
   PlugZap,
+  Plus,
   RefreshCcw,
   Settings,
   ShieldCheck,
+  Trash2,
   X,
 } from "lucide-react";
 import { useEffect, useReducer, useState } from "react";
 
 import { getInitialLanguage, languages, type Language, translate } from "./i18n";
+import {
+  clampSidebarWidth,
+  compactLibraryNodeGap,
+  createEmptyLibraryDraft,
+  getLoaderIconKind,
+  getActiveLibrarySelection,
+  getInitialExpandedModpackIds,
+  getLibraryDialogContent,
+  getModpackMenuPlacement,
+  getNextOpenModpackMenuId,
+  getNextSelectionAfterSchemeDelete,
+  sidebarWidthLimits,
+  shouldShowSeedFixtureAction,
+  toggleExpandedModpack,
+  type LoaderIconKind,
+  type LibraryModpack,
+  type LibraryScheme,
+  type LibrarySelection,
+} from "./library";
 import {
   canFinishOnboardingWithKey,
   createInitialAppFlow,
@@ -33,10 +56,17 @@ import {
   type SettingsSection,
 } from "./onboarding";
 import {
+  createScheme,
+  deleteImportedModpack,
+  deleteScheme,
   discoverAppPaths,
   getCurseForgeKeyStatus,
+  listLibrary,
   openAppDataFolder,
+  renameImportedModpack,
+  renameScheme,
   saveCurseForgeApiKey,
+  seedLocalLibraryFixture,
   type AppDataPaths,
   type CurseForgeCredentialStatus,
 } from "./tauri";
@@ -49,6 +79,14 @@ const sampleMaterials = [
 ];
 
 const onboardingStorageKey = "mpb.onboardingComplete";
+
+type LibraryDialog =
+  | { kind: "createScheme"; modpackId: number; name: string; dimensions: [number, number, number] }
+  | { kind: "renameScheme"; scheme: LibraryScheme; name: string }
+  | { kind: "renameModpack"; modpack: LibraryModpack; name: string }
+  | { kind: "infoModpack"; modpack: LibraryModpack }
+  | { kind: "deleteScheme"; scheme: LibraryScheme }
+  | { kind: "deleteModpack"; modpack: LibraryModpack };
 
 export function App() {
   const [language, setLanguage] = useState<Language>(() => getInitialLanguage());
@@ -66,8 +104,18 @@ export function App() {
   const [keyCheckResult, setKeyCheckResult] = useState<CurseForgeKeyCheckResult | "idle">("idle");
   const [isSavingKey, setIsSavingKey] = useState(false);
   const [diagnosticsMessage, setDiagnosticsMessage] = useState("");
+  const [library, setLibrary] = useState<LibraryModpack[]>([]);
+  const [librarySelection, setLibrarySelection] = useState<LibrarySelection | null>(null);
+  const [libraryMessage, setLibraryMessage] = useState("");
+  const [libraryDialog, setLibraryDialog] = useState<LibraryDialog | null>(null);
+  const [expandedModpackIds, setExpandedModpackIds] = useState<Set<number>>(new Set());
+  const [sidebarWidth, setSidebarWidth] = useState<number>(sidebarWidthLimits.default);
 
   const t = (key: Parameters<typeof translate>[1]) => translate(language, key);
+  const selectedModpack =
+    library.find((modpack) => modpack.id === librarySelection?.modpackId) ?? null;
+  const selectedScheme =
+    selectedModpack?.schemes.find((scheme) => scheme.id === librarySelection?.schemeId) ?? null;
 
   useEffect(() => {
     discoverAppPaths()
@@ -91,6 +139,179 @@ export function App() {
         dispatch({ type: "keyUnavailable" });
       });
   }, []);
+
+  useEffect(() => {
+    refreshLibrary();
+  }, []);
+
+  function applyLibrary(nextLibrary: LibraryModpack[], requestedSelection = librarySelection) {
+    const previousLibrary = library;
+    setLibrary(nextLibrary);
+    setLibrarySelection(getActiveLibrarySelection(nextLibrary, requestedSelection));
+    setExpandedModpackIds((current) => {
+      if (current.size === 0) {
+        return getInitialExpandedModpackIds(nextLibrary);
+      }
+
+      const nextModpackIds = new Set(nextLibrary.map((modpack) => modpack.id));
+      const previousModpackIds = new Set(previousLibrary.map((modpack) => modpack.id));
+      const nextExpanded = new Set([...current].filter((id) => nextModpackIds.has(id)));
+      for (const modpack of nextLibrary) {
+        if (!previousModpackIds.has(modpack.id)) {
+          nextExpanded.add(modpack.id);
+        }
+      }
+      return nextExpanded;
+    });
+  }
+
+  function handleToggleModpack(modpackId: number) {
+    setExpandedModpackIds((current) => toggleExpandedModpack(current, modpackId));
+  }
+
+  function handleSidebarResizePointerDown(event: React.PointerEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      setSidebarWidth(clampSidebarWidth(moveEvent.clientX));
+    };
+    const handlePointerUp = () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+  }
+
+  async function refreshLibrary() {
+    try {
+      const nextLibrary = await listLibrary();
+      applyLibrary(nextLibrary, librarySelection);
+      setLibraryMessage("");
+    } catch (error) {
+      setLibraryMessage(String(error));
+    }
+  }
+
+  async function handleSeedLibraryFixture() {
+    try {
+      const nextLibrary = await seedLocalLibraryFixture();
+      applyLibrary(nextLibrary, null);
+      setLibraryMessage(t("library.fixtureLoaded"));
+    } catch (error) {
+      setLibraryMessage(String(error));
+    }
+  }
+
+  function handleCreateScheme(modpackId: number) {
+    const draft = createEmptyLibraryDraft(modpackId);
+    setLibraryDialog({ kind: "createScheme", ...draft });
+  }
+
+  function handleRenameScheme(scheme: LibraryScheme) {
+    setLibraryDialog({ kind: "renameScheme", scheme, name: scheme.name });
+  }
+
+  function handleDeleteScheme(scheme: LibraryScheme) {
+    setLibraryDialog({ kind: "deleteScheme", scheme });
+  }
+
+  function handleRenameModpack(modpack: LibraryModpack) {
+    setLibraryDialog({ kind: "renameModpack", modpack, name: modpack.localName });
+  }
+
+  function handleShowModpackInfo(modpack: LibraryModpack) {
+    setLibraryDialog({ kind: "infoModpack", modpack });
+  }
+
+  function handleDeleteModpack(modpack: LibraryModpack) {
+    setLibraryDialog({ kind: "deleteModpack", modpack });
+  }
+
+  function handleLibraryDialogNameChange(name: string) {
+    setLibraryDialog((dialog) => {
+      if (
+        !dialog ||
+        dialog.kind === "deleteScheme" ||
+        dialog.kind === "deleteModpack" ||
+        dialog.kind === "infoModpack"
+      ) {
+        return dialog;
+      }
+      return { ...dialog, name };
+    });
+  }
+
+  async function handleConfirmLibraryDialog() {
+    if (!libraryDialog) {
+      return;
+    }
+
+    if (libraryDialog.kind === "infoModpack") {
+      setLibraryDialog(null);
+      return;
+    }
+
+    try {
+      if (libraryDialog.kind === "createScheme") {
+        const name = libraryDialog.name.trim() || "New scheme";
+        const nextLibrary = await createScheme(
+          libraryDialog.modpackId,
+          name,
+          libraryDialog.dimensions,
+        );
+        const createdScheme = nextLibrary
+          .find((modpack) => modpack.id === libraryDialog.modpackId)
+          ?.schemes.find((scheme) => scheme.name === name);
+        applyLibrary(
+          nextLibrary,
+          createdScheme
+            ? { modpackId: libraryDialog.modpackId, schemeId: createdScheme.id }
+            : librarySelection,
+        );
+      }
+
+      if (libraryDialog.kind === "renameScheme") {
+        const name = libraryDialog.name.trim();
+        if (!name) {
+          return;
+        }
+        const nextLibrary = await renameScheme(libraryDialog.scheme.id, name);
+        applyLibrary(nextLibrary, {
+          modpackId: libraryDialog.scheme.modpackId,
+          schemeId: libraryDialog.scheme.id,
+        });
+      }
+
+      if (libraryDialog.kind === "deleteScheme") {
+        const nextSelection = getNextSelectionAfterSchemeDelete(library, {
+          modpackId: libraryDialog.scheme.modpackId,
+          schemeId: libraryDialog.scheme.id,
+        });
+        const nextLibrary = await deleteScheme(libraryDialog.scheme.id);
+        applyLibrary(nextLibrary, nextSelection);
+      }
+
+      if (libraryDialog.kind === "renameModpack") {
+        const name = libraryDialog.name.trim();
+        if (!name) {
+          return;
+        }
+        const nextLibrary = await renameImportedModpack(libraryDialog.modpack.id, name);
+        applyLibrary(nextLibrary, librarySelection);
+      }
+
+      if (libraryDialog.kind === "deleteModpack") {
+        const nextLibrary = await deleteImportedModpack(libraryDialog.modpack.id);
+        applyLibrary(nextLibrary, null);
+      }
+
+      setLibraryDialog(null);
+      setLibraryMessage(t("library.autosaved"));
+    } catch (error) {
+      setLibraryMessage(String(error));
+    }
+  }
 
   function completeOnboarding() {
     localStorage.setItem(onboardingStorageKey, "true");
@@ -191,7 +412,10 @@ export function App() {
   }
 
   return (
-    <main className="app-shell antialiased">
+    <main
+      className="app-shell antialiased"
+      style={{ "--sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}
+    >
       <aside className="sidebar" aria-label={t("workspace.library")}>
         <div className="brand">
           <div className="brand-mark">
@@ -210,16 +434,24 @@ export function App() {
         <section className="library-panel">
           <div className="panel-title">
             <span>{t("workspace.library")}</span>
-            <ChevronDown size={16} />
           </div>
-          <div className="tree-item active">
-            <Database size={15} />
-            <span>{t("library.modpack")}</span>
-          </div>
-          <div className="tree-item nested selected">
-            <Layers3 size={15} />
-            <span>{t("library.scheme")}</span>
-          </div>
+          <LibraryTree
+            canSeedFixture={shouldShowSeedFixtureAction(library, import.meta.env.DEV)}
+            expandedModpackIds={expandedModpackIds}
+            library={library}
+            onCreateScheme={handleCreateScheme}
+            onDeleteModpack={handleDeleteModpack}
+            onDeleteScheme={handleDeleteScheme}
+            onRenameModpack={handleRenameModpack}
+            onRenameScheme={handleRenameScheme}
+            onSelect={setLibrarySelection}
+            onSeed={handleSeedLibraryFixture}
+            onShowModpackInfo={handleShowModpackInfo}
+            onToggleModpack={handleToggleModpack}
+            selected={librarySelection}
+            t={t}
+          />
+          {libraryMessage && <p className="library-message">{libraryMessage}</p>}
         </section>
 
         <button
@@ -231,6 +463,12 @@ export function App() {
           <span>{t("workspace.settings")}</span>
         </button>
       </aside>
+      <button
+        aria-label={t("library.resizeSidebar")}
+        className="sidebar-resize-handle"
+        onPointerDown={handleSidebarResizePointerDown}
+        type="button"
+      />
 
       <section className="workspace">
         <header className="status-strip">
@@ -259,7 +497,7 @@ export function App() {
           {flow.screen === "importWizard" ? (
             <ImportReadyWorkspace t={t} />
           ) : (
-            <ViewerWorkspace t={t} />
+            <ViewerWorkspace modpack={selectedModpack} scheme={selectedScheme} t={t} />
           )}
 
           <aside className="right-rail" aria-label={t("workspace.review")}>
@@ -312,6 +550,15 @@ export function App() {
           onUpdateKey={handleUpdateKeyInput}
           paths={paths}
           section={flow.settingsSection}
+          t={t}
+        />
+      )}
+      {libraryDialog && (
+        <LibraryActionDialog
+          dialog={libraryDialog}
+          onCancel={() => setLibraryDialog(null)}
+          onConfirm={handleConfirmLibraryDialog}
+          onNameChange={handleLibraryDialogNameChange}
           t={t}
         />
       )}
@@ -461,12 +708,319 @@ function OnboardingScreen(props: {
   );
 }
 
-function ViewerWorkspace({ t }: { t: Translator }) {
+function LibraryTree(props: {
+  canSeedFixture: boolean;
+  expandedModpackIds: Set<number>;
+  library: LibraryModpack[];
+  onCreateScheme: (modpackId: number) => void;
+  onDeleteModpack: (modpack: LibraryModpack) => void;
+  onDeleteScheme: (scheme: LibraryScheme) => void;
+  onRenameModpack: (modpack: LibraryModpack) => void;
+  onRenameScheme: (scheme: LibraryScheme) => void;
+  onSelect: (selection: LibrarySelection) => void;
+  onSeed: () => void;
+  onShowModpackInfo: (modpack: LibraryModpack) => void;
+  onToggleModpack: (modpackId: number) => void;
+  selected: LibrarySelection | null;
+  t: Translator;
+}) {
+  const { t } = props;
+  const [openModpackMenu, setOpenModpackMenu] = useState<{
+    id: number;
+    left: number;
+    top: number;
+  } | null>(null);
+  useEffect(() => {
+    if (openModpackMenu === null) {
+      return;
+    }
+
+    const closeMenu = () => {
+      setOpenModpackMenu(null);
+    };
+
+    window.addEventListener("pointerdown", closeMenu);
+    return () => window.removeEventListener("pointerdown", closeMenu);
+  }, [openModpackMenu]);
+
+  if (props.library.length === 0) {
+    return (
+      <div className="library-empty-state">
+        <p>{t("library.empty")}</p>
+        {props.canSeedFixture && (
+          <button className="secondary-action compact" onClick={props.onSeed} type="button">
+            <Database size={15} />
+            {t("library.loadFixture")}
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="library-tree"
+      style={{ "--library-node-gap": `${compactLibraryNodeGap}px` } as React.CSSProperties}
+    >
+      {props.library.map((modpack) => (
+        <div
+          className={props.expandedModpackIds.has(modpack.id) ? "library-node expanded" : "library-node"}
+          key={modpack.id}
+        >
+          <div className="tree-item modpack-row">
+            <button
+              className="tree-label modpack-label"
+              onClick={() => props.onToggleModpack(modpack.id)}
+              type="button"
+            >
+              <LoaderIcon kind={getLoaderIconKind(modpack.loader)} />
+              <span title={modpack.localName}>{modpack.localName}</span>
+            </button>
+            <div className="tree-actions">
+              <button
+                aria-label={t("library.createScheme")}
+                className="icon-action small"
+                onClick={() => props.onCreateScheme(modpack.id)}
+                type="button"
+              >
+                <Plus size={14} />
+              </button>
+              <button
+                aria-label={t("library.modpackActions")}
+                className="icon-action small"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  const placement = getModpackMenuPlacement(event.currentTarget.getBoundingClientRect(), {
+                    width: window.innerWidth,
+                    height: window.innerHeight,
+                  });
+                  setOpenModpackMenu((current) => {
+                    const nextId = getNextOpenModpackMenuId(current?.id ?? null, modpack.id, "menuButton");
+                    return nextId === null ? null : { id: nextId, ...placement };
+                  });
+                }}
+                type="button"
+              >
+                <MoreHorizontal size={15} />
+              </button>
+            </div>
+            {openModpackMenu?.id === modpack.id && (
+              <div
+                className="modpack-menu"
+                onPointerDown={(event) => event.stopPropagation()}
+                role="menu"
+                style={
+                  {
+                    "--modpack-menu-left": `${openModpackMenu.left}px`,
+                    "--modpack-menu-top": `${openModpackMenu.top}px`,
+                  } as React.CSSProperties
+                }
+              >
+                <button
+                  onClick={() => {
+                    setOpenModpackMenu(null);
+                    props.onShowModpackInfo(modpack);
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <Info size={14} />
+                  {t("library.information")}
+                </button>
+                <button
+                  onClick={() => {
+                    setOpenModpackMenu(null);
+                    props.onRenameModpack(modpack);
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <Pencil size={14} />
+                  {t("library.renameModpack")}
+                </button>
+                <button
+                  className="danger"
+                  onClick={() => {
+                    setOpenModpackMenu(null);
+                    props.onDeleteModpack(modpack);
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <Trash2 size={14} />
+                  {t("library.deleteModpack")}
+                </button>
+              </div>
+            )}
+          </div>
+          {props.expandedModpackIds.has(modpack.id) &&
+            (modpack.schemes.length === 0 ? (
+              <div className="tree-item nested empty-scheme-row">{t("library.noSchemes")}</div>
+            ) : (
+              modpack.schemes.map((scheme) => (
+              <div
+                className={
+                  props.selected?.schemeId === scheme.id
+                    ? "tree-item nested selected scheme-row"
+                    : "tree-item nested scheme-row"
+                }
+                key={scheme.id}
+              >
+                <button
+                  className="tree-label scheme-label"
+                  onClick={() => props.onSelect({ modpackId: modpack.id, schemeId: scheme.id })}
+                  type="button"
+                >
+                  <Layers3 size={15} />
+                  <span title={scheme.name}>{scheme.name}</span>
+                </button>
+                <div className="tree-actions">
+                  <button
+                    aria-label={t("library.renameScheme")}
+                    className="icon-action small"
+                    onClick={() => props.onRenameScheme(scheme)}
+                    type="button"
+                  >
+                    <Pencil size={14} />
+                  </button>
+                  <button
+                    aria-label={t("library.deleteScheme")}
+                    className="icon-action small danger"
+                    onClick={() => props.onDeleteScheme(scheme)}
+                    type="button"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+              ))
+            ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function LoaderIcon({ kind }: { kind: LoaderIconKind }) {
+  const label = {
+    forge: "F",
+    neoforge: "NF",
+    fabric: "Fb",
+    quilt: "Q",
+    generic: "MC",
+  }[kind];
+
+  return (
+    <span aria-hidden="true" className={`loader-icon ${kind}`}>
+      {label}
+    </span>
+  );
+}
+
+function LibraryActionDialog(props: {
+  dialog: LibraryDialog;
+  onCancel: () => void;
+  onConfirm: () => void;
+  onNameChange: (name: string) => void;
+  t: Translator;
+}) {
+  const { dialog, t } = props;
+  const isDelete = dialog.kind === "deleteScheme" || dialog.kind === "deleteModpack";
+  const isInfo = dialog.kind === "infoModpack";
+  const content = getLibraryDialogContent(dialog.kind);
+  const title = t(content.titleKey);
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section
+        className={`settings-modal library-dialog ${content.tone}`}
+        aria-label={title}
+        role="dialog"
+      >
+        <header className="settings-modal-header">
+          <h2>{title}</h2>
+          <button
+            aria-label={t("library.cancel")}
+            className="icon-action"
+            onClick={props.onCancel}
+            type="button"
+          >
+            <X size={18} />
+          </button>
+        </header>
+        {content.bodyKey && (
+          <div className="library-dialog-copy">
+            <p>{t(content.bodyKey)}</p>
+          </div>
+        )}
+        {isInfo && <ModpackInfoRows modpack={dialog.modpack} t={t} />}
+        {!isDelete && !isInfo && (
+          <label className="library-dialog-field">
+            <span>{content.fieldKey ? t(content.fieldKey) : t("library.nameLabel")}</span>
+            <input
+              autoFocus
+              onChange={(event) => props.onNameChange(event.currentTarget.value)}
+              value={dialog.name}
+            />
+          </label>
+        )}
+        <div className="dialog-actions">
+          <button className="secondary-action compact" onClick={props.onCancel} type="button">
+            {isInfo ? t("library.close") : t("library.cancel")}
+          </button>
+          {!isInfo && (
+            <button
+              className={isDelete ? "secondary-action compact danger" : "primary-action compact"}
+              onClick={props.onConfirm}
+              type="button"
+            >
+              {t("library.confirm")}
+            </button>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ModpackInfoRows({ modpack, t }: { modpack: LibraryModpack; t: Translator }) {
+  const rows: Array<[string, string]> = [
+    [t("library.localName"), modpack.localName],
+    [t("library.releaseVersion"), modpack.versionName],
+    [t("library.minecraftVersion"), modpack.minecraftVersion ?? t("library.unknown")],
+    [t("library.loader"), modpack.loader ?? t("library.unknown")],
+    [t("library.sourceUrl"), modpack.sourceUrl ?? t("library.unknown")],
+    [t("library.importStatus"), modpack.importStatus],
+    [t("library.schemeCount"), String(modpack.schemes.length)],
+  ];
+
+  return (
+    <dl className="modpack-info-list">
+      {rows.map(([label, value]) => (
+        <div key={label}>
+          <dt>{label}</dt>
+          <dd>{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function ViewerWorkspace({
+  modpack,
+  scheme,
+  t,
+}: {
+  modpack: LibraryModpack | null;
+  scheme: LibraryScheme | null;
+  t: Translator;
+}) {
+  const dimensions = scheme?.dimensions.join(" x ") ?? "64 x 64 x 64";
   return (
     <section className="viewer-region" aria-label={t("workspace.viewer")}>
       <div className="section-heading">
         <span>{t("workspace.viewer")}</span>
-        <strong>64 x 64 x 64</strong>
+        <strong>{dimensions}</strong>
       </div>
       <div className="viewer-canvas">
         <div className="grid-floor" />
@@ -474,8 +1028,12 @@ function ViewerWorkspace({ t }: { t: Translator }) {
         <div className="block-stack stack-b" />
         <div className="block-stack stack-c" />
         <div className="viewer-empty">
-          <h2>{t("viewer.emptyTitle")}</h2>
-          <p>{t("viewer.emptyBody")}</p>
+          <h2>{scheme?.name ?? t("viewer.emptyTitle")}</h2>
+          <p>
+            {scheme
+              ? `${modpack?.localName ?? t("workspace.library")} · ${t("viewer.autosavedBody")}`
+              : t("viewer.emptyBody")}
+          </p>
         </div>
       </div>
     </section>
