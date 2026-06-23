@@ -45,8 +45,8 @@ fn release_discovery_maps_curseforge_files_and_selects_latest_by_date() {
 fn modpack_search_returns_matching_projects_for_a_query() {
     let gateway = FakeGateway::default();
 
-    let projects = search_modpack_projects(&gateway, "test-key", " all of create ")
-        .expect("search modpacks");
+    let projects =
+        search_modpack_projects(&gateway, "test-key", " all of create ").expect("search modpacks");
 
     assert_eq!(
         projects,
@@ -57,7 +57,9 @@ fn modpack_search_returns_matching_projects_for_a_query() {
             logo_url: Some("https://images.example/aoc-thumb.png".to_string()),
         }]
     );
-    assert!(search_modpack_projects(&gateway, "test-key", " ").unwrap().is_empty());
+    assert!(search_modpack_projects(&gateway, "test-key", " ")
+        .unwrap()
+        .is_empty());
 }
 
 #[test]

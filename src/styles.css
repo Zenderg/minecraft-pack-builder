@@ -307,6 +307,25 @@ button.loading:disabled {
   opacity: 1;
 }
 
+.import-status-indicator {
+  display: grid;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 6px;
+}
+
+.import-status-indicator.importing {
+  color: var(--warning);
+  background: rgba(231, 185, 95, 0.1);
+}
+
+.import-status-indicator.failed {
+  color: #ffb0a3;
+  background: rgba(255, 118, 96, 0.12);
+}
+
 .library-message,
 .library-empty-state p,
 .empty-scheme-row {
@@ -490,7 +509,8 @@ button.loading:disabled {
 
 .viewer-region {
   display: grid;
-  grid-template-rows: 34px minmax(0, 1fr);
+  grid-template-rows: 34px minmax(260px, 1fr) auto;
+  gap: 12px;
   padding: 14px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -820,9 +840,162 @@ code {
   font-size: 12px;
 }
 
+.import-job-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.import-job-meta span {
+  position: relative;
+  color: var(--muted);
+}
+
+.import-job-meta span + span::before {
+  position: absolute;
+  left: -9px;
+  color: rgba(147, 161, 156, 0.7);
+  content: "·";
+}
+
 .library-dialog .settings-modal-header {
   align-items: flex-start;
   padding-bottom: 16px;
+}
+
+.import-job-modal {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  width: min(860px, calc(100vw - 48px));
+  max-height: min(760px, calc(100vh - 48px));
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(14, 19, 20, 0.98);
+  box-shadow: 0 22px 90px rgba(0, 0, 0, 0.48);
+}
+
+.import-job-body {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 16px 18px;
+  min-height: 0;
+}
+
+.import-job-summary {
+  grid-column: 1 / -1;
+  display: grid;
+  align-content: start;
+  min-width: 0;
+}
+
+.import-job-progress {
+  display: grid;
+  gap: 8px;
+}
+
+.import-job-progress div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.import-job-progress strong {
+  color: var(--accent-strong);
+}
+
+.import-job-progress progress {
+  width: 100%;
+}
+
+.import-job-stages {
+  grid-column: 1;
+  grid-row: 2;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.import-job-stage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0;
+  border-left: 2px solid rgba(38, 49, 48, 0.9);
+  padding-left: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.import-job-stage.done {
+  color: var(--accent-strong);
+  border-left-color: rgba(66, 211, 146, 0.62);
+}
+
+.import-job-stage.active {
+  color: var(--warning);
+  border-left-color: rgba(231, 185, 95, 0.7);
+}
+
+.import-job-stage.failed {
+  color: #ffb0a3;
+  border-left-color: rgba(255, 118, 96, 0.74);
+}
+
+.stage-dot {
+  width: 8px;
+  height: 8px;
+  border: 1px solid rgba(147, 161, 156, 0.6);
+  border-radius: 999px;
+}
+
+.import-job-log {
+  grid-column: 2;
+  grid-row: 2;
+  display: grid;
+  min-height: 0;
+}
+
+.import-log-lines {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-height: 260px;
+  max-height: none;
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid rgba(38, 49, 48, 0.78);
+  border-radius: 8px;
+  background: #090d0e;
+}
+
+.import-log-lines code {
+  color: #bfd0c9;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 760px) {
+  .import-job-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .import-job-stages,
+  .import-job-log {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .import-log-lines {
+    min-height: 180px;
+  }
 }
 
 .library-dialog .settings-modal-header h2 {
@@ -935,8 +1108,12 @@ code {
 
 .dialog-actions {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
   gap: 10px;
+}
+
+.dialog-actions-spacer {
+  flex: 1 1 auto;
 }
 
 .settings-tabs {

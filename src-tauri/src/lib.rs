@@ -6,9 +6,10 @@ use credentials::{
     curseforge_key_status, read_curseforge_key, save_curseforge_key, CurseForgeCredentialStatus,
 };
 use mpb_assets::{
-    discover_modpack_releases, download_release_archive, parse_modpack_page_url, CancellationToken,
-    search_modpack_projects, CurseForgeGateway, CurseForgeHttpGateway, CurseForgeProject,
-    DiscoveredReleases, DownloadProgress,
+    build_modpack_asset_index_with_events, discover_modpack_releases, download_release_archive,
+    parse_modpack_page_url, search_modpack_projects, AssetImportReport, CancellationToken,
+    CurseForgeGateway, CurseForgeHttpGateway, CurseForgeProject, DiscoveredReleases,
+    DownloadProgress, ModpackAssetImportRequest,
 };
 use mpb_core::DomainDemoReport;
 use mpb_storage::{
@@ -150,15 +151,44 @@ fn search_curseforge_modpacks(query: String) -> Result<Vec<CurseForgeProject>, S
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ModpackImportProgress {
+    modpack_id: i64,
+    stage: String,
     bytes_downloaded: u64,
     total_bytes: Option<u64>,
+    progress_percent: Option<u8>,
 }
 
-impl From<DownloadProgress> for ModpackImportProgress {
-    fn from(value: DownloadProgress) -> Self {
+impl ModpackImportProgress {
+    fn from_download(modpack_id: i64, value: DownloadProgress) -> Self {
+        let progress_percent = value.total_bytes.and_then(|total| {
+            if total == 0 {
+                return None;
+            }
+            let ratio = value.bytes_downloaded as f64 / total as f64;
+            Some((10.0 + ratio.clamp(0.0, 1.0) * 20.0).round() as u8)
+        });
         Self {
+            modpack_id,
+            stage: "download".to_string(),
             bytes_downloaded: value.bytes_downloaded,
             total_bytes: value.total_bytes,
+            progress_percent,
+        }
+    }
+
+    fn from_parse(modpack_id: i64, completed: u64, total: u64) -> Self {
+        let progress_percent = if total == 0 {
+            None
+        } else {
+            let ratio = completed as f64 / total as f64;
+            Some((30.0 + ratio.clamp(0.0, 1.0) * 65.0).round() as u8)
+        };
+        Self {
+            modpack_id,
+            stage: "parse".to_string(),
+            bytes_downloaded: 0,
+            total_bytes: None,
+            progress_percent,
         }
     }
 }
@@ -169,6 +199,17 @@ struct ImportedModpackResult {
     library: Vec<LibraryModpack>,
     modpack_id: i64,
     archive_path: PathBuf,
+    asset_report_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModpackImportStatusChanged {
+    modpack_id: i64,
+    status: ImportStatus,
+    message: Option<String>,
+    stage: String,
+    library: Vec<LibraryModpack>,
 }
 
 #[tauri::command]
@@ -233,9 +274,187 @@ fn import_curseforge_modpack(
         .join("modpacks")
         .join(format!("{}-{}", parsed.slug, release.file_id));
     let archive_path = cache_dir.join("archives").join(safe_file_name);
+    let asset_report_slug = format!("{}-{}", parsed.slug, release.file_id);
+    let import_asset_report_slug = asset_report_slug.clone();
+
+    let imported = repository
+        .create_imported_modpack(NewImportedModpack {
+            local_name: format!("{} - {}", project.name, summary.version_name),
+            source_slug: Some(project.slug),
+            source_url: Some(parsed.normalized_url),
+            version_name: summary.version_name.clone(),
+            minecraft_version: summary.minecraft_versions.first().cloned(),
+            loader: summary.loaders.first().cloned(),
+            cache_dir: Some(cache_dir.clone()),
+            import_status: ImportStatus::Importing,
+        })
+        .map_err(|error| error.to_string())?;
+    repository
+        .update_import_status(
+            imported.id,
+            ImportStatus::Importing,
+            Some("Queued for background processing...".to_string()),
+        )
+        .map_err(|error| error.to_string())?;
+    let library = repository
+        .list_library()
+        .map_err(|error| error.to_string())?;
     let token = controller.start()?;
+    let import_app = app.clone();
+    let import_api_key = api_key.clone();
+    let import_release = release.clone();
+    let import_archive_path = archive_path.clone();
+    let import_cache_dir = cache_dir.clone();
+    let import_diagnostics_dir = paths.diagnostics_dir.clone();
+    let import_summary = summary.clone();
+    let import_modpack_id = imported.id;
+    std::thread::spawn(move || {
+        let result = finish_modpack_import(
+            import_app.clone(),
+            import_api_key,
+            import_release,
+            import_archive_path,
+            import_cache_dir,
+            import_diagnostics_dir,
+            import_asset_report_slug,
+            import_summary,
+            import_modpack_id,
+            token,
+        );
+        if let Err(message) = result {
+            let _ = set_import_status_and_emit(
+                &import_app,
+                import_modpack_id,
+                ImportStatus::Failed,
+                Some(message),
+                "failed",
+            );
+        }
+        if let Some(controller) = import_app.try_state::<ImportController>() {
+            let _ = controller.clear();
+        }
+    });
+
+    Ok(ImportedModpackResult {
+        library,
+        modpack_id: imported.id,
+        archive_path,
+        asset_report_path: paths
+            .diagnostics_dir
+            .join(format!("{}-assets.json", asset_report_slug)),
+    })
+}
+
+#[tauri::command]
+fn retry_modpack_import(
+    app: tauri::AppHandle,
+    controller: tauri::State<ImportController>,
+    modpack_id: i64,
+) -> Result<Vec<LibraryModpack>, String> {
+    let api_key = read_curseforge_key().map_err(|error| error.to_string())?;
+    let (_, repository) = library_repository(&app)?;
+    let modpack = repository
+        .get_imported_modpack(modpack_id)
+        .map_err(|error| error.to_string())?;
+    let page_url = modpack
+        .source_url
+        .clone()
+        .ok_or_else(|| "Imported modpack has no CurseForge source URL".to_string())?;
+    let cache_dir = modpack
+        .cache_dir
+        .clone()
+        .ok_or_else(|| "Imported modpack has no cache directory".to_string())?;
+    let file_id = curseforge_file_id_from_cache_dir(&cache_dir)?;
+    let gateway = CurseForgeHttpGateway::new().map_err(|error| error.to_string())?;
+    let parsed = parse_modpack_page_url(&page_url).map_err(|error| error.to_string())?;
+    let project = gateway
+        .find_modpack_project(&api_key, &parsed.slug)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| {
+            format!(
+                "CurseForge modpack was not found for slug '{}'",
+                parsed.slug
+            )
+        })?;
+    let release = gateway
+        .list_project_files(&api_key, project.id)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find(|release| release.file_id == file_id)
+        .ok_or_else(|| format!("CurseForge release file {file_id} was not found"))?;
+    let summary = release_summary_from_release(&release)?;
+    let paths = discover_app_paths(app.clone())?;
+    let archive_path = cache_dir
+        .join("archives")
+        .join(safe_path_segment(&release.file_name));
+    let asset_report_slug = format!("{}-{}", parsed.slug, release.file_id);
+
+    repository
+        .update_import_status(
+            modpack_id,
+            ImportStatus::Importing,
+            Some("Queued for retry...".to_string()),
+        )
+        .map_err(|error| error.to_string())?;
+    let library = repository
+        .list_library()
+        .map_err(|error| error.to_string())?;
+
+    let token = controller.start()?;
+    let import_app = app.clone();
+    std::thread::spawn(move || {
+        let result = finish_modpack_import(
+            import_app.clone(),
+            api_key,
+            release,
+            archive_path,
+            cache_dir,
+            paths.diagnostics_dir,
+            asset_report_slug,
+            summary,
+            modpack_id,
+            token,
+        );
+        if let Err(message) = result {
+            let _ = set_import_status_and_emit(
+                &import_app,
+                modpack_id,
+                ImportStatus::Failed,
+                Some(message),
+                "failed",
+            );
+        }
+        if let Some(controller) = import_app.try_state::<ImportController>() {
+            let _ = controller.clear();
+        }
+    });
+
+    Ok(library)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn finish_modpack_import(
+    app: tauri::AppHandle,
+    api_key: String,
+    release: mpb_assets::CurseForgeRelease,
+    archive_path: PathBuf,
+    cache_dir: PathBuf,
+    diagnostics_dir: PathBuf,
+    asset_report_slug: String,
+    summary: mpb_assets::ReleaseSummary,
+    modpack_id: i64,
+    token: CancellationToken,
+) -> Result<(), String> {
+    let gateway = CurseForgeHttpGateway::new().map_err(|error| error.to_string())?;
     let emit_app = app.clone();
-    let download_result = download_release_archive(
+    set_import_status_and_emit(
+        &app,
+        modpack_id,
+        ImportStatus::Importing,
+        Some("Downloading selected release...".to_string()),
+        "download",
+    )?;
+    download_release_archive(
         &gateway,
         &api_key,
         &release,
@@ -244,34 +463,159 @@ fn import_curseforge_modpack(
         |progress| {
             let _ = emit_app.emit(
                 "modpack_import_progress",
-                ModpackImportProgress::from(progress),
+                ModpackImportProgress::from_download(modpack_id, progress),
             );
         },
-    );
-    controller.clear()?;
-    download_result.map_err(|error| error.to_string())?;
+    )
+    .map_err(|error| error.to_string())?;
 
-    let imported = repository
-        .create_imported_modpack(NewImportedModpack {
-            local_name: format!("{} - {}", project.name, summary.version_name),
-            source_slug: Some(project.slug),
-            source_url: Some(parsed.normalized_url),
-            version_name: summary.version_name,
+    set_import_status_and_emit(
+        &app,
+        modpack_id,
+        ImportStatus::Importing,
+        Some("Parsing modpack assets...".to_string()),
+        "parse",
+    )?;
+    let parse_event_app = app.clone();
+    build_modpack_asset_index_with_events(
+        &gateway,
+        &api_key,
+        ModpackAssetImportRequest {
+            archive_path,
+            cache_dir,
+            diagnostics_dir,
+            source_slug: asset_report_slug,
+            release_name: summary.version_name.clone(),
             minecraft_version: summary.minecraft_versions.first().cloned(),
             loader: summary.loaders.first().cloned(),
-            cache_dir: Some(cache_dir),
-            import_status: ImportStatus::Imported,
-        })
+        },
+        &token,
+        |event| {
+            if let Some(progress) = event.progress {
+                let _ = parse_event_app.emit(
+                    "modpack_import_progress",
+                    ModpackImportProgress::from_parse(
+                        modpack_id,
+                        progress.completed,
+                        progress.total,
+                    ),
+                );
+            }
+            let _ = set_import_status_and_emit(
+                &parse_event_app,
+                modpack_id,
+                ImportStatus::Importing,
+                Some(event.message),
+                "parse",
+            );
+        },
+    )
+    .map_err(|error| format!("Could not parse modpack assets: {error}"))?;
+
+    set_import_status_and_emit(
+        &app,
+        modpack_id,
+        ImportStatus::Imported,
+        Some("Ready".to_string()),
+        "done",
+    )?;
+    Ok(())
+}
+
+fn set_import_status_and_emit(
+    app: &tauri::AppHandle,
+    modpack_id: i64,
+    status: ImportStatus,
+    message: Option<String>,
+    stage: &str,
+) -> Result<(), String> {
+    let (_, repository) = library_repository(app)?;
+    repository
+        .update_import_status(modpack_id, status, message.clone())
         .map_err(|error| error.to_string())?;
     let library = repository
         .list_library()
         .map_err(|error| error.to_string())?;
+    app.emit(
+        "modpack_import_status_changed",
+        ModpackImportStatusChanged {
+            modpack_id,
+            status,
+            message,
+            stage: stage.to_string(),
+            library,
+        },
+    )
+    .map_err(|error| error.to_string())
+}
 
-    Ok(ImportedModpackResult {
-        library,
-        modpack_id: imported.id,
-        archive_path,
-    })
+fn release_summary_from_release(
+    release: &mpb_assets::CurseForgeRelease,
+) -> Result<mpb_assets::ReleaseSummary, String> {
+    mpb_assets::filter_releases(
+        &[mpb_assets::ReleaseSummary {
+            file_id: release.file_id,
+            version_name: release.display_name.clone(),
+            file_name: release.file_name.clone(),
+            minecraft_versions: release
+                .game_versions
+                .iter()
+                .filter(|value| value.chars().next().is_some_and(|ch| ch.is_ascii_digit()))
+                .cloned()
+                .collect(),
+            loaders: release
+                .game_versions
+                .iter()
+                .filter(|value| matches!(value.as_str(), "Forge" | "NeoForge" | "Fabric" | "Quilt"))
+                .cloned()
+                .collect(),
+            file_date: release.file_date.clone(),
+            file_length: release.file_length,
+        }],
+        &mpb_assets::ReleaseFilter {
+            minecraft_version: None,
+            loader: None,
+        },
+    )
+    .into_iter()
+    .next()
+    .cloned()
+    .ok_or_else(|| "could not summarize selected release".to_string())
+}
+
+fn curseforge_file_id_from_cache_dir(cache_dir: &Path) -> Result<u64, String> {
+    let name = cache_dir
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "Imported modpack cache directory is not readable".to_string())?;
+    name.rsplit_once('-')
+        .and_then(|(_, file_id)| file_id.parse::<u64>().ok())
+        .ok_or_else(|| "Could not determine CurseForge file id for retry".to_string())
+}
+
+#[tauri::command]
+fn load_modpack_asset_report(
+    app: tauri::AppHandle,
+    modpack_id: i64,
+) -> Result<AssetImportReport, String> {
+    let (paths, repository) = library_repository(&app)?;
+    let modpack = repository
+        .get_imported_modpack(modpack_id)
+        .map_err(|error| error.to_string())?;
+    let cache_dir = modpack
+        .cache_dir
+        .ok_or_else(|| "Imported modpack has no asset cache directory".to_string())?;
+    let report_stem = cache_dir
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "Imported modpack cache directory is not readable".to_string())?;
+    let report_path = paths
+        .diagnostics_dir
+        .join(format!("{}-assets.json", report_stem));
+    let json = std::fs::read_to_string(&report_path)
+        .map_err(|error| format!("Could not read modpack asset diagnostics report: {error}"))?;
+    serde_json::from_str(&json)
+        .map_err(|error| format!("Could not parse modpack asset diagnostics report: {error}"))
 }
 
 #[tauri::command]
@@ -453,7 +797,9 @@ pub fn run() {
         discover_curseforge_releases,
         search_curseforge_modpacks,
         import_curseforge_modpack,
+        retry_modpack_import,
         cancel_curseforge_import,
+        load_modpack_asset_report,
         generate_domain_demo_report,
         list_library,
         seed_local_library_fixture,
@@ -474,7 +820,9 @@ pub fn run() {
         discover_curseforge_releases,
         search_curseforge_modpacks,
         import_curseforge_modpack,
+        retry_modpack_import,
         cancel_curseforge_import,
+        load_modpack_asset_report,
         generate_domain_demo_report,
         list_library,
         create_scheme,

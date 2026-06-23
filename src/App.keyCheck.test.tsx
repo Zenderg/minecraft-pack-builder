@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const tauriMocks = vi.hoisted(() => ({
   checkResolve: undefined as (() => void) | undefined,
+  cancelCurseForgeImport: vi.fn(),
   checkCurseForgeApiKey: vi.fn(),
   createScheme: vi.fn(),
   deleteImportedModpack: vi.fn(),
@@ -13,15 +14,19 @@ const tauriMocks = vi.hoisted(() => ({
   discoverAppPaths: vi.fn(),
   getCurseForgeKeyStatus: vi.fn(),
   listLibrary: vi.fn(),
+  listenToModpackImportStatus: vi.fn(),
+  listenToModpackImportProgress: vi.fn(),
   openAppDataFolder: vi.fn(),
   renameImportedModpack: vi.fn(),
   renameScheme: vi.fn(),
+  retryModpackImport: vi.fn(),
   saveCurseForgeApiKey: vi.fn(),
   searchCurseForgeModpacks: vi.fn(),
   seedLocalLibraryFixture: vi.fn(),
 }));
 
 vi.mock("./tauri", () => ({
+  cancelCurseForgeImport: tauriMocks.cancelCurseForgeImport,
   checkCurseForgeApiKey: tauriMocks.checkCurseForgeApiKey,
   createScheme: tauriMocks.createScheme,
   deleteImportedModpack: tauriMocks.deleteImportedModpack,
@@ -29,9 +34,12 @@ vi.mock("./tauri", () => ({
   discoverAppPaths: tauriMocks.discoverAppPaths,
   getCurseForgeKeyStatus: tauriMocks.getCurseForgeKeyStatus,
   listLibrary: tauriMocks.listLibrary,
+  listenToModpackImportStatus: tauriMocks.listenToModpackImportStatus,
+  listenToModpackImportProgress: tauriMocks.listenToModpackImportProgress,
   openAppDataFolder: tauriMocks.openAppDataFolder,
   renameImportedModpack: tauriMocks.renameImportedModpack,
   renameScheme: tauriMocks.renameScheme,
+  retryModpackImport: tauriMocks.retryModpackImport,
   saveCurseForgeApiKey: tauriMocks.saveCurseForgeApiKey,
   searchCurseForgeModpacks: tauriMocks.searchCurseForgeModpacks,
   seedLocalLibraryFixture: tauriMocks.seedLocalLibraryFixture,
@@ -95,6 +103,8 @@ describe("CurseForge key check UI", () => {
       apiKey: null,
     });
     tauriMocks.listLibrary.mockResolvedValue([]);
+    tauriMocks.listenToModpackImportStatus.mockResolvedValue(() => {});
+    tauriMocks.listenToModpackImportProgress.mockResolvedValue(() => {});
     tauriMocks.checkCurseForgeApiKey.mockImplementation(
       () =>
         new Promise<void>((resolve) => {

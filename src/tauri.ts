@@ -42,14 +42,26 @@ export type CurseForgeReleaseDiscovery = {
 };
 
 export type ImportProgress = {
+  modpackId: number;
+  stage: string;
   bytesDownloaded: number;
   totalBytes: number | null;
+  progressPercent: number | null;
 };
 
 export type ImportedModpackResult = {
   library: LibraryModpack[];
   modpackId: number;
   archivePath: string;
+  assetReportPath: string;
+};
+
+export type ModpackImportStatusChanged = {
+  modpackId: number;
+  status: LibraryModpack["importStatus"];
+  message: string | null;
+  stage: string;
+  library: LibraryModpack[];
 };
 
 function getProjectSourceUrl(project: CurseForgeProject): string {
@@ -130,6 +142,7 @@ const browserSeedLibrary: LibraryModpack[] = [
     minecraftVersion: "1.20.1",
     loader: "Forge",
     importStatus: "imported",
+    importMessage: null,
     schemes: [
       {
         id: 10,
@@ -147,6 +160,7 @@ const browserSeedLibrary: LibraryModpack[] = [
     minecraftVersion: "1.20.1",
     loader: "Forge",
     importStatus: "imported",
+    importMessage: null,
     schemes: [],
   },
 ];
@@ -312,8 +326,20 @@ export async function importCurseForgeModpack(
     if (!release) {
       throw new Error(`release file ${fileId} was not found`);
     }
-    onProgress({ bytesDownloaded: Math.floor(release.fileLength / 2), totalBytes: release.fileLength });
-    onProgress({ bytesDownloaded: release.fileLength, totalBytes: release.fileLength });
+    onProgress({
+      modpackId: browserNextModpackId,
+      stage: "download",
+      bytesDownloaded: Math.floor(release.fileLength / 2),
+      totalBytes: release.fileLength,
+      progressPercent: 20,
+    });
+    onProgress({
+      modpackId: browserNextModpackId,
+      stage: "download",
+      bytesDownloaded: release.fileLength,
+      totalBytes: release.fileLength,
+      progressPercent: 30,
+    });
     const imported: LibraryModpack = {
       id: browserNextModpackId++,
       localName: browserUniqueNewModpackName(`${discovery.modpack.name} - ${release.versionName}`),
@@ -321,14 +347,27 @@ export async function importCurseForgeModpack(
       versionName: release.versionName,
       minecraftVersion: release.minecraftVersions[0] ?? null,
       loader: release.loaders[0] ?? null,
-      importStatus: "imported",
+      importStatus: "importing",
+      importMessage: "Adding selected release...",
       schemes: [],
     };
     browserLibrary = [...browserLibrary, imported];
+    window.setTimeout(() => {
+      browserLibrary = browserLibrary.map((modpack) =>
+        modpack.id === imported.id
+          ? {
+              ...modpack,
+              importStatus: "imported",
+              importMessage: "Ready",
+            }
+          : modpack,
+      );
+    }, 1200);
     return {
       library: structuredClone(browserLibrary),
       modpackId: imported.id,
       archivePath: `/browser-demo/modpacks/${discovery.modpack.slug}-${release.fileId}/${release.fileName}`,
+      assetReportPath: `/browser-demo/diagnostics/${discovery.modpack.slug}-${release.fileId}-assets.json`,
     };
   }
 
@@ -340,6 +379,43 @@ export async function importCurseForgeModpack(
   } finally {
     unlisten();
   }
+}
+
+export async function retryModpackImport(modpackId: number): Promise<LibraryModpack[]> {
+  if (!isTauriRuntime()) {
+    browserLibrary = browserLibrary.map((modpack) =>
+      modpack.id === modpackId
+        ? { ...modpack, importStatus: "importing", importMessage: "Retry queued..." }
+        : modpack,
+    );
+    return structuredClone(browserLibrary);
+  }
+
+  return invoke<LibraryModpack[]>("retry_modpack_import", { modpackId });
+}
+
+export async function listenToModpackImportStatus(
+  onChanged: (event: ModpackImportStatusChanged) => void,
+): Promise<() => void> {
+  if (!isTauriRuntime()) {
+    return () => {};
+  }
+
+  return listen<ModpackImportStatusChanged>("modpack_import_status_changed", (event) => {
+    onChanged(event.payload);
+  });
+}
+
+export async function listenToModpackImportProgress(
+  onProgress: (event: ImportProgress) => void,
+): Promise<() => void> {
+  if (!isTauriRuntime()) {
+    return () => {};
+  }
+
+  return listen<ImportProgress>("modpack_import_progress", (event) => {
+    onProgress(event.payload);
+  });
 }
 
 export async function cancelCurseForgeImport(): Promise<void> {

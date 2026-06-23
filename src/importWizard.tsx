@@ -1,7 +1,7 @@
-import { AlertTriangle, CheckCircle2, Download, Filter, Loader2, PackagePlus, Search, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Filter, Loader2, PackagePlus, Search, X } from "lucide-react";
 import { useEffect, useMemo, useReducer, useState } from "react";
 
-import type { LibraryModpack } from "./library";
+import type { ImportStatus, LibraryModpack } from "./library";
 import type { MessageKey } from "./i18n";
 import {
   cancelCurseForgeImport,
@@ -24,6 +24,7 @@ export type ReleaseFilters = {
 };
 
 export type ImportWizardStatus = "idle" | "discovering" | "ready" | "downloading" | "success" | "failed";
+export type ReleaseImportState = ImportStatus | "none";
 
 export type ImportWizardState = {
   status: ImportWizardStatus;
@@ -62,14 +63,25 @@ export function importWizardReducer(
     case "releaseReady":
       return { ...state, status: "ready", message: "", progress: null };
     case "downloading":
-      return { ...state, status: "downloading", message: "", progress: { bytesDownloaded: 0, totalBytes: null } };
+      return {
+        ...state,
+        status: "downloading",
+        message: "",
+        progress: {
+          modpackId: -1,
+          stage: "download",
+          bytesDownloaded: 0,
+          totalBytes: null,
+          progressPercent: null,
+        },
+      };
     case "progress":
       return { ...state, progress: action.progress };
     case "downloadSucceeded":
       return {
         ...state,
         status: "success",
-        message: action.result.archivePath,
+        message: "",
         progress: null,
         importedModpackId: action.result.modpackId,
       };
@@ -136,6 +148,40 @@ export function getProjectLogoUrl(project: CurseForgeProject): string | null {
   return project.logoUrl;
 }
 
+export function getReleaseImportState(
+  release: CurseForgeReleaseSummary,
+  library: LibraryModpack[],
+  sourceUrl?: string,
+): ReleaseImportState {
+  return (
+    library.find(
+      (modpack) =>
+        (!sourceUrl || modpack.sourceUrl === sourceUrl) &&
+        modpack.versionName === release.versionName &&
+        modpack.minecraftVersion === (release.minecraftVersions[0] ?? null) &&
+        modpack.loader === (release.loaders[0] ?? null),
+    )?.importStatus ?? "none"
+  );
+}
+
+export function getReleasePrimaryActionLabel(t: (key: MessageKey) => string): string {
+  return t("import.addSelected");
+}
+
+export function getReleaseImportStateLabel(
+  state: Exclude<ReleaseImportState, "none">,
+  t: (key: MessageKey) => string,
+): string {
+  switch (state) {
+    case "importing":
+      return t("import.state.importing");
+    case "imported":
+      return t("import.state.imported");
+    case "failed":
+      return t("import.state.failed");
+  }
+}
+
 export function createInitialProjectSearchQuery(): string {
   return "";
 }
@@ -152,6 +198,7 @@ function useDebouncedValue(value: string, delayMs: number): string {
 }
 
 export function ImportWizardWorkspace(props: {
+  library: LibraryModpack[];
   onClose?: () => void;
   onImported: (library: LibraryModpack[], modpackId: number) => void;
   t: (key: MessageKey) => string;
@@ -174,6 +221,10 @@ export function ImportWizardWorkspace(props: {
     () => getFilteredReleases(discovery?.releases ?? [], filters),
     [discovery, filters],
   );
+  const selectedRelease = filteredReleases.find((release) => release.fileId === selectedFileId) ?? null;
+  const selectedReleaseImportState = selectedRelease
+    ? getReleaseImportState(selectedRelease, props.library, discovery?.sourceUrl)
+    : "none";
   const hasSelectedRelease = selectedFileId !== null && filteredReleases.length > 0;
 
   useEffect(() => {
@@ -415,21 +466,14 @@ export function ImportWizardWorkspace(props: {
           ) : (
             <div className="release-list">
               {filteredReleases.map((release) => (
-                <button
-                  className={release.fileId === selectedFileId ? "release-row selected" : "release-row"}
+                <ReleaseRow
+                  importState={getReleaseImportState(release, props.library, discovery?.sourceUrl)}
+                  isSelected={release.fileId === selectedFileId}
                   key={release.fileId}
-                  onClick={() => setSelectedFileId(release.fileId)}
-                  type="button"
-                >
-                  <span>
-                    <strong>{release.versionName}</strong>
-                    <small>{release.fileName}</small>
-                  </span>
-                  <span>
-                    <small>{release.minecraftVersions.join(", ") || t("library.unknown")}</small>
-                    <small>{release.loaders.join(", ") || t("library.unknown")}</small>
-                  </span>
-                </button>
+                  onSelect={() => setSelectedFileId(release.fileId)}
+                  release={release}
+                  t={t}
+                />
               ))}
             </div>
           )}
@@ -459,16 +503,53 @@ export function ImportWizardWorkspace(props: {
           )}
           <button
             className="primary-action compact"
-            disabled={!selectedFileId || state.status === "downloading"}
+            disabled={
+              !selectedFileId ||
+              state.status === "downloading" ||
+              selectedReleaseImportState !== "none"
+            }
             onClick={handleImport}
             type="button"
           >
-            {isDownloading ? <Loader2 className="button-spinner" size={16} /> : <Download size={16} />}
-            {isDownloading ? t("import.downloadingSelected") : t("import.downloadSelected")}
+            {isDownloading ? <Loader2 className="button-spinner" size={16} /> : <PackagePlus size={16} />}
+            {isDownloading ? t("import.addingSelected") : getReleasePrimaryActionLabel(t)}
           </button>
         </section>
       </div>
     </section>
+  );
+}
+
+function ReleaseRow(props: {
+  importState: ReleaseImportState;
+  isSelected: boolean;
+  onSelect: () => void;
+  release: CurseForgeReleaseSummary;
+  t: (key: MessageKey) => string;
+}) {
+  return (
+    <button
+      className={props.isSelected ? "release-row selected" : "release-row"}
+      onClick={props.onSelect}
+      type="button"
+    >
+      <span>
+        <strong>{props.release.versionName}</strong>
+        <small>{props.release.fileName}</small>
+      </span>
+      <span>
+        <small>{props.release.minecraftVersions.join(", ") || props.t("library.unknown")}</small>
+        <small>{props.release.loaders.join(", ") || props.t("library.unknown")}</small>
+      </span>
+      {props.importState !== "none" && (
+        <span className={`release-import-state ${props.importState}`}>
+          {props.importState === "importing" && <Loader2 className="status-spinner" size={14} />}
+          {props.importState === "imported" && <CheckCircle2 size={14} />}
+          {props.importState === "failed" && <AlertTriangle size={14} />}
+          {getReleaseImportStateLabel(props.importState, props.t)}
+        </span>
+      )}
+    </button>
   );
 }
 
@@ -484,7 +565,7 @@ export function statusText(
     return t("import.downloading");
   }
   if (state.status === "success") {
-    return `${t("import.success")} ${state.message}`;
+    return t("import.addStarted");
   }
   if (state.status === "failed" && state.message) {
     return state.message;

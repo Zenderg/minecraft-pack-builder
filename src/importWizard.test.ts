@@ -9,6 +9,8 @@ import {
   getProjectLogoUrl,
   getNextSelectedReleaseId,
   getProjectSourceUrl,
+  getReleaseImportState,
+  getReleasePrimaryActionLabel,
   importWizardReducer,
   isImportWizardBusy,
   shouldSearchModpacks,
@@ -16,6 +18,7 @@ import {
   type CurseForgeProject,
   type CurseForgeReleaseSummary,
 } from "./importWizard";
+import type { LibraryModpack } from "./library";
 
 const releases: CurseForgeReleaseSummary[] = [
   {
@@ -119,5 +122,25 @@ describe("phase 5 import wizard state", () => {
     expect(statusText(importWizardReducer(createInitialImportWizardState(), { type: "releaseReady" }), true, t)).toBe(
       "import.releaseReady",
     );
+  });
+
+  it("treats already tracked releases as busy and labels the action as adding", () => {
+    const trackedLibrary: LibraryModpack[] = [
+      {
+        id: 1,
+        localName: "AOC - AOC 1.2.0",
+        sourceUrl: "https://www.curseforge.com/minecraft/modpacks/aoc",
+        versionName: "AOC 1.2.0",
+        minecraftVersion: "1.20.1",
+        loader: "NeoForge",
+        importStatus: "importing",
+        importMessage: "Downloading selected release...",
+        schemes: [],
+      },
+    ];
+
+    expect(getReleaseImportState(releases[2], trackedLibrary)).toBe("importing");
+    expect(getReleaseImportState(releases[1], trackedLibrary)).toBe("none");
+    expect(getReleasePrimaryActionLabel((key: string) => key)).toBe("import.addSelected");
   });
 });

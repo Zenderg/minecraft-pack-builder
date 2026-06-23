@@ -83,7 +83,8 @@ impl LibraryDatabase {
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
         )?;
         let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
     }
 
     fn migrate(&self) -> Result<(), StorageError> {
@@ -225,6 +226,7 @@ pub struct ImportedModpack {
     pub loader: Option<String>,
     pub cache_dir: Option<PathBuf>,
     pub import_status: ImportStatus,
+    pub import_message: Option<String>,
     pub scheme_count: i64,
 }
 
@@ -256,6 +258,7 @@ pub struct LibraryModpack {
     pub minecraft_version: Option<String>,
     pub loader: Option<String>,
     pub import_status: ImportStatus,
+    pub import_message: Option<String>,
     pub schemes: Vec<SchemeRecord>,
 }
 
@@ -352,6 +355,29 @@ impl LibraryRepository {
         })
     }
 
+    pub fn update_import_status(
+        &self,
+        id: i64,
+        status: ImportStatus,
+        message: Option<String>,
+    ) -> Result<ImportedModpack, StorageError> {
+        self.require_modpack(id)?;
+        self.database.connection.execute(
+            "UPDATE imported_modpacks SET import_status = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
+            params![status.as_str(), id],
+        )?;
+        self.database.connection.execute(
+            "INSERT INTO import_status (imported_modpack_id, status, message, updated_at)
+             VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP)
+             ON CONFLICT(imported_modpack_id) DO UPDATE SET
+               status = excluded.status,
+               message = excluded.message,
+               updated_at = CURRENT_TIMESTAMP",
+            params![id, status.as_str(), message],
+        )?;
+        self.get_imported_modpack(id)
+    }
+
     pub fn create_scheme(&self, new_scheme: NewScheme) -> Result<SchemeRecord, StorageError> {
         validate_dimensions(new_scheme.size_x, new_scheme.size_y, new_scheme.size_z)?;
         self.require_modpack(new_scheme.modpack_id)?;
@@ -401,8 +427,9 @@ impl LibraryRepository {
 
     pub fn list_library(&self) -> Result<Vec<LibraryModpack>, StorageError> {
         let mut statement = self.database.connection.prepare(
-            "SELECT id, local_name, source_url, version_name, minecraft_version, loader, import_status
-             FROM imported_modpacks
+            "SELECT m.id, m.local_name, m.source_url, m.version_name, m.minecraft_version, m.loader, m.import_status, s.message
+             FROM imported_modpacks m
+             LEFT JOIN import_status s ON s.imported_modpack_id = m.id
              ORDER BY local_name COLLATE NOCASE, id",
         )?;
         let modpack_rows = statement.query_map([], |row| {
@@ -414,6 +441,7 @@ impl LibraryRepository {
                 minecraft_version: row.get(4)?,
                 loader: row.get(5)?,
                 import_status: ImportStatus::from_str(row.get::<_, String>(6)?.as_str()),
+                import_message: row.get(7)?,
                 schemes: Vec::new(),
             })
         })?;
@@ -424,16 +452,17 @@ impl LibraryRepository {
         Ok(library)
     }
 
-    fn get_imported_modpack(&self, id: i64) -> Result<ImportedModpack, StorageError> {
+    pub fn get_imported_modpack(&self, id: i64) -> Result<ImportedModpack, StorageError> {
         self.database
             .connection
             .query_row(
                 "SELECT
                     m.id, m.local_name, m.source_slug, m.source_url, m.version_name,
-                    m.minecraft_version, m.loader, m.cache_dir, m.import_status,
+                    m.minecraft_version, m.loader, m.cache_dir, m.import_status, ist.message,
                     COUNT(s.id) AS scheme_count
                  FROM imported_modpacks m
                  LEFT JOIN schemes s ON s.imported_modpack_id = m.id
+                 LEFT JOIN import_status ist ON ist.imported_modpack_id = m.id
                  WHERE m.id = ?1
                  GROUP BY m.id",
                 params![id],
@@ -449,7 +478,8 @@ impl LibraryRepository {
                         loader: row.get(6)?,
                         cache_dir: cache_dir.map(PathBuf::from),
                         import_status: ImportStatus::from_str(row.get::<_, String>(8)?.as_str()),
-                        scheme_count: row.get(9)?,
+                        import_message: row.get(9)?,
+                        scheme_count: row.get(10)?,
                     })
                 },
             )
@@ -487,7 +517,8 @@ impl LibraryRepository {
              ORDER BY s.name COLLATE NOCASE, s.id",
         )?;
         let rows = statement.query_map(params![modpack_id], row_to_scheme)?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
     }
 
     fn require_modpack(&self, id: i64) -> Result<(), StorageError> {

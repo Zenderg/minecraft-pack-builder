@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const tauriMocks = vi.hoisted(() => ({
+  cancelCurseForgeImport: vi.fn(),
   checkCurseForgeApiKey: vi.fn(),
   createScheme: vi.fn(),
   deleteImportedModpack: vi.fn(),
@@ -12,15 +13,19 @@ const tauriMocks = vi.hoisted(() => ({
   discoverAppPaths: vi.fn(),
   getCurseForgeKeyStatus: vi.fn(),
   listLibrary: vi.fn(),
+  listenToModpackImportStatus: vi.fn(),
+  listenToModpackImportProgress: vi.fn(),
   openAppDataFolder: vi.fn(),
   renameImportedModpack: vi.fn(),
   renameScheme: vi.fn(),
+  retryModpackImport: vi.fn(),
   saveCurseForgeApiKey: vi.fn(),
   searchCurseForgeModpacks: vi.fn(),
   seedLocalLibraryFixture: vi.fn(),
 }));
 
 vi.mock("./tauri", () => ({
+  cancelCurseForgeImport: tauriMocks.cancelCurseForgeImport,
   checkCurseForgeApiKey: tauriMocks.checkCurseForgeApiKey,
   createScheme: tauriMocks.createScheme,
   deleteImportedModpack: tauriMocks.deleteImportedModpack,
@@ -28,9 +33,12 @@ vi.mock("./tauri", () => ({
   discoverAppPaths: tauriMocks.discoverAppPaths,
   getCurseForgeKeyStatus: tauriMocks.getCurseForgeKeyStatus,
   listLibrary: tauriMocks.listLibrary,
+  listenToModpackImportStatus: tauriMocks.listenToModpackImportStatus,
+  listenToModpackImportProgress: tauriMocks.listenToModpackImportProgress,
   openAppDataFolder: tauriMocks.openAppDataFolder,
   renameImportedModpack: tauriMocks.renameImportedModpack,
   renameScheme: tauriMocks.renameScheme,
+  retryModpackImport: tauriMocks.retryModpackImport,
   saveCurseForgeApiKey: tauriMocks.saveCurseForgeApiKey,
   searchCurseForgeModpacks: tauriMocks.searchCurseForgeModpacks,
   seedLocalLibraryFixture: tauriMocks.seedLocalLibraryFixture,
@@ -90,6 +98,8 @@ describe("modpack import modal", () => {
       apiKey: null,
     });
     tauriMocks.listLibrary.mockResolvedValue([]);
+    tauriMocks.listenToModpackImportStatus.mockResolvedValue(() => {});
+    tauriMocks.listenToModpackImportProgress.mockResolvedValue(() => {});
     tauriMocks.searchCurseForgeModpacks.mockResolvedValue([
       { id: 42, name: "AOC", slug: "aoc", logoUrl: null },
     ]);
@@ -125,5 +135,9 @@ describe("modpack import modal", () => {
     expect(dialog).not.toBeNull();
     expect(viewer).not.toBeNull();
     expect(importInWorkspace).toBeNull();
+  });
+
+  it("does not render asset diagnostics in the main workspace", () => {
+    expect(container.querySelector(".asset-preview-panel")).toBeNull();
   });
 });

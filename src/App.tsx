@@ -25,7 +25,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useReducer, useState } from "react";
+import { useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
 
 import { getInitialLanguage, languages, type Language, translate } from "./i18n";
 import { ImportWizardWorkspace } from "./importWizard";
@@ -60,6 +60,7 @@ import {
   type SettingsSection,
 } from "./onboarding";
 import {
+  cancelCurseForgeImport,
   checkCurseForgeApiKey,
   createScheme,
   deleteImportedModpack,
@@ -67,13 +68,17 @@ import {
   discoverAppPaths,
   getCurseForgeKeyStatus,
   listLibrary,
+  listenToModpackImportProgress,
+  listenToModpackImportStatus,
   openAppDataFolder,
   renameImportedModpack,
   renameScheme,
+  retryModpackImport,
   saveCurseForgeApiKey,
   seedLocalLibraryFixture,
   type AppDataPaths,
   type CurseForgeCredentialStatus,
+  type ImportProgress,
 } from "./tauri";
 import "./styles.css";
 
@@ -114,6 +119,10 @@ export function App() {
   const [librarySelection, setLibrarySelection] = useState<LibrarySelection | null>(null);
   const [libraryMessage, setLibraryMessage] = useState("");
   const [libraryDialog, setLibraryDialog] = useState<LibraryDialog | null>(null);
+  const [importJobModpackId, setImportJobModpackId] = useState<number | null>(null);
+  const [importProgressByModpack, setImportProgressByModpack] = useState<Record<number, ImportProgress>>({});
+  const [importLogsByModpack, setImportLogsByModpack] = useState<Record<number, string[]>>({});
+  const [importStageByModpack, setImportStageByModpack] = useState<Record<number, string>>({});
   const [expandedModpackIds, setExpandedModpackIds] = useState<Set<number>>(new Set());
   const [sidebarWidth, setSidebarWidth] = useState<number>(sidebarWidthLimits.default);
 
@@ -122,6 +131,8 @@ export function App() {
     library.find((modpack) => modpack.id === librarySelection?.modpackId) ?? null;
   const selectedScheme =
     selectedModpack?.schemes.find((scheme) => scheme.id === librarySelection?.schemeId) ?? null;
+  const importJobModpack =
+    library.find((modpack) => modpack.id === importJobModpackId) ?? null;
 
   useEffect(() => {
     discoverAppPaths()
@@ -148,6 +159,78 @@ export function App() {
 
   useEffect(() => {
     refreshLibrary();
+  }, []);
+
+  function appendImportLog(modpackId: number, message: string) {
+    const trimmed = message.trim();
+    if (!trimmed) {
+      return;
+    }
+    const timestamp = new Date().toLocaleTimeString();
+    setImportLogsByModpack((current) => {
+      const previous = current[modpackId] ?? [];
+      const nextLine = `${timestamp} ${trimmed}`;
+      if (previous[previous.length - 1] === nextLine) {
+        return current;
+      }
+      return {
+        ...current,
+        [modpackId]: [...previous.slice(-80), nextLine],
+      };
+    });
+  }
+
+  function clearImportJobHistory(modpackId: number) {
+    setImportLogsByModpack((current) => {
+      if (!(modpackId in current)) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[modpackId];
+      return next;
+    });
+    setImportProgressByModpack((current) => {
+      if (!(modpackId in current)) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[modpackId];
+      return next;
+    });
+  }
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    listenToModpackImportStatus((event) => {
+      applyLibrary(event.library, { modpackId: event.modpackId, schemeId: -1 });
+      setImportStageByModpack((current) => ({ ...current, [event.modpackId]: event.stage }));
+      if (event.message) {
+        appendImportLog(event.modpackId, event.message);
+      }
+    })
+      .then((nextUnlisten) => {
+        unlisten = nextUnlisten;
+      })
+      .catch((error: unknown) => setLibraryMessage(String(error)));
+
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    listenToModpackImportProgress((event) => {
+      setImportProgressByModpack((current) => ({ ...current, [event.modpackId]: event }));
+    })
+      .then((nextUnlisten) => {
+        unlisten = nextUnlisten;
+      })
+      .catch((error: unknown) => setLibraryMessage(String(error)));
+
+    return () => {
+      unlisten?.();
+    };
   }, []);
 
   function applyLibrary(nextLibrary: LibraryModpack[], requestedSelection = librarySelection) {
@@ -456,6 +539,7 @@ export function App() {
             onRenameScheme={handleRenameScheme}
             onSelect={setLibrarySelection}
             onSeed={handleSeedLibraryFixture}
+            onShowImportJob={(modpack) => setImportJobModpackId(modpack.id)}
             onShowModpackInfo={handleShowModpackInfo}
             onToggleModpack={handleToggleModpack}
             selected={librarySelection}
@@ -563,10 +647,13 @@ export function App() {
       {flow.importModalOpen && (
         <div className="modal-backdrop" role="presentation">
           <ImportWizardWorkspace
+            library={library}
             onClose={() => dispatch({ type: "closeImportWizard" })}
             onImported={(nextLibrary, modpackId) => {
               applyLibrary(nextLibrary, { modpackId, schemeId: -1 });
-              setLibraryMessage(t("import.success"));
+              setImportStageByModpack((current) => ({ ...current, [modpackId]: "queued" }));
+              appendImportLog(modpackId, t("import.addStarted"));
+              setLibraryMessage(t("import.addStarted"));
             }}
             t={t}
           />
@@ -578,6 +665,42 @@ export function App() {
           onCancel={() => setLibraryDialog(null)}
           onConfirm={handleConfirmLibraryDialog}
           onNameChange={handleLibraryDialogNameChange}
+          t={t}
+        />
+      )}
+      {importJobModpack && (
+        <ImportJobDialog
+          logs={importLogsByModpack[importJobModpack.id] ?? []}
+          modpack={importJobModpack}
+          onCancel={async () => {
+            try {
+              await cancelCurseForgeImport();
+              appendImportLog(importJobModpack.id, t("import.cancelRequested"));
+            } catch (error) {
+              appendImportLog(importJobModpack.id, String(error));
+            }
+          }}
+          onClose={() => setImportJobModpackId(null)}
+          onDelete={() => {
+            setImportJobModpackId(null);
+            handleDeleteModpack(importJobModpack);
+          }}
+          onRetry={async () => {
+            clearImportJobHistory(importJobModpack.id);
+            try {
+              const nextLibrary = await retryModpackImport(importJobModpack.id);
+              applyLibrary(nextLibrary, { modpackId: importJobModpack.id, schemeId: -1 });
+              setImportStageByModpack((current) => ({
+                ...current,
+                [importJobModpack.id]: "queued",
+              }));
+              appendImportLog(importJobModpack.id, t("import.retryQueued"));
+            } catch (error) {
+              appendImportLog(importJobModpack.id, String(error));
+            }
+          }}
+          progress={importProgressByModpack[importJobModpack.id] ?? null}
+          stage={importStageByModpack[importJobModpack.id] ?? importJobStageFromMessage(importJobModpack)}
           t={t}
         />
       )}
@@ -742,6 +865,7 @@ function LibraryTree(props: {
   onRenameScheme: (scheme: LibraryScheme) => void;
   onSelect: (selection: LibrarySelection) => void;
   onSeed: () => void;
+  onShowImportJob: (modpack: LibraryModpack) => void;
   onShowModpackInfo: (modpack: LibraryModpack) => void;
   onToggleModpack: (modpackId: number) => void;
   selected: LibrarySelection | null;
@@ -793,40 +917,50 @@ function LibraryTree(props: {
           <div className="tree-item modpack-row">
             <button
               className="tree-label modpack-label"
-              onClick={() => props.onToggleModpack(modpack.id)}
+              onClick={() => {
+                if (modpack.importStatus === "imported") {
+                  props.onToggleModpack(modpack.id);
+                } else {
+                  props.onShowImportJob(modpack);
+                }
+              }}
               type="button"
             >
               <LoaderIcon kind={getLoaderIconKind(modpack.loader)} />
               <span title={modpack.localName}>{modpack.localName}</span>
             </button>
-            <div className="tree-actions">
-              <button
-                aria-label={t("library.createScheme")}
-                className="icon-action small"
-                onClick={() => props.onCreateScheme(modpack.id)}
-                type="button"
-              >
-                <Plus size={14} />
-              </button>
-              <button
-                aria-label={t("library.modpackActions")}
-                className="icon-action small"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  const placement = getModpackMenuPlacement(event.currentTarget.getBoundingClientRect(), {
-                    width: window.innerWidth,
-                    height: window.innerHeight,
-                  });
-                  setOpenModpackMenu((current) => {
-                    const nextId = getNextOpenModpackMenuId(current?.id ?? null, modpack.id, "menuButton");
-                    return nextId === null ? null : { id: nextId, ...placement };
-                  });
-                }}
-                type="button"
-              >
-                <MoreHorizontal size={15} />
-              </button>
-            </div>
+            {modpack.importStatus === "imported" ? (
+              <div className="tree-actions">
+                <button
+                  aria-label={t("library.createScheme")}
+                  className="icon-action small"
+                  onClick={() => props.onCreateScheme(modpack.id)}
+                  type="button"
+                >
+                  <Plus size={14} />
+                </button>
+                <button
+                  aria-label={t("library.modpackActions")}
+                  className="icon-action small"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    const placement = getModpackMenuPlacement(event.currentTarget.getBoundingClientRect(), {
+                      width: window.innerWidth,
+                      height: window.innerHeight,
+                    });
+                    setOpenModpackMenu((current) => {
+                      const nextId = getNextOpenModpackMenuId(current?.id ?? null, modpack.id, "menuButton");
+                      return nextId === null ? null : { id: nextId, ...placement };
+                    });
+                  }}
+                  type="button"
+                >
+                  <MoreHorizontal size={15} />
+                </button>
+              </div>
+            ) : (
+              <ImportStatusIndicator status={modpack.importStatus} t={t} />
+            )}
             {openModpackMenu?.id === modpack.id && (
               <div
                 className="modpack-menu"
@@ -876,7 +1010,8 @@ function LibraryTree(props: {
               </div>
             )}
           </div>
-          {props.expandedModpackIds.has(modpack.id) &&
+          {modpack.importStatus === "imported" &&
+            props.expandedModpackIds.has(modpack.id) &&
             (modpack.schemes.length === 0 ? (
               <div className="tree-item nested empty-scheme-row">{t("library.noSchemes")}</div>
             ) : (
@@ -924,6 +1059,30 @@ function LibraryTree(props: {
   );
 }
 
+function ImportStatusIndicator({
+  status,
+  t,
+}: {
+  status: LibraryModpack["importStatus"];
+  t: Translator;
+}) {
+  if (status === "importing") {
+    return (
+      <span className="import-status-indicator importing" title={t("import.state.importing")}>
+        <Loader2 className="status-spinner" size={15} />
+      </span>
+    );
+  }
+  if (status === "failed") {
+    return (
+      <span className="import-status-indicator failed" title={t("import.state.failed")}>
+        <AlertTriangle size={15} />
+      </span>
+    );
+  }
+  return null;
+}
+
 function LoaderIcon({ kind }: { kind: LoaderIconKind }) {
   const label = {
     forge: "F",
@@ -938,6 +1097,195 @@ function LoaderIcon({ kind }: { kind: LoaderIconKind }) {
       {label}
     </span>
   );
+}
+
+function ImportJobDialog({
+  logs,
+  modpack,
+  onCancel,
+  onClose,
+  onDelete,
+  onRetry,
+  progress,
+  stage,
+  t,
+}: {
+  logs: string[];
+  modpack: LibraryModpack;
+  onCancel: () => void;
+  onClose: () => void;
+  onDelete: () => void;
+  onRetry: () => void;
+  progress: ImportProgress | null;
+  stage: string;
+  t: Translator;
+}) {
+  const progressValue = getImportJobProgressValue(stage, modpack.importStatus, progress);
+  const stages = getImportJobStages(stage, modpack.importStatus);
+  const canDelete = modpack.importStatus === "failed";
+  const logViewportRef = useRef<HTMLDivElement | null>(null);
+  const shouldStickLogToBottomRef = useRef(true);
+  const visibleLogLines = logs.length > 0 ? logs : [modpack.importMessage ?? t("import.noLogYet")];
+
+  useLayoutEffect(() => {
+    const viewport = logViewportRef.current;
+    if (!viewport || !shouldStickLogToBottomRef.current) {
+      return;
+    }
+    viewport.scrollTop = viewport.scrollHeight;
+  }, [visibleLogLines.length, visibleLogLines[visibleLogLines.length - 1]]);
+
+  function handleLogScroll(event: React.UIEvent<HTMLDivElement>) {
+    const viewport = event.currentTarget;
+    const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+    shouldStickLogToBottomRef.current = distanceFromBottom < 24;
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="import-job-modal" aria-label={t("import.processingTitle")} role="dialog">
+        <header className="settings-modal-header">
+          <div>
+            <h2>{t("import.processingTitle")}</h2>
+            <div className="import-job-meta" aria-label="Selected release metadata">
+              <span>{modpack.versionName}</span>
+              <span>{modpack.minecraftVersion ?? t("library.unknown")}</span>
+              <span>{modpack.loader ?? t("library.unknown")}</span>
+            </div>
+          </div>
+          <button aria-label={t("settings.close")} className="icon-action" onClick={onClose} type="button">
+            <X size={18} />
+          </button>
+        </header>
+
+        <div className="import-job-body">
+          <section className="import-job-summary">
+            <div className="import-job-progress">
+              <div>
+                <span>{t("import.progress")}</span>
+                <strong>{progressValue}%</strong>
+              </div>
+              <progress max={100} value={progressValue} />
+            </div>
+          </section>
+
+          <section className="import-job-stages" aria-label={t("import.stages")}>
+            {stages.map((item) => (
+              <div className={`import-job-stage ${item.state}`} key={item.key}>
+                {item.state === "active" ? (
+                  <Loader2 className="status-spinner" size={15} />
+                ) : item.state === "done" ? (
+                  <CheckCircle2 size={15} />
+                ) : item.state === "failed" ? (
+                  <AlertTriangle size={15} />
+                ) : (
+                  <span className="stage-dot" />
+                )}
+                <span>{t(item.label)}</span>
+              </div>
+            ))}
+          </section>
+
+          <section className="import-job-log" aria-label={t("import.liveLog")}>
+            <div className="import-log-lines" onScroll={handleLogScroll} ref={logViewportRef}>
+              {visibleLogLines.map((line, index) => (
+                <code key={`${line}-${index}`}>{line}</code>
+              ))}
+            </div>
+          </section>
+        </div>
+
+        <div className="dialog-actions">
+          {canDelete && (
+            <button className="secondary-action compact danger" onClick={onDelete} type="button">
+              <Trash2 size={16} />
+              {t("library.deleteModpack")}
+            </button>
+          )}
+          <span className="dialog-actions-spacer" />
+          {modpack.importStatus === "importing" && (
+            <button className="secondary-action compact danger" onClick={onCancel} type="button">
+              <X size={16} />
+              {t("import.cancel")}
+            </button>
+          )}
+          {modpack.importStatus === "failed" && (
+            <button className="primary-action compact" onClick={onRetry} type="button">
+              <RefreshCcw size={16} />
+              {t("import.retry")}
+            </button>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function getImportJobProgressValue(
+  stage: string,
+  status: LibraryModpack["importStatus"],
+  progress: ImportProgress | null,
+): number {
+  if (status === "imported") {
+    return 100;
+  }
+
+  if (progress?.progressPercent !== null && progress?.progressPercent !== undefined) {
+    return Math.min(99, Math.max(0, progress.progressPercent));
+  }
+
+  if (stage === "parse" || stage === "failed") {
+    return 30;
+  }
+
+  if (stage === "download") {
+    if (!progress?.totalBytes || progress.totalBytes <= 0) {
+      return 20;
+    }
+    const downloadRatio = Math.min(1, Math.max(0, progress.bytesDownloaded / progress.totalBytes));
+    return Math.round(10 + downloadRatio * 20);
+  }
+
+  return 5;
+}
+
+function importJobStageFromMessage(modpack: LibraryModpack): string {
+  const message = modpack.importMessage?.toLowerCase() ?? "";
+  if (modpack.importStatus === "failed") {
+    return "failed";
+  }
+  if (message.includes("pars")) {
+    return "parse";
+  }
+  if (message.includes("download")) {
+    return "download";
+  }
+  if (modpack.importStatus === "imported") {
+    return "done";
+  }
+  return "queued";
+}
+
+function getImportJobStages(stage: string, status: LibraryModpack["importStatus"]) {
+  const order = ["queued", "download", "parse", "done"];
+  const activeIndex = stage === "failed" ? 2 : Math.max(0, order.indexOf(stage));
+  return [
+    { key: "queued", label: "import.stage.queued" as const },
+    { key: "download", label: "import.stage.download" as const },
+    { key: "parse", label: "import.stage.parse" as const },
+    { key: "done", label: "import.stage.done" as const },
+  ].map((item, index) => {
+    if (status === "failed" && item.key === "parse") {
+      return { ...item, state: "failed" as const };
+    }
+    if (status === "imported" || index < activeIndex) {
+      return { ...item, state: "done" as const };
+    }
+    if (index === activeIndex) {
+      return { ...item, state: "active" as const };
+    }
+    return { ...item, state: "pending" as const };
+  });
 }
 
 function LibraryActionDialog(props: {
@@ -1014,6 +1362,7 @@ function ModpackInfoRows({ modpack, t }: { modpack: LibraryModpack; t: Translato
     [t("library.loader"), modpack.loader ?? t("library.unknown")],
     [t("library.sourceUrl"), modpack.sourceUrl ?? t("library.unknown")],
     [t("library.importStatus"), modpack.importStatus],
+    [t("library.importMessage"), modpack.importMessage ?? t("library.unknown")],
     [t("library.schemeCount"), String(modpack.schemes.length)],
   ];
 
@@ -1039,6 +1388,7 @@ function ViewerWorkspace({
   t: Translator;
 }) {
   const dimensions = scheme?.dimensions.join(" x ") ?? "64 x 64 x 64";
+
   return (
     <section className="viewer-region" aria-label={t("workspace.viewer")}>
       <div className="section-heading">

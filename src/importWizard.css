@@ -238,7 +238,7 @@
 
 .release-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(120px, 0.8fr);
+  grid-template-columns: minmax(0, 1.1fr) minmax(120px, 0.7fr) minmax(82px, auto);
   gap: 12px;
   width: 100%;
   min-height: 58px;
@@ -273,6 +273,48 @@
 .release-row small {
   color: var(--muted);
   font-size: 12px;
+}
+
+.release-import-state {
+  display: flex;
+  align-items: center;
+  justify-self: end;
+  gap: 6px;
+  min-width: 86px;
+  height: 24px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 720;
+  line-height: 1;
+  white-space: nowrap;
+  justify-content: center;
+  align-self: center;
+}
+
+.release-row .release-import-state {
+  display: inline-flex;
+  min-width: 86px;
+  width: 86px;
+}
+
+.release-import-state.importing {
+  border-color: rgba(231, 185, 95, 0.32);
+  color: var(--warning);
+  background: rgba(231, 185, 95, 0.1);
+}
+
+.release-import-state.imported {
+  border-color: rgba(66, 211, 146, 0.28);
+  color: var(--accent-strong);
+  background: rgba(66, 211, 146, 0.1);
+}
+
+.release-import-state.failed {
+  border-color: rgba(255, 118, 96, 0.28);
+  color: #ffb0a3;
+  background: rgba(255, 118, 96, 0.12);
 }
 
 .import-status-row {

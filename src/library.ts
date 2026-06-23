@@ -17,6 +17,7 @@ export type LibraryModpack = {
   minecraftVersion: string | null;
   loader: string | null;
   importStatus: ImportStatus;
+  importMessage: string | null;
   schemes: LibraryScheme[];
 };
 

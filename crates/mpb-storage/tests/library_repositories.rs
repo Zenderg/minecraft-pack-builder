@@ -41,7 +41,10 @@ fn migrations_create_phase_3_tables() {
         "settings_metadata",
         "import_status",
     ] {
-        assert!(tables.contains(&expected.to_string()), "missing table {expected}");
+        assert!(
+            tables.contains(&expected.to_string()),
+            "missing table {expected}"
+        );
     }
 }
 
@@ -62,6 +65,38 @@ fn imported_modpack_names_receive_numeric_suffixes() {
     assert_eq!(first.local_name, "All the Mods 10 - 2.14.1");
     assert_eq!(second.local_name, "All the Mods 10 - 2.14.1 (2)");
     assert_eq!(third.local_name, "All the Mods 10 - 2.14.1 (3)");
+}
+
+#[test]
+fn import_status_updates_are_visible_in_the_library_tree() {
+    let repository = open_test_repository();
+    let modpack = repository
+        .create_imported_modpack(NewImportedModpack {
+            local_name: "All of Create".to_string(),
+            source_slug: Some("aoc".to_string()),
+            source_url: Some("https://www.curseforge.com/minecraft/modpacks/aoc".to_string()),
+            version_name: "All of Create 1.21.1 - v2.1".to_string(),
+            minecraft_version: Some("1.21.1".to_string()),
+            loader: Some("NeoForge".to_string()),
+            cache_dir: Some(PathBuf::from("cache/aoc-123")),
+            import_status: ImportStatus::Importing,
+        })
+        .expect("create importing modpack");
+
+    repository
+        .update_import_status(
+            modpack.id,
+            ImportStatus::Failed,
+            Some("Could not parse modpack assets".to_string()),
+        )
+        .expect("mark failed");
+
+    let library = repository.list_library().expect("list library");
+    assert_eq!(library[0].import_status, ImportStatus::Failed);
+    assert_eq!(
+        library[0].import_message.as_deref(),
+        Some("Could not parse modpack assets")
+    );
 }
 
 #[test]
@@ -96,7 +131,9 @@ fn schemes_are_crud_records_owned_by_one_modpack() {
     assert_eq!(library[0].schemes[0].name, "Starter Factory Revised");
 
     repository.delete_scheme(scheme.id).expect("delete scheme");
-    let library = repository.list_library().expect("list library after delete");
+    let library = repository
+        .list_library()
+        .expect("list library after delete");
     assert!(library[0].schemes.is_empty());
 }
 

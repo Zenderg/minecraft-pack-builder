@@ -25,6 +25,7 @@ const library: LibraryModpack[] = [
     minecraftVersion: "1.20.1",
     loader: "Forge",
     importStatus: "imported",
+    importMessage: null,
     schemes: [
       { id: 10, modpackId: 1, name: "Starter Factory", dimensions: [64, 64, 64] },
       { id: 11, modpackId: 1, name: "Tower", dimensions: [32, 96, 32] },
@@ -38,6 +39,7 @@ const library: LibraryModpack[] = [
     minecraftVersion: "1.19.2",
     loader: "Forge",
     importStatus: "imported",
+    importMessage: null,
     schemes: [],
   },
 ];
