@@ -165,6 +165,7 @@ The user should never need to infer what changed from code. They should be able 
 **Build:**
 
 - Parse CurseForge modpack page URLs and reject non-modpack URLs.
+- Search CurseForge modpacks by name and let the user select a project result.
 - Fetch available releases through Rust backend code only.
 - Show a single release list with filters for Minecraft version and loader.
 - Select the latest available release by default.
@@ -176,12 +177,13 @@ The user should never need to infer what changed from code. They should be able 
 **User Opens:**
 
 - Add Modpack wizard in the app.
-- The imported AOC modpack entry after using `https://www.curseforge.com/minecraft/modpacks/aoc`.
+- The imported AOC modpack entry after searching for `AOC` or another CurseForge modpack name and selecting the intended project.
 - The local app data folder containing the downloaded archive.
 
 **User Validates:**
 
-- Pasting the AOC CurseForge URL shows real releases.
+- Searching by a modpack name shows CurseForge project results.
+- Selecting the intended project shows real releases.
 - Filters narrow releases by Minecraft version and loader.
 - The selected release downloads with progress.
 - The imported modpack appears in the sidebar after success.

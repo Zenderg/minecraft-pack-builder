@@ -23,4 +23,9 @@ describe("i18n", () => {
   it("keeps the agent connection prompt in English for every UI language", () => {
     expect(translate("ru", "onboarding.aiPrompt")).toBe(translate("en", "onboarding.aiPrompt"));
   });
+
+  it("does not describe the implemented import wizard as a future phase", () => {
+    expect(translate("en", "import.readyBody")).not.toMatch(/phase 5/i);
+    expect(translate("ru", "import.readyBody")).not.toMatch(/фаз[аеуы]? 5|phase 5/i);
+  });
 });

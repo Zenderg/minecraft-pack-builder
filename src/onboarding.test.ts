@@ -3,10 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   canFinishOnboardingWithKey,
   createInitialAppFlow,
-  getCurseForgeKeyCheckResult,
+  getCurseForgeKeyInputCheckResult,
   getAddModpackTarget,
   getPreviousOnboardingStep,
+  getCurseForgeKeyButtonState,
+  isCurseForgeKeyCheckBusy,
   onboardingReducer,
+  shouldShowExistingKeyNotice,
   type CurseForgeKeyState,
 } from "./onboarding";
 
@@ -25,6 +28,7 @@ describe("phase 2 onboarding flow", () => {
         settingsSection: "ai",
         keyNotice: "saved",
         settingsModalOpen: true,
+        importModalOpen: false,
       },
       { type: "restartOnboarding" },
     );
@@ -43,6 +47,7 @@ describe("phase 2 onboarding flow", () => {
         settingsSection: "curseforge",
         keyNotice: "idle",
         settingsModalOpen: false,
+        importModalOpen: false,
       },
       { type: "skipOnboarding" },
     );
@@ -64,6 +69,7 @@ describe("phase 2 onboarding flow", () => {
         settingsSection: "curseforge",
         keyNotice: "idle",
         settingsModalOpen: false,
+        importModalOpen: false,
       },
       { type: "previousOnboardingStep" },
     );
@@ -81,16 +87,19 @@ describe("phase 2 onboarding flow", () => {
       screen: "workspace",
       settingsSection: "curseforge",
       settingsModalOpen: true,
+      importModalOpen: false,
     });
     expect(getAddModpackTarget(unavailable)).toEqual({
       screen: "workspace",
       settingsSection: "curseforge",
       settingsModalOpen: true,
+      importModalOpen: false,
     });
     expect(getAddModpackTarget(saved)).toEqual({
-      screen: "importWizard",
+      screen: "workspace",
       settingsSection: "curseforge",
       settingsModalOpen: false,
+      importModalOpen: true,
     });
   });
 
@@ -103,6 +112,7 @@ describe("phase 2 onboarding flow", () => {
         settingsSection: "curseforge",
         keyNotice: "idle",
         settingsModalOpen: true,
+        importModalOpen: false,
       },
       { type: "keySaved" },
     );
@@ -117,9 +127,34 @@ describe("phase 2 onboarding flow", () => {
     expect(replaced.keyNotice).toBe("replaced");
   });
 
-  it("keeps CurseForge key checking local during phase 2", () => {
-    expect(getCurseForgeKeyCheckResult("")).toBe("empty");
-    expect(getCurseForgeKeyCheckResult("  abc123  ")).toBe("formatReady");
+  it("prechecks CurseForge key input before the online phase 5 validation", () => {
+    expect(getCurseForgeKeyInputCheckResult("")).toBe("empty");
+    expect(getCurseForgeKeyInputCheckResult("  abc123  ")).toBe("ready");
+  });
+
+  it("treats only the active key check as a busy state", () => {
+    expect(isCurseForgeKeyCheckBusy("checking")).toBe(true);
+    expect(isCurseForgeKeyCheckBusy("idle")).toBe(false);
+    expect(isCurseForgeKeyCheckBusy("valid")).toBe(false);
+    expect(isCurseForgeKeyCheckBusy("invalid")).toBe(false);
+  });
+
+  it("keeps the key check button visibly loading while disabled", () => {
+    expect(getCurseForgeKeyButtonState("checking", true)).toEqual({
+      disabled: true,
+      loading: true,
+    });
+    expect(getCurseForgeKeyButtonState("valid", false)).toEqual({
+      disabled: false,
+      loading: false,
+    });
+  });
+
+  it("shows the existing-key notice only before replacing or checking a key", () => {
+    expect(shouldShowExistingKeyNotice("saved", "", "idle")).toBe(true);
+    expect(shouldShowExistingKeyNotice("saved", "new-key", "idle")).toBe(false);
+    expect(shouldShowExistingKeyNotice("saved", "", "valid")).toBe(false);
+    expect(shouldShowExistingKeyNotice("missing", "", "idle")).toBe(false);
   });
 
   it("allows finishing the CurseForge onboarding step only after a key exists", () => {

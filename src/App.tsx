@@ -13,6 +13,7 @@ import {
   KeyRound,
   Layers3,
   Languages,
+  Loader2,
   MoreHorizontal,
   PackagePlus,
   Pencil,
@@ -27,6 +28,7 @@ import {
 import { useEffect, useReducer, useState } from "react";
 
 import { getInitialLanguage, languages, type Language, translate } from "./i18n";
+import { ImportWizardWorkspace } from "./importWizard";
 import {
   clampSidebarWidth,
   compactLibraryNodeGap,
@@ -49,13 +51,16 @@ import {
 import {
   canFinishOnboardingWithKey,
   createInitialAppFlow,
-  getCurseForgeKeyCheckResult,
+  getCurseForgeKeyButtonState,
+  getCurseForgeKeyInputCheckResult,
   onboardingReducer,
+  shouldShowExistingKeyNotice,
   type CurseForgeKeyCheckResult,
   type CurseForgeKeyState,
   type SettingsSection,
 } from "./onboarding";
 import {
+  checkCurseForgeApiKey,
   createScheme,
   deleteImportedModpack,
   deleteScheme,
@@ -101,7 +106,8 @@ export function App() {
   const [paths, setPaths] = useState<AppDataPaths | null>(null);
   const [keyStatus, setKeyStatus] = useState<CurseForgeCredentialStatus | null>(null);
   const [apiKeyInput, setApiKeyInput] = useState("");
-  const [keyCheckResult, setKeyCheckResult] = useState<CurseForgeKeyCheckResult | "idle">("idle");
+  const [keyCheckResult, setKeyCheckResult] = useState<CurseForgeKeyCheckResult>("idle");
+  const [keyCheckMessage, setKeyCheckMessage] = useState("");
   const [isSavingKey, setIsSavingKey] = useState(false);
   const [diagnosticsMessage, setDiagnosticsMessage] = useState("");
   const [library, setLibrary] = useState<LibraryModpack[]>([]);
@@ -326,6 +332,7 @@ export function App() {
   function restartOnboarding() {
     localStorage.removeItem(onboardingStorageKey);
     setKeyCheckResult("idle");
+    setKeyCheckMessage("");
     dispatch({ type: "restartOnboarding" });
   }
 
@@ -334,32 +341,32 @@ export function App() {
   }
 
   async function handleCheckAndSaveKey() {
-    const checkResult = getCurseForgeKeyCheckResult(apiKeyInput);
-    setKeyCheckResult(checkResult);
-    if (checkResult === "empty") {
+    const inputCheckResult = getCurseForgeKeyInputCheckResult(apiKeyInput);
+    if (inputCheckResult === "empty") {
+      setKeyCheckResult("empty");
+      setKeyCheckMessage("");
       return;
     }
 
     setIsSavingKey(true);
+    setKeyCheckResult("checking");
+    setKeyCheckMessage("");
     try {
+      await checkCurseForgeApiKey(apiKeyInput);
       const status = await saveCurseForgeApiKey(apiKeyInput);
       setKeyStatus(status);
       setApiKeyInput("");
       if (status.state === "saved") {
-        setKeyCheckResult("formatReady");
+        setKeyCheckResult("valid");
         dispatch({ type: "keySaved" });
       } else {
-        setKeyCheckResult("idle");
+        setKeyCheckResult("invalid");
+        setKeyCheckMessage(status.message ?? t("settings.keyCheckInvalid"));
         dispatch({ type: "keyUnavailable" });
       }
     } catch (error) {
-      setKeyStatus({
-        state: "unavailable",
-        backend: keyStatus?.backend ?? "OS secure credential storage",
-        message: String(error),
-        apiKey: null,
-      });
-      dispatch({ type: "keyUnavailable" });
+      setKeyCheckResult("invalid");
+      setKeyCheckMessage(String(error));
     } finally {
       setIsSavingKey(false);
     }
@@ -368,6 +375,7 @@ export function App() {
   function handleUpdateKeyInput(value: string) {
     setApiKeyInput(value);
     setKeyCheckResult("idle");
+    setKeyCheckMessage("");
   }
 
   function handleCheckKey() {
@@ -396,6 +404,8 @@ export function App() {
         keyState={flow.curseForgeKey}
         keyStatus={keyStatus}
         keyCheckResult={keyCheckResult}
+        keyCheckMessage={keyCheckMessage}
+        keyNotice={flow.keyNotice}
         language={language}
         onBack={() => dispatch({ type: "previousOnboardingStep" })}
         onCheckKey={handleCheckKey}
@@ -494,11 +504,7 @@ export function App() {
         </header>
 
         <div className="content-grid">
-          {flow.screen === "importWizard" ? (
-            <ImportReadyWorkspace t={t} />
-          ) : (
-            <ViewerWorkspace modpack={selectedModpack} scheme={selectedScheme} t={t} />
-          )}
+          <ViewerWorkspace modpack={selectedModpack} scheme={selectedScheme} t={t} />
 
           <aside className="right-rail" aria-label={t("workspace.review")}>
             <section className="tool-panel">
@@ -537,6 +543,7 @@ export function App() {
           diagnosticsMessage={diagnosticsMessage}
           isSavingKey={isSavingKey}
           keyCheckResult={keyCheckResult}
+          keyCheckMessage={keyCheckMessage}
           keyNotice={flow.keyNotice}
           keyState={flow.curseForgeKey}
           keyStatus={keyStatus}
@@ -552,6 +559,18 @@ export function App() {
           section={flow.settingsSection}
           t={t}
         />
+      )}
+      {flow.importModalOpen && (
+        <div className="modal-backdrop" role="presentation">
+          <ImportWizardWorkspace
+            onClose={() => dispatch({ type: "closeImportWizard" })}
+            onImported={(nextLibrary, modpackId) => {
+              applyLibrary(nextLibrary, { modpackId, schemeId: -1 });
+              setLibraryMessage(t("import.success"));
+            }}
+            t={t}
+          />
+        </div>
       )}
       {libraryDialog && (
         <LibraryActionDialog
@@ -573,7 +592,9 @@ function OnboardingScreen(props: {
   isSavingKey: boolean;
   keyState: CurseForgeKeyState;
   keyStatus: CurseForgeCredentialStatus | null;
-  keyCheckResult: CurseForgeKeyCheckResult | "idle";
+  keyCheckResult: CurseForgeKeyCheckResult;
+  keyCheckMessage: string;
+  keyNotice: "idle" | "missing" | "saved" | "replaced" | "unavailable";
   language: Language;
   onBack: () => void;
   onCheckKey: () => void;
@@ -676,6 +697,8 @@ function OnboardingScreen(props: {
               apiKeyInput={props.apiKeyInput}
               isSavingKey={props.isSavingKey}
               keyCheckResult={props.keyCheckResult}
+              keyCheckMessage={props.keyCheckMessage}
+              keyNotice={props.keyNotice}
               keyState={props.keyState}
               keyStatus={props.keyStatus}
               onCheckKey={props.onCheckKey}
@@ -1040,27 +1063,12 @@ function ViewerWorkspace({
   );
 }
 
-function ImportReadyWorkspace({ t }: { t: Translator }) {
-  return (
-    <section className="viewer-region settings-workspace" aria-label={t("workspace.addModpack")}>
-      <div className="section-heading">
-        <span>{t("workspace.addModpack")}</span>
-        <strong>{t("settings.curseforgeKey")}</strong>
-      </div>
-      <div className="empty-state-panel">
-        <PackagePlus size={34} />
-        <h2>{t("import.readyTitle")}</h2>
-        <p>{t("import.readyBody")}</p>
-      </div>
-    </section>
-  );
-}
-
 function SettingsModal(props: {
   apiKeyInput: string;
   diagnosticsMessage: string;
   isSavingKey: boolean;
-  keyCheckResult: CurseForgeKeyCheckResult | "idle";
+  keyCheckResult: CurseForgeKeyCheckResult;
+  keyCheckMessage: string;
   keyNotice: "idle" | "missing" | "saved" | "replaced" | "unavailable";
   keyState: CurseForgeKeyState;
   keyStatus: CurseForgeCredentialStatus | null;
@@ -1141,6 +1149,8 @@ function SettingsModal(props: {
                 apiKeyInput={props.apiKeyInput}
                 isSavingKey={props.isSavingKey}
                 keyCheckResult={props.keyCheckResult}
+                keyCheckMessage={props.keyCheckMessage}
+                keyNotice={props.keyNotice}
                 keyState={props.keyState}
                 keyStatus={props.keyStatus}
                 onCheckKey={props.onCheckKey}
@@ -1199,7 +1209,9 @@ function SettingsModal(props: {
 function KeyForm(props: {
   apiKeyInput: string;
   isSavingKey: boolean;
-  keyCheckResult: CurseForgeKeyCheckResult | "idle";
+  keyCheckResult: CurseForgeKeyCheckResult;
+  keyCheckMessage: string;
+  keyNotice: "idle" | "missing" | "saved" | "replaced" | "unavailable";
   keyState: CurseForgeKeyState;
   keyStatus: CurseForgeCredentialStatus | null;
   onCheckKey: () => void;
@@ -1207,21 +1219,25 @@ function KeyForm(props: {
   t: Translator;
 }) {
   const { t } = props;
+  const keyButtonState = getCurseForgeKeyButtonState(props.keyCheckResult, props.isSavingKey);
   return (
     <div className="key-form">
       <div className={`key-status ${props.keyState}`}>
         {props.keyState === "saved" ? <ShieldCheck size={18} /> : <AlertTriangle size={18} />}
         <div>
-          <strong>{keyLabel(t, props.keyState, "idle")}</strong>
+          <strong>{keyLabel(t, props.keyState, props.keyNotice)}</strong>
           <span>
             {t("settings.backend")}: {props.keyStatus?.backend ?? "OS secure credential storage"}
           </span>
           {props.keyStatus?.message && <span>{props.keyStatus.message}</span>}
         </div>
       </div>
-      {props.keyState === "saved" && <p className="key-check-message formatReady">{t("settings.existingKey")}</p>}
-      <div className="secret-input-row">
+      {shouldShowExistingKeyNotice(props.keyState, props.apiKeyInput, props.keyCheckResult) && (
+        <p className="key-check-message valid">{t("settings.existingKey")}</p>
+      )}
+      <div className={keyButtonState.loading ? "secret-input-row checking" : "secret-input-row"}>
         <input
+          aria-busy={keyButtonState.loading}
           autoComplete="off"
           onChange={(event) => props.onUpdateKey(event.currentTarget.value)}
           placeholder={t("settings.keyPlaceholder")}
@@ -1229,19 +1245,24 @@ function KeyForm(props: {
           value={props.apiKeyInput}
         />
         <button
-          className="secondary-action compact"
-          disabled={props.isSavingKey}
+          aria-busy={keyButtonState.loading}
+          className={keyButtonState.loading ? "secondary-action compact loading" : "secondary-action compact"}
+          disabled={keyButtonState.disabled}
           onClick={props.onCheckKey}
           type="button"
         >
-          <CheckCircle2 size={16} />
-          {t("settings.checkKey")}
+          {keyButtonState.loading ? <Loader2 className="button-spinner" size={16} /> : <CheckCircle2 size={16} />}
+          {keyButtonState.loading ? t("settings.checkingKey") : t("settings.checkKey")}
         </button>
       </div>
       {props.keyCheckResult !== "idle" && (
-        <p className={`key-check-message ${props.keyCheckResult}`}>
-          {props.keyCheckResult === "empty" ? t("settings.keyCheckEmpty") : t("settings.keyCheckReady")}
-          <span>{t("settings.keyCheckNote")}</span>
+        <p
+          aria-live="polite"
+          className={`key-check-message ${props.keyCheckResult}`}
+          role={keyButtonState.loading ? "status" : undefined}
+        >
+          {keyButtonState.loading && <Loader2 className="status-spinner" size={16} />}
+          {keyCheckMessage(t, props.keyCheckResult, props.keyCheckMessage)}
         </p>
       )}
     </div>
@@ -1284,6 +1305,26 @@ function StatusRows({ rows }: { rows: Array<[string, string | undefined]> }) {
 
 function StepIcon({ children }: { children: React.ReactNode }) {
   return <div className="step-icon">{children}</div>;
+}
+
+function keyCheckMessage(
+  t: Translator,
+  result: CurseForgeKeyCheckResult,
+  detail: string,
+): string {
+  if (result === "empty") {
+    return t("settings.keyCheckEmpty");
+  }
+  if (result === "checking") {
+    return t("settings.keyCheckChecking");
+  }
+  if (result === "valid") {
+    return t("settings.keyCheckValid");
+  }
+  if (result === "invalid") {
+    return detail || t("settings.keyCheckInvalid");
+  }
+  return "";
 }
 
 function keyLabel(

@@ -46,6 +46,23 @@ button:disabled {
   opacity: 0.48;
 }
 
+button.loading:disabled {
+  cursor: progress;
+  opacity: 1;
+}
+
+.button-spinner,
+.status-spinner {
+  transform-origin: center;
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: var(--sidebar-width, 276px) 6px minmax(0, 1fr);
@@ -144,6 +161,13 @@ button:disabled {
 .secondary-action {
   background: var(--panel-strong);
   color: var(--text);
+}
+
+.secondary-action.loading {
+  border: 1px solid rgba(66, 211, 146, 0.46);
+  color: var(--accent-strong);
+  background: rgba(66, 211, 146, 0.12);
+  box-shadow: 0 0 0 1px rgba(66, 211, 146, 0.12) inset;
 }
 
 .secondary-action.danger {
@@ -1077,6 +1101,11 @@ code {
   border-color: rgba(66, 211, 146, 0.68);
 }
 
+.secret-input-row.checking input {
+  border-color: rgba(66, 211, 146, 0.46);
+  background: rgba(66, 211, 146, 0.06);
+}
+
 .key-check-message {
   display: grid;
   gap: 3px;
@@ -1090,12 +1119,22 @@ code {
   line-height: 1.45;
 }
 
-.key-check-message.formatReady {
+.key-check-message.valid {
   border-color: rgba(66, 211, 146, 0.36);
 }
 
-.key-check-message.empty {
+.key-check-message.empty,
+.key-check-message.invalid {
   border-color: rgba(231, 185, 95, 0.36);
+}
+
+.key-check-message.checking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-color: rgba(66, 211, 146, 0.46);
+  color: var(--accent-strong);
+  background: rgba(66, 211, 146, 0.1);
 }
 
 .key-check-message span {

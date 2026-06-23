@@ -1,4 +1,4 @@
-export type AppScreen = "onboarding" | "workspace" | "settings" | "importWizard";
+export type AppScreen = "onboarding" | "workspace" | "settings";
 export type OnboardingStep = "language" | "ai" | "curseforge";
 export type SettingsSection = "ai" | "curseforge" | "language" | "data";
 export type CurseForgeKeyState = "missing" | "saved" | "unavailable";
@@ -11,6 +11,7 @@ export type AppFlowState = {
   settingsSection: SettingsSection;
   keyNotice: KeyNotice;
   settingsModalOpen: boolean;
+  importModalOpen: boolean;
 };
 
 export type AppFlowAction =
@@ -19,6 +20,7 @@ export type AppFlowAction =
   | { type: "previousOnboardingStep" }
   | { type: "openSettings"; section: SettingsSection }
   | { type: "closeSettings" }
+  | { type: "closeImportWizard" }
   | { type: "restartOnboarding" }
   | { type: "skipOnboarding" }
   | { type: "finishOnboarding" }
@@ -35,6 +37,7 @@ export function createInitialAppFlow(options: { onboardingComplete: boolean }): 
     settingsSection: "curseforge",
     keyNotice: "idle",
     settingsModalOpen: false,
+    importModalOpen: false,
   };
 }
 
@@ -42,12 +45,23 @@ export function getAddModpackTarget(curseForgeKey: CurseForgeKeyState): {
   screen: AppScreen;
   settingsSection: SettingsSection;
   settingsModalOpen: boolean;
+  importModalOpen: boolean;
 } {
   if (curseForgeKey !== "saved") {
-    return { screen: "workspace", settingsSection: "curseforge", settingsModalOpen: true };
+    return {
+      screen: "workspace",
+      settingsSection: "curseforge",
+      settingsModalOpen: true,
+      importModalOpen: false,
+    };
   }
 
-  return { screen: "importWizard", settingsSection: "curseforge", settingsModalOpen: false };
+  return {
+    screen: "workspace",
+    settingsSection: "curseforge",
+    settingsModalOpen: false,
+    importModalOpen: true,
+  };
 }
 
 export function getPreviousOnboardingStep(step: OnboardingStep): OnboardingStep {
@@ -60,14 +74,38 @@ export function getPreviousOnboardingStep(step: OnboardingStep): OnboardingStep 
   return "language";
 }
 
-export type CurseForgeKeyCheckResult = "empty" | "formatReady";
+export type CurseForgeKeyInputCheckResult = "empty" | "ready";
+export type CurseForgeKeyCheckResult = "idle" | "empty" | "checking" | "valid" | "invalid";
 
-export function getCurseForgeKeyCheckResult(apiKey: string): CurseForgeKeyCheckResult {
-  return apiKey.trim().length === 0 ? "empty" : "formatReady";
+export function getCurseForgeKeyInputCheckResult(apiKey: string): CurseForgeKeyInputCheckResult {
+  return apiKey.trim().length === 0 ? "empty" : "ready";
+}
+
+export function isCurseForgeKeyCheckBusy(result: CurseForgeKeyCheckResult): boolean {
+  return result === "checking";
+}
+
+export function getCurseForgeKeyButtonState(
+  result: CurseForgeKeyCheckResult,
+  isSavingKey: boolean,
+): { disabled: boolean; loading: boolean } {
+  const loading = isCurseForgeKeyCheckBusy(result);
+  return {
+    disabled: isSavingKey || loading,
+    loading,
+  };
 }
 
 export function canFinishOnboardingWithKey(curseForgeKey: CurseForgeKeyState): boolean {
   return curseForgeKey === "saved";
+}
+
+export function shouldShowExistingKeyNotice(
+  curseForgeKey: CurseForgeKeyState,
+  apiKeyInput: string,
+  keyCheckResult: CurseForgeKeyCheckResult,
+): boolean {
+  return curseForgeKey === "saved" && apiKeyInput.trim() === "" && keyCheckResult === "idle";
 }
 
 export function onboardingReducer(state: AppFlowState, action: AppFlowAction): AppFlowState {
@@ -83,20 +121,24 @@ export function onboardingReducer(state: AppFlowState, action: AppFlowAction): A
         ...state,
         screen: state.screen === "onboarding" ? "workspace" : state.screen,
         settingsModalOpen: true,
+        importModalOpen: false,
         settingsSection: action.section,
       };
     case "closeSettings":
       return { ...state, settingsModalOpen: false };
+    case "closeImportWizard":
+      return { ...state, screen: "workspace", importModalOpen: false };
     case "restartOnboarding":
       return {
         ...state,
         screen: "onboarding",
         onboardingStep: "language",
         settingsModalOpen: false,
+        importModalOpen: false,
       };
     case "skipOnboarding":
     case "finishOnboarding":
-      return { ...state, screen: "workspace", settingsModalOpen: false };
+      return { ...state, screen: "workspace", settingsModalOpen: false, importModalOpen: false };
     case "setCurseForgeKeyState":
       return {
         ...state,
@@ -118,6 +160,7 @@ export function onboardingReducer(state: AppFlowState, action: AppFlowAction): A
         screen: target.screen,
         settingsSection: target.settingsSection,
         settingsModalOpen: target.settingsModalOpen,
+        importModalOpen: target.importModalOpen,
         keyNotice: target.settingsModalOpen ? "missing" : state.keyNotice,
       };
     }

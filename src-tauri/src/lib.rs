@@ -1,17 +1,61 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
 
-use credentials::{curseforge_key_status, save_curseforge_key, CurseForgeCredentialStatus};
+use credentials::{
+    curseforge_key_status, read_curseforge_key, save_curseforge_key, CurseForgeCredentialStatus,
+};
+use mpb_assets::{
+    discover_modpack_releases, download_release_archive, parse_modpack_page_url, CancellationToken,
+    search_modpack_projects, CurseForgeGateway, CurseForgeHttpGateway, CurseForgeProject,
+    DiscoveredReleases, DownloadProgress,
+};
 use mpb_core::DomainDemoReport;
 use mpb_storage::{
     ensure_app_data_dirs, AppDataPaths, LibraryModpack, LibraryRepository, NewScheme,
 };
-#[cfg(debug_assertions)]
 use mpb_storage::{ImportStatus, NewImportedModpack};
 use serde::Serialize;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 mod credentials;
+
+#[derive(Default)]
+struct ImportController {
+    current: Mutex<Option<CancellationToken>>,
+}
+
+impl ImportController {
+    fn start(&self) -> Result<CancellationToken, String> {
+        let token = CancellationToken::new();
+        let mut current = self
+            .current
+            .lock()
+            .map_err(|_| "import controller lock is poisoned".to_string())?;
+        *current = Some(token.clone());
+        Ok(token)
+    }
+
+    fn cancel(&self) -> Result<(), String> {
+        let current = self
+            .current
+            .lock()
+            .map_err(|_| "import controller lock is poisoned".to_string())?;
+        if let Some(token) = current.as_ref() {
+            token.cancel();
+        }
+        Ok(())
+    }
+
+    fn clear(&self) -> Result<(), String> {
+        let mut current = self
+            .current
+            .lock()
+            .map_err(|_| "import controller lock is poisoned".to_string())?;
+        *current = None;
+        Ok(())
+    }
+}
 
 #[tauri::command]
 fn discover_app_paths(app: tauri::AppHandle) -> Result<AppDataPaths, String> {
@@ -77,6 +121,162 @@ fn get_curseforge_key_status() -> CurseForgeCredentialStatus {
 #[tauri::command]
 fn save_curseforge_api_key(api_key: String) -> Result<CurseForgeCredentialStatus, String> {
     save_curseforge_key(&api_key).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn check_curseforge_api_key(api_key: String) -> Result<(), String> {
+    credentials::validate_curseforge_api_key(&api_key).map_err(|error| error.to_string())?;
+    let gateway = CurseForgeHttpGateway::new().map_err(|error| error.to_string())?;
+    gateway
+        .find_modpack_project(&api_key, "aoc")
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn discover_curseforge_releases(page_url: String) -> Result<DiscoveredReleases, String> {
+    let api_key = read_curseforge_key().map_err(|error| error.to_string())?;
+    let gateway = CurseForgeHttpGateway::new().map_err(|error| error.to_string())?;
+    discover_modpack_releases(&gateway, &api_key, &page_url).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn search_curseforge_modpacks(query: String) -> Result<Vec<CurseForgeProject>, String> {
+    let api_key = read_curseforge_key().map_err(|error| error.to_string())?;
+    let gateway = CurseForgeHttpGateway::new().map_err(|error| error.to_string())?;
+    search_modpack_projects(&gateway, &api_key, &query).map_err(|error| error.to_string())
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModpackImportProgress {
+    bytes_downloaded: u64,
+    total_bytes: Option<u64>,
+}
+
+impl From<DownloadProgress> for ModpackImportProgress {
+    fn from(value: DownloadProgress) -> Self {
+        Self {
+            bytes_downloaded: value.bytes_downloaded,
+            total_bytes: value.total_bytes,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportedModpackResult {
+    library: Vec<LibraryModpack>,
+    modpack_id: i64,
+    archive_path: PathBuf,
+}
+
+#[tauri::command]
+fn import_curseforge_modpack(
+    app: tauri::AppHandle,
+    controller: tauri::State<ImportController>,
+    page_url: String,
+    file_id: u64,
+) -> Result<ImportedModpackResult, String> {
+    let api_key = read_curseforge_key().map_err(|error| error.to_string())?;
+    let gateway = CurseForgeHttpGateway::new().map_err(|error| error.to_string())?;
+    let parsed = parse_modpack_page_url(&page_url).map_err(|error| error.to_string())?;
+    let project = gateway
+        .find_modpack_project(&api_key, &parsed.slug)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| {
+            format!(
+                "CurseForge modpack was not found for slug '{}'",
+                parsed.slug
+            )
+        })?;
+    let release = gateway
+        .list_project_files(&api_key, project.id)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find(|release| release.file_id == file_id)
+        .ok_or_else(|| format!("CurseForge release file {file_id} was not found"))?;
+    let summary = mpb_assets::filter_releases(
+        &[mpb_assets::ReleaseSummary {
+            file_id: release.file_id,
+            version_name: release.display_name.clone(),
+            file_name: release.file_name.clone(),
+            minecraft_versions: release
+                .game_versions
+                .iter()
+                .filter(|value| value.chars().next().is_some_and(|ch| ch.is_ascii_digit()))
+                .cloned()
+                .collect(),
+            loaders: release
+                .game_versions
+                .iter()
+                .filter(|value| matches!(value.as_str(), "Forge" | "NeoForge" | "Fabric" | "Quilt"))
+                .cloned()
+                .collect(),
+            file_date: release.file_date.clone(),
+            file_length: release.file_length,
+        }],
+        &mpb_assets::ReleaseFilter {
+            minecraft_version: None,
+            loader: None,
+        },
+    )
+    .into_iter()
+    .next()
+    .cloned()
+    .ok_or_else(|| "could not summarize selected release".to_string())?;
+
+    let (paths, repository) = library_repository(&app)?;
+    let safe_file_name = safe_path_segment(&release.file_name);
+    let cache_dir = paths
+        .app_data_dir
+        .join("modpacks")
+        .join(format!("{}-{}", parsed.slug, release.file_id));
+    let archive_path = cache_dir.join("archives").join(safe_file_name);
+    let token = controller.start()?;
+    let emit_app = app.clone();
+    let download_result = download_release_archive(
+        &gateway,
+        &api_key,
+        &release,
+        &archive_path,
+        &token,
+        |progress| {
+            let _ = emit_app.emit(
+                "modpack_import_progress",
+                ModpackImportProgress::from(progress),
+            );
+        },
+    );
+    controller.clear()?;
+    download_result.map_err(|error| error.to_string())?;
+
+    let imported = repository
+        .create_imported_modpack(NewImportedModpack {
+            local_name: format!("{} - {}", project.name, summary.version_name),
+            source_slug: Some(project.slug),
+            source_url: Some(parsed.normalized_url),
+            version_name: summary.version_name,
+            minecraft_version: summary.minecraft_versions.first().cloned(),
+            loader: summary.loaders.first().cloned(),
+            cache_dir: Some(cache_dir),
+            import_status: ImportStatus::Imported,
+        })
+        .map_err(|error| error.to_string())?;
+    let library = repository
+        .list_library()
+        .map_err(|error| error.to_string())?;
+
+    Ok(ImportedModpackResult {
+        library,
+        modpack_id: imported.id,
+        archive_path,
+    })
+}
+
+#[tauri::command]
+fn cancel_curseforge_import(controller: tauri::State<ImportController>) -> Result<(), String> {
+    controller.cancel()
 }
 
 #[tauri::command]
@@ -222,6 +422,24 @@ pub fn open_folder_command_for_platform() -> &'static str {
     }
 }
 
+fn safe_path_segment(value: &str) -> String {
+    let cleaned = value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_') {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    if cleaned.is_empty() {
+        "modpack.zip".to_string()
+    } else {
+        cleaned
+    }
+}
+
 pub fn run() {
     let builder = tauri::Builder::default();
 
@@ -231,6 +449,11 @@ pub fn run() {
         open_app_data_folder,
         get_curseforge_key_status,
         save_curseforge_api_key,
+        check_curseforge_api_key,
+        discover_curseforge_releases,
+        search_curseforge_modpacks,
+        import_curseforge_modpack,
+        cancel_curseforge_import,
         generate_domain_demo_report,
         list_library,
         seed_local_library_fixture,
@@ -247,6 +470,11 @@ pub fn run() {
         open_app_data_folder,
         get_curseforge_key_status,
         save_curseforge_api_key,
+        check_curseforge_api_key,
+        discover_curseforge_releases,
+        search_curseforge_modpacks,
+        import_curseforge_modpack,
+        cancel_curseforge_import,
         generate_domain_demo_report,
         list_library,
         create_scheme,
@@ -257,6 +485,7 @@ pub fn run() {
     ]);
 
     builder
+        .manage(ImportController::default())
         .run(tauri::generate_context!())
         .expect("failed to run Minecraft Pack Builder desktop app");
 }
