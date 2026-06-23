@@ -3,7 +3,7 @@
 - Work only in the main branch by default.
 - Do not create or switch to another branch or worktree unless the user explicitly asks for it.
 - If a general workflow guide recommends branch or worktree creation, this repository instruction takes precedence.
-- Keep source files below 1000 lines by default. This applies when creating new hand-written source files and when editing existing hand-written source files. If a file already exceeds 1000 lines and you need to edit it, either decompose the touched area into focused modules, components, hooks, helpers, or stylesheets along meaningful ownership boundaries, or explicitly note why decomposition would make the current change harder to understand.
-- Do not split files purely to satisfy the line limit when the file is generated, vendored, a lockfile, a schema snapshot, or a single cohesive artifact whose decomposition would make the code harder to understand. If such a file exceeds 1000 lines, leave it intact and note the reason when relevant.
+- When you need to edit a file that is objectively large and can reasonably be decomposed, decompose the whole file into well-scoped modules, components, hooks, helpers, stylesheets, or other appropriate blocks along meaningful ownership boundaries.
+- Do not split files when they are generated, vendored, lockfiles, schema snapshots, or single cohesive artifacts whose decomposition would make the code harder to understand.
 - Rust is installed through `rustup` in the user's home directory. If `cargo` or `rustc` are not visible in a non-login shell, run commands through a login `zsh` shell so `$HOME/.cargo/env` from `.zprofile`/`.zshrc` is loaded.
 - Node.js may be changed with the `n` CLI outside the sandbox if a project toolchain requires a different version; otherwise keep the current version.
