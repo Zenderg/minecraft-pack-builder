@@ -4,11 +4,12 @@ import {
   ArrowRight,
   Bot,
   Box,
+  ChevronDown,
   CheckCircle2,
+  ClipboardList,
   Database,
   EyeOff,
   FolderOpen,
-  Globe2,
   Info,
   KeyRound,
   Layers3,
@@ -25,7 +26,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
 
 import { getInitialLanguage, languages, type Language, translate } from "./i18n";
 import { ImportWizardWorkspace } from "./importWizard";
@@ -80,13 +81,9 @@ import {
   type CurseForgeCredentialStatus,
   type ImportProgress,
 } from "./tauri";
+import { type StageOptionId } from "./renderViewer";
+import { ViewerWorkspace, type ViewerSelection, type ViewerToolContext } from "./ViewerWorkspace";
 import "./styles.css";
-
-const sampleMaterials = [
-  { name: "minecraft:stone_bricks", count: 284 },
-  { name: "thermal:machine_frame", count: 24 },
-  { name: "create:andesite_casing", count: 48 },
-];
 
 const onboardingStorageKey = "mpb.onboardingComplete";
 
@@ -125,6 +122,18 @@ export function App() {
   const [importStageByModpack, setImportStageByModpack] = useState<Record<number, string>>({});
   const [expandedModpackIds, setExpandedModpackIds] = useState<Set<number>>(new Set());
   const [sidebarWidth, setSidebarWidth] = useState<number>(sidebarWidthLimits.default);
+  const [viewerSelection, setViewerSelection] = useState<ViewerSelection>(null);
+  const [viewerStageId, setViewerStageId] = useState<StageOptionId | null>(null);
+  const [viewerToolContext, setViewerToolContext] = useState<ViewerToolContext | null>(null);
+  const handleViewerSelectionChange = useCallback((selection: ViewerSelection) => {
+    setViewerSelection(selection);
+  }, []);
+  const handleViewerStageChange = useCallback((stageId: StageOptionId | null) => {
+    setViewerStageId(stageId);
+  }, []);
+  const handleViewerToolContextChange = useCallback((context: ViewerToolContext | null) => {
+    setViewerToolContext(context);
+  }, []);
 
   const t = (key: Parameters<typeof translate>[1]) => translate(language, key);
   const selectedModpack =
@@ -516,6 +525,10 @@ export function App() {
           </div>
           <div>
             <h1>{t("app.title")}</h1>
+            <span className="brand-status">
+              <Bot size={12} />
+              {t("status.aiDisconnected")}
+            </span>
           </div>
         </div>
 
@@ -565,60 +578,23 @@ export function App() {
       />
 
       <section className="workspace">
-        <header className="status-strip">
-          <div className="status-group">
-            <span className="status-pill warning">
-              <Bot size={15} />
-              {t("status.aiDisconnected")}
-            </span>
-          </div>
-          <div className="language-switch" aria-label={t("settings.language")}>
-            <Globe2 size={16} />
-            {languages.map((option) => (
-              <button
-                className={option === language ? "active" : ""}
-                key={option}
-                onClick={() => setLanguage(option)}
-                type="button"
-              >
-                {option.toUpperCase()}
-              </button>
-            ))}
-          </div>
-        </header>
-
         <div className="content-grid">
-          <ViewerWorkspace modpack={selectedModpack} scheme={selectedScheme} t={t} />
+          <ViewerWorkspace
+            modpack={selectedModpack}
+            onSelectionChange={handleViewerSelectionChange}
+            onStageChange={handleViewerStageChange}
+            onToolContextChange={handleViewerToolContextChange}
+            scheme={selectedScheme}
+            selectedStageId={viewerStageId}
+            t={t}
+          />
 
-          <aside className="right-rail" aria-label={t("workspace.review")}>
-            <section className="tool-panel">
-              <div className="section-heading">
-                <span>{t("workspace.review")}</span>
-                <strong>{t("review.pending")}: 0</strong>
-              </div>
-              <div className="selection-box">
-                <span>{t("review.selection")}</span>
-                <code>x: --, y: --, z: --</code>
-              </div>
-              <div className="empty-list">{t("review.changeRequests")}</div>
-            </section>
-
-            <section className="tool-panel">
-              <div className="section-heading">
-                <span>{t("workspace.materials")}</span>
-                <strong>{t("materials.total")}: 356</strong>
-              </div>
-              <ul className="materials-list">
-                {sampleMaterials.map((material) => (
-                  <li key={material.name}>
-                    <span>{material.name}</span>
-                    <strong>{material.count}</strong>
-                  </li>
-                ))}
-              </ul>
-            </section>
-
-          </aside>
+          <RightToolPanel
+            onStageChange={setViewerStageId}
+            selection={viewerSelection}
+            t={t}
+            toolContext={viewerToolContext}
+          />
         </div>
       </section>
       {flow.settingsModalOpen && (
@@ -1099,6 +1075,132 @@ function LoaderIcon({ kind }: { kind: LoaderIconKind }) {
   );
 }
 
+function RightToolPanel({
+  onStageChange,
+  selection,
+  t,
+  toolContext,
+}: {
+  onStageChange: (stageId: StageOptionId) => void;
+  selection: ViewerSelection;
+  t: Translator;
+  toolContext: ViewerToolContext | null;
+}) {
+  const [openSections, setOpenSections] = useState({
+    materials: false,
+    review: false,
+    stages: true,
+  });
+  const materialTotal = toolContext?.materials.reduce((total, line) => total + line.count, 0) ?? 0;
+
+  function toggleSection(section: keyof typeof openSections) {
+    setOpenSections((current) => ({ ...current, [section]: !current[section] }));
+  }
+
+  return (
+    <aside className="right-rail tools-sidebar" aria-label={t("tools.sidebar")}>
+      <div className="tool-summary" aria-label="Render metrics">
+        <span>
+          {toolContext
+            ? `${toolContext.metrics.visibleBlocks} / ${toolContext.metrics.totalBlocks}`
+            : "--"}
+        </span>
+        <span>{toolContext ? `${toolContext.metrics.chunkCount} chunks` : "-- chunks"}</span>
+        <span>{toolContext ? `${toolContext.metrics.faceCount} faces` : "-- faces"}</span>
+      </div>
+      <div className="tool-tree">
+        <section className={openSections.stages ? "tool-node expanded" : "tool-node"}>
+          <div className="tree-item tool-row">
+            <button className="tree-label tool-label" onClick={() => toggleSection("stages")} type="button">
+              <Layers3 size={16} />
+              {t("tools.stages")}
+            </button>
+            <strong>
+              {toolContext
+                ? `${toolContext.metrics.visibleBlocks} / ${toolContext.metrics.totalBlocks}`
+                : "--"}
+            </strong>
+            <ChevronDown className={openSections.stages ? "open" : ""} size={16} />
+          </div>
+          {openSections.stages && (
+            <div className="tool-children">
+              <div className="tool-panel-stage-list">
+                {toolContext ? (
+                  toolContext.stageOptions.map((stage) => (
+                    <button
+                      className={stage.id === toolContext.selectedStageId ? "active" : ""}
+                      key={stage.id}
+                      onClick={() => onStageChange(stage.id)}
+                      type="button"
+                    >
+                      <span>{stage.label}</span>
+                      <strong>{stage.order ?? t("tools.unassigned")}</strong>
+                    </button>
+                  ))
+                ) : (
+                  <div className="empty-list">{t("tools.openScheme")}</div>
+                )}
+              </div>
+            </div>
+          )}
+        </section>
+
+        <section className={openSections.review ? "tool-node expanded" : "tool-node"}>
+          <div className="tree-item tool-row">
+            <button className="tree-label tool-label" onClick={() => toggleSection("review")} type="button">
+              <ClipboardList size={16} />
+              {t("tools.review")}
+            </button>
+            <strong>{t("review.pending")}: 0</strong>
+            <ChevronDown className={openSections.review ? "open" : ""} size={16} />
+          </div>
+          {openSections.review && (
+            <div className="tool-children">
+              <div className="selection-box">
+                <span>{t("review.selection")}</span>
+                <code>
+                  {selection
+                    ? `x: ${selection.coordinate[0]}, y: ${selection.coordinate[1]}, z: ${selection.coordinate[2]}`
+                    : "x: --, y: --, z: --"}
+                </code>
+                {selection && <span>{selection.blockId}</span>}
+              </div>
+              <div className="empty-list">{t("review.changeRequests")}</div>
+            </div>
+          )}
+        </section>
+
+        <section className={openSections.materials ? "tool-node expanded" : "tool-node"}>
+          <div className="tree-item tool-row">
+            <button className="tree-label tool-label" onClick={() => toggleSection("materials")} type="button">
+              <Database size={16} />
+              {t("tools.materials")}
+            </button>
+            <strong>{t("materials.total")}: {materialTotal}</strong>
+            <ChevronDown className={openSections.materials ? "open" : ""} size={16} />
+          </div>
+          {openSections.materials && (
+            <div className="tool-children">
+              {toolContext ? (
+                <ul className="materials-list">
+                  {toolContext.materials.map((material) => (
+                    <li key={material.blockId}>
+                      <span>{material.blockId}</span>
+                      <strong>{material.count}</strong>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="empty-list">{t("tools.openScheme")}</div>
+              )}
+            </div>
+          )}
+        </section>
+      </div>
+    </aside>
+  );
+}
+
 function ImportJobDialog({
   logs,
   modpack,
@@ -1375,41 +1477,6 @@ function ModpackInfoRows({ modpack, t }: { modpack: LibraryModpack; t: Translato
         </div>
       ))}
     </dl>
-  );
-}
-
-function ViewerWorkspace({
-  modpack,
-  scheme,
-  t,
-}: {
-  modpack: LibraryModpack | null;
-  scheme: LibraryScheme | null;
-  t: Translator;
-}) {
-  const dimensions = scheme?.dimensions.join(" x ") ?? "64 x 64 x 64";
-
-  return (
-    <section className="viewer-region" aria-label={t("workspace.viewer")}>
-      <div className="section-heading">
-        <span>{t("workspace.viewer")}</span>
-        <strong>{dimensions}</strong>
-      </div>
-      <div className="viewer-canvas">
-        <div className="grid-floor" />
-        <div className="block-stack stack-a" />
-        <div className="block-stack stack-b" />
-        <div className="block-stack stack-c" />
-        <div className="viewer-empty">
-          <h2>{scheme?.name ?? t("viewer.emptyTitle")}</h2>
-          <p>
-            {scheme
-              ? `${modpack?.localName ?? t("workspace.library")} · ${t("viewer.autosavedBody")}`
-              : t("viewer.emptyBody")}
-          </p>
-        </div>
-      </div>
-    </section>
   );
 }
 

@@ -65,6 +65,7 @@ version = "0.1.0"
 dependencies = [
  "mpb-assets",
  "mpb-core",
+ "mpb-render",
  "mpb-storage",
  "serde",
  "serde_json",
@@ -1890,6 +1891,10 @@ version = "0.1.0"
 [[package]]
 name = "mpb-render"
 version = "0.1.0"
+dependencies = [
+ "mpb-core",
+ "serde",
+]
 
 [[package]]
 name = "mpb-storage"

@@ -362,6 +362,10 @@ impl Scheme {
             .collect()
     }
 
+    pub fn blocks(&self) -> impl Iterator<Item = (&Coordinate, &SchemeBlock)> {
+        self.blocks.iter()
+    }
+
     pub fn block_count(&self) -> usize {
         self.blocks.len()
     }
@@ -372,6 +376,19 @@ impl Scheme {
 
     pub fn stages(&self) -> &[ConstructionStage] {
         &self.stages
+    }
+
+    pub fn is_visible_at(&self, block_stage: StageRef, selected_stage: StageRef) -> bool {
+        self.is_visible_at_stage(block_stage, selected_stage)
+    }
+
+    pub fn is_future_stage(&self, block_stage: StageRef, selected_stage: StageRef) -> bool {
+        match (block_stage, selected_stage) {
+            (StageRef::Stage(block_id), StageRef::Stage(selected_id)) => {
+                self.stage_order(block_id) > self.stage_order(selected_id)
+            }
+            _ => false,
+        }
     }
 
     fn validate_operation(

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { LibraryModpack } from "./library";
 import { browserDomainDemoArtifact, type DomainDemoArtifact } from "./phase4Demo";
+import { browserRenderSceneFixture, type RenderScene } from "./renderViewer";
 
 export type AppDataPaths = {
   appDataDir: string;
@@ -276,6 +277,17 @@ export async function generateDomainDemoReport(): Promise<DomainDemoArtifact> {
   }
 
   return invoke<DomainDemoArtifact>("generate_domain_demo_report");
+}
+
+export async function getSchemeRenderScene(schemeId: number): Promise<RenderScene> {
+  if (!isTauriRuntime()) {
+    return {
+      ...structuredClone(browserRenderSceneFixture),
+      schemeId,
+    };
+  }
+
+  return invoke<RenderScene>("get_scheme_render_scene", { schemeId });
 }
 
 export async function searchCurseForgeModpacks(query: string): Promise<CurseForgeProject[]> {
