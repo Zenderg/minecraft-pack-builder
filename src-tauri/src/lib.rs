@@ -1,7 +1,10 @@
 use std::process::Command;
 
+use credentials::{curseforge_key_status, save_curseforge_key, CurseForgeCredentialStatus};
 use mpb_storage::{ensure_app_data_dirs, AppDataPaths};
 use tauri::Manager;
+
+mod credentials;
 
 #[tauri::command]
 fn discover_app_paths(app: tauri::AppHandle) -> Result<AppDataPaths, String> {
@@ -25,6 +28,16 @@ fn open_app_data_folder(app: tauri::AppHandle) -> Result<AppDataPaths, String> {
     Ok(paths)
 }
 
+#[tauri::command]
+fn get_curseforge_key_status() -> CurseForgeCredentialStatus {
+    curseforge_key_status()
+}
+
+#[tauri::command]
+fn save_curseforge_api_key(api_key: String) -> Result<CurseForgeCredentialStatus, String> {
+    save_curseforge_key(&api_key).map_err(|error| error.to_string())
+}
+
 pub fn open_folder_command_for_platform() -> &'static str {
     if cfg!(target_os = "macos") {
         "open"
@@ -39,7 +52,9 @@ pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             discover_app_paths,
-            open_app_data_folder
+            open_app_data_folder,
+            get_curseforge_key_status,
+            save_curseforge_api_key
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Minecraft Pack Builder desktop app");

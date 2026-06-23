@@ -19,4 +19,8 @@ describe("i18n", () => {
     expect(getInitialLanguage(["ru-RU", "en-US"])).toBe("ru");
     expect(getInitialLanguage(["en-US", "ru-RU"])).toBe("en");
   });
+
+  it("keeps the agent connection prompt in English for every UI language", () => {
+    expect(translate("ru", "onboarding.aiPrompt")).toBe(translate("en", "onboarding.aiPrompt"));
+  });
 });
