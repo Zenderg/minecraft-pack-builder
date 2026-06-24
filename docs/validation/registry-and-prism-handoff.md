@@ -164,6 +164,20 @@ The recommended product flow:
 
 Open design question: whether to launch through Prism's CLI or reproduce the instance launch in our own temporary directory. The safer production path is probably a temporary copy/snapshot controlled by our app, because registry extraction should be headless and should not alter or visibly launch the user's game instance.
 
+## Registry Performance Contract
+
+Prism registry diagnostics can become very large once block states, model variants, texture paths, and modded blocks are indexed. Do not put startup, freshness checks, or render-scene loading on a path that parses the full `*-registry.json`.
+
+Current constraints:
+
+- freshness checks should read the small `*-registry-meta.json` sidecar, or only the header of a legacy registry report;
+- render-scene loading should parse full block metadata only for block ids that are actually present in the scheme;
+- extracting a block id from a raw registry block should avoid full JSON deserialization, because unknown fields can include huge legacy `modelElements` arrays;
+- the main diagnostics registry should stay scan-friendly and should not store full geometry for every block as the primary index;
+- Tauri commands that may touch registry data should run blocking work off the WebView/main invoke path.
+
+This was validated after a macOS Tauri dev hang where the app UI was drawn but the cursor showed a spinner. `sample` showed hot paths in `serde_json` while reading or writing huge registry reports. After moving freshness to sidecar metadata, keeping registry output lightweight, and filtering render-scene registry reads by scheme block ids, the desktop process returned to idle CPU after startup.
+
 ## Viewer/Materials UI Decisions
 
 Materials should show:
