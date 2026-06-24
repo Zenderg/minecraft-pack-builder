@@ -1,6 +1,7 @@
 import { AlertTriangle, CheckCircle2, Filter, Loader2, PackagePlus, Search, X } from "lucide-react";
 import { useEffect, useMemo, useReducer, useState } from "react";
 
+import { formatBackendError } from "./backendErrors";
 import type { ImportStatus, LibraryModpack } from "./library";
 import type { MessageKey } from "./i18n";
 import {
@@ -269,7 +270,7 @@ export function ImportWizardWorkspace(props: {
         }
         setProjects([]);
         setProjectSearchStatus("failed");
-        setProjectSearchMessage(String(error));
+        setProjectSearchMessage(formatBackendError(error));
       });
 
     return () => {
@@ -290,7 +291,7 @@ export function ImportWizardWorkspace(props: {
       setFilters({ minecraftVersion: "", loader: "" });
       dispatch({ type: "releaseReady" });
     } catch (error) {
-      dispatch({ type: "downloadFailed", message: String(error) });
+      dispatch({ type: "downloadFailed", message: formatBackendError(error) });
     }
   }
 
@@ -307,7 +308,7 @@ export function ImportWizardWorkspace(props: {
       dispatch({ type: "downloadSucceeded", result });
       props.onImported(result.library, result.modpackId);
     } catch (error) {
-      dispatch({ type: "downloadFailed", message: String(error) });
+      dispatch({ type: "downloadFailed", message: formatBackendError(error) });
     }
   }
 

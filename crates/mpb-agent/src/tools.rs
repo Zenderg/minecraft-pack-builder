@@ -249,10 +249,20 @@ pub(crate) fn dispatch_tool(
             let scheme_id = required_i64(&arguments, "schemeId")?;
             let scheme = workspace_scheme(workspace, scheme_id)?;
             match scheme.scheme.validate(&workspace.registry) {
-                Ok(()) => Ok(ToolOutcome::read(json!({ "valid": true, "errors": [] }))),
+                Ok(()) => Ok(ToolOutcome::read(json!({
+                    "valid": true,
+                    "errors": [],
+                    "diagnostic": validation_diagnostic(scheme_id, "success", None, None)
+                }))),
                 Err(error) => Ok(ToolOutcome::read(json!({
                     "valid": false,
-                    "errors": [{ "code": error.code(), "message": error.to_string() }]
+                    "errors": [{ "code": error.code(), "message": error.to_string() }],
+                    "diagnostic": validation_diagnostic(
+                        scheme_id,
+                        "failed",
+                        Some(error.code()),
+                        Some(error.to_string())
+                    )
                 }))),
             }
         }
@@ -292,12 +302,20 @@ pub(crate) fn tool_success(value: Value) -> Value {
     })
 }
 
-pub(crate) fn tool_error(code: &'static str, message: String, data: Value) -> Value {
+pub(crate) fn tool_error(tool: &str, code: &'static str, message: String, data: Value) -> Value {
     let value = json!({
         "error": {
             "code": code,
             "message": message,
             "details": data
+        },
+        "diagnostic": {
+            "operation": "ai_tool_call",
+            "tool": tool,
+            "status": "failed",
+            "errorCode": code,
+            "errorMessage": message,
+            "recoveryMessage": tool_recovery_message(code)
         }
     });
     json!({
@@ -305,6 +323,43 @@ pub(crate) fn tool_error(code: &'static str, message: String, data: Value) -> Va
         "structuredContent": value,
         "isError": true
     })
+}
+
+fn validation_diagnostic(
+    scheme_id: i64,
+    status: &'static str,
+    error_code: Option<&'static str>,
+    error_message: Option<String>,
+) -> Value {
+    json!({
+        "operation": "validation",
+        "schemeId": scheme_id,
+        "status": status,
+        "errorCode": error_code,
+        "errorMessage": error_message,
+        "recoveryMessage": if error_code.is_some() {
+            Some("Review the validation error, correct the scheme through a valid tool call, then run validation again.")
+        } else {
+            None
+        }
+    })
+}
+
+fn tool_recovery_message(code: &str) -> &'static str {
+    match code {
+        "invalid_arguments" => "Adjust the request arguments to match the tool schema, then call the tool again.",
+        "coordinate_out_of_bounds" => {
+            "Adjust the request coordinates to stay inside the scheme dimensions, then call the tool again."
+        }
+        "unknown_block" | "invalid_block_state" => {
+            "Use a block id and states from the imported modpack registry, then call the tool again."
+        }
+        "not_found" => "Refresh the library context and retry with an existing modpack or scheme id.",
+        "curseforge_import_requires_desktop_backend" => {
+            "Start modpack import through the desktop backend so credentials and files stay controlled."
+        }
+        _ => "Adjust the request, keep the current scheme open, and call the tool again.",
+    }
 }
 
 fn scheme_summary(scheme: &AgentScheme) -> Value {

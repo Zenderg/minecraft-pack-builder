@@ -231,7 +231,7 @@ impl AgentServer {
             }
             Err(error) => Ok(json_rpc_result(
                 request.id.clone(),
-                tool_error(error.code, error.message, error.data),
+                tool_error(name, error.code, error.message, error.data),
             )),
         }
     }

@@ -2,6 +2,7 @@ import { Cuboid, Loader2, MousePointer2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { InstancedMesh, Material } from "three";
 
+import { formatBackendError } from "./backendErrors";
 import { translate } from "./i18n";
 import type { LibraryModpack, LibraryScheme } from "./library";
 import {
@@ -86,7 +87,7 @@ export function ViewerWorkspace({
       })
       .catch((error: unknown) => {
         if (active) {
-          setViewerState({ kind: "error", message: String(error) });
+          setViewerState({ kind: "error", message: formatBackendError(error) });
         }
       });
 

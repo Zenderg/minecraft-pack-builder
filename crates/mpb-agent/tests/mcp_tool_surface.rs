@@ -272,12 +272,49 @@ fn rejects_invalid_bulk_mutation_atomically_with_structured_error() {
         rejected["structuredContent"]["error"]["code"],
         "coordinate_out_of_bounds"
     );
+    assert_eq!(
+        rejected["structuredContent"]["diagnostic"]["operation"],
+        "ai_tool_call"
+    );
+    assert_eq!(
+        rejected["structuredContent"]["diagnostic"]["tool"],
+        "bulk_set_area"
+    );
+    assert_eq!(
+        rejected["structuredContent"]["diagnostic"]["status"],
+        "failed"
+    );
+    assert!(
+        rejected["structuredContent"]["diagnostic"]["recoveryMessage"]
+            .as_str()
+            .expect("recovery message")
+            .contains("Adjust the request")
+    );
 
     let after = call_tool(&server, 4, "read_scheme_content", json!({ "schemeId": 10 }));
     assert_eq!(
         after["structuredContent"]["blockCount"].as_u64(),
         Some(before_block_count)
     );
+}
+
+#[test]
+fn validate_scheme_returns_structured_validation_diagnostic() {
+    let server = AgentServer::new_demo();
+
+    let response = call_tool(&server, 1, "validate_scheme", json!({ "schemeId": 10 }));
+
+    assert_eq!(response["isError"], false);
+    assert_eq!(response["structuredContent"]["valid"], true);
+    assert_eq!(
+        response["structuredContent"]["diagnostic"]["operation"],
+        "validation"
+    );
+    assert_eq!(
+        response["structuredContent"]["diagnostic"]["status"],
+        "success"
+    );
+    assert_eq!(response["structuredContent"]["diagnostic"]["schemeId"], 10);
 }
 
 #[test]

@@ -108,6 +108,42 @@ pub struct DomainDemoReportArtifact {
     pub report: DomainDemoReport,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportDiagnosticReport {
+    pub operation: String,
+    pub status: String,
+    pub scheme_id: i64,
+    pub format: ExportFormat,
+    pub destination_path: PathBuf,
+    pub artifact_path: Option<PathBuf>,
+    pub byte_len: Option<u64>,
+    pub block_count: Option<usize>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub recovery_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportDiagnosticArtifact {
+    pub path: PathBuf,
+    pub report: ExportDiagnosticReport,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportWithDiagnostics {
+    pub artifact: ExportArtifact,
+    pub diagnostic: ExportDiagnosticArtifact,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExportDiagnosticError {
+    pub message: String,
+    pub diagnostic_path: PathBuf,
+}
+
 pub fn write_domain_demo_report(
     diagnostics_dir: impl AsRef<Path>,
 ) -> Result<DomainDemoReportArtifact, String> {
@@ -141,15 +177,123 @@ pub fn write_demo_scheme_export(
     write_scheme_export(&scheme, format, destination_path).map_err(|error| error.to_string())
 }
 
+pub fn write_demo_scheme_export_with_diagnostics(
+    scheme_id: i64,
+    format: ExportFormat,
+    destination_path: impl AsRef<Path>,
+    diagnostics_dir: impl AsRef<Path>,
+) -> Result<ExportWithDiagnostics, ExportDiagnosticError> {
+    let destination_path = destination_path.as_ref().to_path_buf();
+    let diagnostics_dir = diagnostics_dir.as_ref();
+    let scheme = demo_export_scheme(scheme_id);
+    let result = write_scheme_export(&scheme, format, &destination_path);
+    match result {
+        Ok(artifact) => {
+            let report = ExportDiagnosticReport {
+                operation: "export".to_string(),
+                status: "success".to_string(),
+                scheme_id,
+                format,
+                destination_path,
+                artifact_path: Some(artifact.path.clone()),
+                byte_len: Some(artifact.byte_len),
+                block_count: Some(artifact.block_count),
+                error_code: None,
+                error_message: None,
+                recovery_message: None,
+            };
+            let diagnostic =
+                write_export_diagnostic_report(diagnostics_dir, &report).map_err(|message| {
+                    ExportDiagnosticError {
+                        message,
+                        diagnostic_path: diagnostics_dir
+                            .join(export_diagnostic_file_name(scheme_id, format)),
+                    }
+                })?;
+            Ok(ExportWithDiagnostics {
+                artifact,
+                diagnostic,
+            })
+        }
+        Err(error) => {
+            let report = ExportDiagnosticReport {
+                operation: "export".to_string(),
+                status: "failed".to_string(),
+                scheme_id,
+                format,
+                destination_path,
+                artifact_path: None,
+                byte_len: None,
+                block_count: Some(scheme.block_count()),
+                error_code: Some(error.code().to_string()),
+                error_message: Some(error.to_string()),
+                recovery_message: Some(export_recovery_message(error.code()).to_string()),
+            };
+            let diagnostic_path = write_export_diagnostic_report(diagnostics_dir, &report)
+                .map_or_else(
+                    |_| diagnostics_dir.join(export_diagnostic_file_name(scheme_id, format)),
+                    |diagnostic| diagnostic.path,
+                );
+            Err(ExportDiagnosticError {
+                message: format!(
+                    "Could not export scheme. {} Diagnostic report: {}",
+                    export_recovery_message(error.code()),
+                    diagnostic_path.display()
+                ),
+                diagnostic_path,
+            })
+        }
+    }
+}
+
+fn write_export_diagnostic_report(
+    diagnostics_dir: &Path,
+    report: &ExportDiagnosticReport,
+) -> Result<ExportDiagnosticArtifact, String> {
+    std::fs::create_dir_all(diagnostics_dir).map_err(|error| error.to_string())?;
+    let path = diagnostics_dir.join(export_diagnostic_file_name(report.scheme_id, report.format));
+    let json = serde_json::to_string_pretty(report).map_err(|error| error.to_string())?;
+    std::fs::write(&path, json).map_err(|error| error.to_string())?;
+    Ok(ExportDiagnosticArtifact {
+        path,
+        report: report.clone(),
+    })
+}
+
+fn export_diagnostic_file_name(scheme_id: i64, format: ExportFormat) -> String {
+    format!("export-scheme-{scheme_id}-{}.json", format.extension())
+}
+
+fn export_recovery_message(error_code: &str) -> &'static str {
+    match error_code {
+        "export_write_failed" => {
+            "Choose another destination or check that the folder is writable, then try export again."
+        }
+        "export_dimensions_too_large" | "export_volume_too_large" => {
+            "Resize the scheme into the supported export limits before trying again."
+        }
+        _ => "Keep the scheme open, check the diagnostic report, and try export again.",
+    }
+}
+
 #[tauri::command]
 fn export_scheme(
+    app: tauri::AppHandle,
     scheme_id: i64,
     format: String,
     destination_path: PathBuf,
 ) -> Result<ExportArtifact, String> {
     let format = ExportFormat::from_extension(&format)
         .ok_or_else(|| "Export format must be schem or litematic".to_string())?;
-    write_demo_scheme_export(scheme_id, format, destination_path)
+    let paths = discover_app_paths(app)?;
+    write_demo_scheme_export_with_diagnostics(
+        scheme_id,
+        format,
+        destination_path,
+        paths.diagnostics_dir,
+    )
+    .map(|result| result.artifact)
+    .map_err(|error| error.message)
 }
 
 #[tauri::command]

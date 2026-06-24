@@ -28,6 +28,10 @@ pub enum StorageError {
     },
     #[error("record not found: {entity} {id}")]
     NotFound { entity: &'static str, id: i64 },
+    #[error(
+        "local data was created by a newer app version (schema {found}, supported {supported}); keep the data folder unchanged, check diagnostics, and open it with a compatible Minecraft Pack Builder build"
+    )]
+    UnsupportedMigrationVersion { found: i64, supported: i64 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -61,6 +65,8 @@ pub struct LibraryDatabase {
     connection: Connection,
 }
 
+const SUPPORTED_SCHEMA_VERSION: i64 = 3;
+
 impl LibraryDatabase {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StorageError> {
         let connection = Connection::open(path)?;
@@ -88,11 +94,34 @@ impl LibraryDatabase {
     }
 
     fn migrate(&self) -> Result<(), StorageError> {
+        self.connection.execute_batch(
+            "CREATE TABLE IF NOT EXISTS schema_migrations (
+              version INTEGER PRIMARY KEY,
+              applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );",
+        )?;
+        self.validate_migration_version()?;
         self.connection.execute_batch(PHASE_3_SCHEMA)?;
         self.connection.execute(
             "INSERT OR IGNORE INTO schema_migrations (version) VALUES (3)",
             [],
         )?;
+        Ok(())
+    }
+
+    fn validate_migration_version(&self) -> Result<(), StorageError> {
+        let current_version = self
+            .connection
+            .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
+                row.get::<_, Option<i64>>(0)
+            })?
+            .unwrap_or(0);
+        if current_version > SUPPORTED_SCHEMA_VERSION {
+            return Err(StorageError::UnsupportedMigrationVersion {
+                found: current_version,
+                supported: SUPPORTED_SCHEMA_VERSION,
+            });
+        }
         Ok(())
     }
 }
@@ -365,20 +394,30 @@ impl LibraryRepository {
     pub fn create_scheme(&self, new_scheme: NewScheme) -> Result<SchemeRecord, StorageError> {
         validate_dimensions(new_scheme.size_x, new_scheme.size_y, new_scheme.size_z)?;
         self.require_modpack(new_scheme.modpack_id)?;
-        self.database.connection.execute(
+        let transaction = self.database.connection.unchecked_transaction()?;
+        transaction.execute(
             "INSERT INTO schemes (imported_modpack_id, name) VALUES (?1, ?2)",
-            params![new_scheme.modpack_id, new_scheme.name],
+            params![new_scheme.modpack_id, new_scheme.name.as_str()],
         )?;
-        let id = self.database.connection.last_insert_rowid();
-        self.database.connection.execute(
+        let id = transaction.last_insert_rowid();
+        transaction.execute(
             "INSERT INTO scheme_dimensions (scheme_id, size_x, size_y, size_z) VALUES (?1, ?2, ?3, ?4)",
             params![id, new_scheme.size_x, new_scheme.size_y, new_scheme.size_z],
         )?;
-        self.database.connection.execute(
+        transaction.execute(
             "INSERT INTO construction_stages (scheme_id, name, position) VALUES (?1, ?2, 0)",
             params![id, "Unassigned"],
         )?;
-        self.get_scheme(id)
+        let scheme = transaction.query_row(
+            "SELECT s.id, s.imported_modpack_id, s.name, d.size_x, d.size_y, d.size_z
+             FROM schemes s
+             JOIN scheme_dimensions d ON d.scheme_id = s.id
+             WHERE s.id = ?1",
+            params![id],
+            row_to_scheme,
+        )?;
+        transaction.commit()?;
+        Ok(scheme)
     }
 
     pub fn rename_scheme(&self, id: i64, name: &str) -> Result<SchemeRecord, StorageError> {

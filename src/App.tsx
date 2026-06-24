@@ -7,6 +7,7 @@ import {
 import { useCallback, useEffect, useReducer, useState } from "react";
 
 import { getInitialLanguage, type Language, translate } from "./i18n";
+import { formatBackendError } from "./backendErrors";
 import { ImportWizardWorkspace } from "./importWizard";
 import {
   clampSidebarWidth,
@@ -125,7 +126,7 @@ export function App() {
   useEffect(() => {
     discoverAppPaths()
       .then(setPaths)
-      .catch((error: unknown) => setDiagnosticsMessage(String(error)));
+      .catch((error: unknown) => setDiagnosticsMessage(formatBackendError(error)));
   }, []);
 
   useEffect(() => {
@@ -138,7 +139,7 @@ export function App() {
         setKeyStatus({
           state: "unavailable",
           backend: "OS secure credential storage",
-          message: String(error),
+          message: formatBackendError(error),
           apiKey: null,
         });
         dispatch({ type: "keyUnavailable" });
@@ -191,7 +192,7 @@ export function App() {
       .then((nextUnlisten) => {
         unlisten = nextUnlisten;
       })
-      .catch((error: unknown) => setLibraryMessage(String(error)));
+      .catch((error: unknown) => setLibraryMessage(formatBackendError(error)));
 
     return () => {
       unlisten?.();
@@ -248,7 +249,7 @@ export function App() {
       .then((nextUnlisten) => {
         unlisten = nextUnlisten;
       })
-      .catch((error: unknown) => setLibraryMessage(String(error)));
+      .catch((error: unknown) => setLibraryMessage(formatBackendError(error)));
 
     return () => {
       unlisten?.();
@@ -263,7 +264,7 @@ export function App() {
       .then((nextUnlisten) => {
         unlisten = nextUnlisten;
       })
-      .catch((error: unknown) => setLibraryMessage(String(error)));
+      .catch((error: unknown) => setLibraryMessage(formatBackendError(error)));
 
     return () => {
       unlisten?.();
@@ -315,7 +316,7 @@ export function App() {
       applyLibrary(nextLibrary, librarySelection);
       setLibraryMessage("");
     } catch (error) {
-      setLibraryMessage(String(error));
+      setLibraryMessage(formatBackendError(error));
     }
   }
 
@@ -325,7 +326,7 @@ export function App() {
       applyLibrary(nextLibrary, null);
       setLibraryMessage(t("library.fixtureLoaded"));
     } catch (error) {
-      setLibraryMessage(String(error));
+      setLibraryMessage(formatBackendError(error));
     }
   }
 
@@ -435,7 +436,7 @@ export function App() {
       setLibraryDialog(null);
       setLibraryMessage(t("library.autosaved"));
     } catch (error) {
-      setLibraryMessage(String(error));
+      setLibraryMessage(formatBackendError(error));
     }
   }
 
@@ -486,7 +487,7 @@ export function App() {
       }
     } catch (error) {
       setKeyCheckResult("invalid");
-      setKeyCheckMessage(String(error));
+      setKeyCheckMessage(formatBackendError(error));
     } finally {
       setIsSavingKey(false);
     }
@@ -512,7 +513,7 @@ export function App() {
         setDiagnosticsMessage(t("settings.desktopOnly"));
       }
     } catch (error) {
-      setDiagnosticsMessage(String(error));
+      setDiagnosticsMessage(formatBackendError(error));
     }
   }
 
@@ -547,7 +548,7 @@ export function App() {
       }
       setExportDialog((dialog) => (dialog ? { ...dialog, destinationPath } : dialog));
     } catch (error) {
-      setLibraryMessage(`${t("export.failed")}: ${String(error)}`);
+      setLibraryMessage(`${t("export.failed")}: ${formatBackendError(error)}`);
     }
   }
 
@@ -563,7 +564,7 @@ export function App() {
       setLibraryMessage(t("export.success").replace("{path}", artifact.path));
       setExportDialog(null);
     } catch (error) {
-      setLibraryMessage(`${t("export.failed")}: ${String(error)}`);
+      setLibraryMessage(`${t("export.failed")}: ${formatBackendError(error)}`);
       setExportDialog((dialog) => (dialog ? { ...dialog, isExporting: false } : dialog));
     }
   }
@@ -744,7 +745,7 @@ export function App() {
               await cancelCurseForgeImport();
               appendImportLog(importJobModpack.id, t("import.cancelRequested"));
             } catch (error) {
-              appendImportLog(importJobModpack.id, String(error));
+              appendImportLog(importJobModpack.id, formatBackendError(error));
             }
           }}
           onClose={() => setImportJobModpackId(null)}
@@ -763,7 +764,7 @@ export function App() {
               }));
               appendImportLog(importJobModpack.id, t("import.retryQueued"));
             } catch (error) {
-              appendImportLog(importJobModpack.id, String(error));
+              appendImportLog(importJobModpack.id, formatBackendError(error));
             }
           }}
           progress={importProgressByModpack[importJobModpack.id] ?? null}

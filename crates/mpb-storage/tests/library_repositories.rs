@@ -160,3 +160,57 @@ fn deleting_a_modpack_cascades_schemes_and_returns_cache_path() {
     assert_eq!(deleted.cache_dir, Some(PathBuf::from("cache/aoc")));
     assert!(repository.list_library().expect("list library").is_empty());
 }
+
+#[test]
+fn failed_scheme_creation_rolls_back_every_written_row() {
+    let temp = tempdir().expect("temp dir");
+    let db_path = temp.path().join("library.sqlite3");
+    let database = LibraryDatabase::open(&db_path).expect("open database");
+    let repository = LibraryRepository::new(database);
+    let modpack = repository
+        .create_imported_modpack(imported_modpack("AOC"))
+        .expect("create modpack");
+
+    let raw = rusqlite::Connection::open(&db_path).expect("open raw database");
+    raw.execute_batch("DROP TABLE construction_stages")
+        .expect("break stage persistence after migration");
+
+    let result = repository.create_scheme(NewScheme {
+        modpack_id: modpack.id,
+        name: "Half Written Scheme".to_string(),
+        size_x: 64,
+        size_y: 64,
+        size_z: 64,
+    });
+
+    assert!(result.is_err(), "stage insert should fail");
+    let library = repository.list_library().expect("list library");
+    assert!(
+        library[0].schemes.is_empty(),
+        "failed scheme writes must not leave partial sidebar records"
+    );
+}
+
+#[test]
+fn opening_database_with_future_migration_version_returns_recovery_error() {
+    let temp = tempdir().expect("temp dir");
+    let db_path = temp.path().join("library.sqlite3");
+    let raw = rusqlite::Connection::open(&db_path).expect("open raw database");
+    raw.execute_batch(
+        "CREATE TABLE schema_migrations (
+            version INTEGER PRIMARY KEY,
+            applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO schema_migrations (version) VALUES (999);",
+    )
+    .expect("seed future migration");
+    drop(raw);
+
+    let error = match LibraryDatabase::open(&db_path) {
+        Ok(_) => panic!("future migration should fail"),
+        Err(error) => error,
+    };
+
+    assert!(error.to_string().contains("newer app version"));
+    assert!(error.to_string().contains("diagnostics"));
+}
