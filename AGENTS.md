@@ -3,6 +3,8 @@
 - Work only in the main branch by default.
 - Do not create or switch to another branch or worktree unless the user explicitly asks for it.
 - If a general workflow guide recommends branch or worktree creation, this repository instruction takes precedence.
+- Do not propose MVP, v1, "start simple", or temporary starter solutions by default. Prefer complete, robust, prod-like solutions immediately.
+- Before committing, record any new durable information that surfaced in the current dialogue in an appropriate project file, if such new information exists.
 - When you need to edit a file that is objectively large and can reasonably be decomposed, decompose the whole file into well-scoped modules, components, hooks, helpers, stylesheets, or other appropriate blocks along meaningful ownership boundaries.
 - Do not split files when they are generated, vendored, lockfiles, schema snapshots, or single cohesive artifacts whose decomposition would make the code harder to understand.
 - Rust is installed through `rustup` in the user's home directory. If `cargo` or `rustc` are not visible in a non-login shell, run commands through a login `zsh` shell so `$HOME/.cargo/env` from `.zprofile`/`.zshrc` is loaded.
