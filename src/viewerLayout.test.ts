@@ -3,7 +3,17 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("desktop viewer layout CSS", () => {
-  const css = readFileSync(join(process.cwd(), "src", "styles.css"), "utf8");
+  const css = [
+    "styles.css",
+    "styles/appShell.css",
+    "styles/library.css",
+    "styles/viewer.css",
+    "styles/onboarding.css",
+    "styles/importJob.css",
+    "styles/settings.css",
+  ]
+    .map((file) => readFileSync(join(process.cwd(), "src", file), "utf8"))
+    .join("\n");
 
   it("does not force the desktop webview into page-scale shrinking", () => {
     const bodyBlock = css.match(/body\s*\{[^}]*\}/)?.[0] ?? "";

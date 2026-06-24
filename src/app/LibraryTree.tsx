@@ -1,0 +1,260 @@
+import { AlertTriangle, Database, Info, Layers3, Loader2, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import type React from "react";
+
+import {
+  compactLibraryNodeGap,
+  getLoaderIconKind,
+  getModpackMenuPlacement,
+  getNextOpenModpackMenuId,
+  type LoaderIconKind,
+  type LibraryModpack,
+  type LibraryScheme,
+  type LibrarySelection,
+} from "../library";
+import type { Translator } from "./types";
+
+export function LibraryTree(props: {
+  canSeedFixture: boolean;
+  expandedModpackIds: Set<number>;
+  library: LibraryModpack[];
+  onCreateScheme: (modpackId: number) => void;
+  onDeleteModpack: (modpack: LibraryModpack) => void;
+  onDeleteScheme: (scheme: LibraryScheme) => void;
+  onRenameModpack: (modpack: LibraryModpack) => void;
+  onRenameScheme: (scheme: LibraryScheme) => void;
+  onSelect: (selection: LibrarySelection) => void;
+  onSeed: () => void;
+  onShowImportJob: (modpack: LibraryModpack) => void;
+  onShowModpackInfo: (modpack: LibraryModpack) => void;
+  onToggleModpack: (modpackId: number) => void;
+  selected: LibrarySelection | null;
+  t: Translator;
+}) {
+  const { t } = props;
+  const [openModpackMenu, setOpenModpackMenu] = useState<{
+    id: number;
+    left: number;
+    top: number;
+  } | null>(null);
+  useEffect(() => {
+    if (openModpackMenu === null) {
+      return;
+    }
+
+    const closeMenu = () => {
+      setOpenModpackMenu(null);
+    };
+
+    window.addEventListener("pointerdown", closeMenu);
+    return () => window.removeEventListener("pointerdown", closeMenu);
+  }, [openModpackMenu]);
+
+  if (props.library.length === 0) {
+    return (
+      <div className="library-empty-state">
+        <p>{t("library.empty")}</p>
+        {props.canSeedFixture && (
+          <button className="secondary-action compact" onClick={props.onSeed} type="button">
+            <Database size={15} />
+            {t("library.loadFixture")}
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="library-tree"
+      style={{ "--library-node-gap": `${compactLibraryNodeGap}px` } as React.CSSProperties}
+    >
+      {props.library.map((modpack) => (
+        <div
+          className={props.expandedModpackIds.has(modpack.id) ? "library-node expanded" : "library-node"}
+          key={modpack.id}
+        >
+          <div className="tree-item modpack-row">
+            <button
+              className="tree-label modpack-label"
+              onClick={() => {
+                if (modpack.importStatus === "imported") {
+                  props.onToggleModpack(modpack.id);
+                } else {
+                  props.onShowImportJob(modpack);
+                }
+              }}
+              type="button"
+            >
+              <LoaderIcon kind={getLoaderIconKind(modpack.loader)} />
+              <span title={modpack.localName}>{modpack.localName}</span>
+            </button>
+            {modpack.importStatus === "imported" ? (
+              <div className="tree-actions">
+                <button
+                  aria-label={t("library.createScheme")}
+                  className="icon-action small"
+                  onClick={() => props.onCreateScheme(modpack.id)}
+                  type="button"
+                >
+                  <Plus size={14} />
+                </button>
+                <button
+                  aria-label={t("library.modpackActions")}
+                  className="icon-action small"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    const placement = getModpackMenuPlacement(event.currentTarget.getBoundingClientRect(), {
+                      width: window.innerWidth,
+                      height: window.innerHeight,
+                    });
+                    setOpenModpackMenu((current) => {
+                      const nextId = getNextOpenModpackMenuId(current?.id ?? null, modpack.id, "menuButton");
+                      return nextId === null ? null : { id: nextId, ...placement };
+                    });
+                  }}
+                  type="button"
+                >
+                  <MoreHorizontal size={15} />
+                </button>
+              </div>
+            ) : (
+              <ImportStatusIndicator status={modpack.importStatus} t={t} />
+            )}
+            {openModpackMenu?.id === modpack.id && (
+              <div
+                className="modpack-menu"
+                onPointerDown={(event) => event.stopPropagation()}
+                role="menu"
+                style={
+                  {
+                    "--modpack-menu-left": `${openModpackMenu.left}px`,
+                    "--modpack-menu-top": `${openModpackMenu.top}px`,
+                  } as React.CSSProperties
+                }
+              >
+                <button
+                  onClick={() => {
+                    setOpenModpackMenu(null);
+                    props.onShowModpackInfo(modpack);
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <Info size={14} />
+                  {t("library.information")}
+                </button>
+                <button
+                  onClick={() => {
+                    setOpenModpackMenu(null);
+                    props.onRenameModpack(modpack);
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <Pencil size={14} />
+                  {t("library.renameModpack")}
+                </button>
+                <button
+                  className="danger"
+                  onClick={() => {
+                    setOpenModpackMenu(null);
+                    props.onDeleteModpack(modpack);
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <Trash2 size={14} />
+                  {t("library.deleteModpack")}
+                </button>
+              </div>
+            )}
+          </div>
+          {modpack.importStatus === "imported" &&
+            props.expandedModpackIds.has(modpack.id) &&
+            (modpack.schemes.length === 0 ? (
+              <div className="tree-item nested empty-scheme-row">{t("library.noSchemes")}</div>
+            ) : (
+              modpack.schemes.map((scheme) => (
+              <div
+                className={
+                  props.selected?.schemeId === scheme.id
+                    ? "tree-item nested selected scheme-row"
+                    : "tree-item nested scheme-row"
+                }
+                key={scheme.id}
+              >
+                <button
+                  className="tree-label scheme-label"
+                  onClick={() => props.onSelect({ modpackId: modpack.id, schemeId: scheme.id })}
+                  type="button"
+                >
+                  <Layers3 size={15} />
+                  <span title={scheme.name}>{scheme.name}</span>
+                </button>
+                <div className="tree-actions">
+                  <button
+                    aria-label={t("library.renameScheme")}
+                    className="icon-action small"
+                    onClick={() => props.onRenameScheme(scheme)}
+                    type="button"
+                  >
+                    <Pencil size={14} />
+                  </button>
+                  <button
+                    aria-label={t("library.deleteScheme")}
+                    className="icon-action small danger"
+                    onClick={() => props.onDeleteScheme(scheme)}
+                    type="button"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+              ))
+            ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ImportStatusIndicator({
+  status,
+  t,
+}: {
+  status: LibraryModpack["importStatus"];
+  t: Translator;
+}) {
+  if (status === "importing") {
+    return (
+      <span className="import-status-indicator importing" title={t("import.state.importing")}>
+        <Loader2 className="status-spinner" size={15} />
+      </span>
+    );
+  }
+  if (status === "failed") {
+    return (
+      <span className="import-status-indicator failed" title={t("import.state.failed")}>
+        <AlertTriangle size={15} />
+      </span>
+    );
+  }
+  return null;
+}
+
+function LoaderIcon({ kind }: { kind: LoaderIconKind }) {
+  const label = {
+    forge: "F",
+    neoforge: "NF",
+    fabric: "Fb",
+    quilt: "Q",
+    generic: "MC",
+  }[kind];
+
+  return (
+    <span aria-hidden="true" className={`loader-icon ${kind}`}>
+      {label}
+    </span>
+  );
+}
