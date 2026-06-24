@@ -31,6 +31,7 @@ import {
 import {
   cancelCurseForgeImport,
   checkCurseForgeApiKey,
+  checkForUpdates,
   createScheme,
   deleteImportedModpack,
   deleteScheme,
@@ -52,6 +53,7 @@ import {
   type AgentStatus,
   type CurseForgeCredentialStatus,
   type ImportProgress,
+  type UpdateCheckResult,
 } from "./tauri";
 import { chooseExportDestination, type ExportFormat } from "./exportDialog";
 import { type StageOptionId } from "./renderViewer";
@@ -74,6 +76,7 @@ import "./styles/importJob.css";
 import "./styles/settings.css";
 
 const onboardingStorageKey = "mpb.onboardingComplete";
+const automaticUpdateChecksStorageKey = "mpb.autoUpdateChecks";
 
 export function App() {
   const [language, setLanguage] = useState<Language>(() => getInitialLanguage());
@@ -88,6 +91,11 @@ export function App() {
   const [paths, setPaths] = useState<AppDataPaths | null>(null);
   const [keyStatus, setKeyStatus] = useState<CurseForgeCredentialStatus | null>(null);
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
+  const [automaticUpdateChecks, setAutomaticUpdateChecks] = useState(
+    () => localStorage.getItem(automaticUpdateChecksStorageKey) !== "false",
+  );
+  const [updateCheck, setUpdateCheck] = useState<UpdateCheckResult | null>(null);
+  const [updateCheckBusy, setUpdateCheckBusy] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [keyCheckResult, setKeyCheckResult] = useState<CurseForgeKeyCheckResult>("idle");
   const [keyCheckMessage, setKeyCheckMessage] = useState("");
@@ -148,6 +156,13 @@ export function App() {
 
   useEffect(() => {
     refreshLibrary();
+  }, []);
+
+  useEffect(() => {
+    if (!automaticUpdateChecks) {
+      return;
+    }
+    void handleCheckUpdates({ silent: true });
   }, []);
 
   useEffect(() => {
@@ -517,6 +532,33 @@ export function App() {
     }
   }
 
+  async function handleCheckUpdates(options: { silent?: boolean } = {}) {
+    setUpdateCheckBusy(true);
+    try {
+      const result = await checkForUpdates();
+      setUpdateCheck(result);
+      if (!options.silent && result.status === "available") {
+        setLibraryMessage(t("settings.updateAvailable").replace("{version}", result.latestVersion ?? ""));
+      }
+    } catch (error) {
+      setUpdateCheck({
+        status: "failed",
+        currentVersion: "0.1.0",
+        latestVersion: null,
+        notes: null,
+        date: null,
+        errorMessage: formatBackendError(error),
+      });
+    } finally {
+      setUpdateCheckBusy(false);
+    }
+  }
+
+  function handleToggleAutomaticUpdateChecks(enabled: boolean) {
+    setAutomaticUpdateChecks(enabled);
+    localStorage.setItem(automaticUpdateChecksStorageKey, enabled ? "true" : "false");
+  }
+
   function handleOpenExportDialog(scheme: LibraryScheme) {
     setExportDialog({
       scheme,
@@ -690,16 +732,21 @@ export function App() {
           keyStatus={keyStatus}
           language={language}
           agentStatus={agentStatus}
+          automaticUpdateChecks={automaticUpdateChecks}
           onCheckKey={handleCheckKey}
+          onCheckUpdates={() => void handleCheckUpdates()}
           onClose={() => dispatch({ type: "closeSettings" })}
           onLanguageChange={setLanguage}
           onOpenDataFolder={handleOpenDataFolder}
           onRestartOnboarding={restartOnboarding}
           onSectionChange={(section) => dispatch({ type: "openSettings", section })}
+          onToggleAutomaticUpdateChecks={handleToggleAutomaticUpdateChecks}
           onUpdateKey={handleUpdateKeyInput}
           paths={paths}
           section={flow.settingsSection}
           t={t}
+          updateCheck={updateCheck}
+          updateCheckBusy={updateCheckBusy}
         />
       )}
       {flow.importModalOpen && (

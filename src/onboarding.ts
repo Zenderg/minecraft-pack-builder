@@ -1,6 +1,6 @@
 export type AppScreen = "onboarding" | "workspace" | "settings";
 export type OnboardingStep = "language" | "ai" | "curseforge";
-export type SettingsSection = "ai" | "curseforge" | "language" | "data";
+export type SettingsSection = "ai" | "curseforge" | "language" | "data" | "updates";
 export type CurseForgeKeyState = "missing" | "saved" | "unavailable";
 export type KeyNotice = "idle" | "missing" | "saved" | "replaced" | "unavailable";
 

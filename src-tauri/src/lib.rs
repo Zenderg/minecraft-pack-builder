@@ -20,6 +20,7 @@ use mpb_storage::{
 use mpb_storage::{ImportStatus, NewImportedModpack};
 use serde::Serialize;
 use tauri::{Emitter, Manager};
+use tauri_plugin_updater::UpdaterExt;
 
 mod credentials;
 mod render_demo;
@@ -136,6 +137,17 @@ pub struct ExportDiagnosticArtifact {
 pub struct ExportWithDiagnostics {
     pub artifact: ExportArtifact,
     pub diagnostic: ExportDiagnosticArtifact,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCheckResult {
+    pub status: String,
+    pub current_version: String,
+    pub latest_version: Option<String>,
+    pub notes: Option<String>,
+    pub date: Option<String>,
+    pub error_message: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -299,6 +311,47 @@ fn export_scheme(
 #[tauri::command]
 fn get_ai_integration_status(controller: tauri::State<AgentController>) -> AgentStatus {
     controller.server.status()
+}
+
+#[tauri::command]
+async fn check_for_updates(app: tauri::AppHandle) -> UpdateCheckResult {
+    let current_version = app.package_info().version.to_string();
+    match app.updater() {
+        Ok(updater) => match updater.check().await {
+            Ok(Some(update)) => UpdateCheckResult {
+                status: "available".to_string(),
+                current_version,
+                latest_version: Some(update.version),
+                notes: update.body,
+                date: update.date.map(|date| date.to_string()),
+                error_message: None,
+            },
+            Ok(None) => UpdateCheckResult {
+                status: "current".to_string(),
+                current_version,
+                latest_version: None,
+                notes: None,
+                date: None,
+                error_message: None,
+            },
+            Err(error) => UpdateCheckResult {
+                status: "failed".to_string(),
+                current_version,
+                latest_version: None,
+                notes: None,
+                date: None,
+                error_message: Some(format!("Could not check for updates: {error}")),
+            },
+        },
+        Err(error) => UpdateCheckResult {
+            status: "failed".to_string(),
+            current_version,
+            latest_version: None,
+            notes: None,
+            date: None,
+            error_message: Some(format!("Updater is not available: {error}")),
+        },
+    }
 }
 
 #[tauri::command]
@@ -990,6 +1043,7 @@ pub fn run() {
         generate_domain_demo_report,
         get_scheme_render_scene,
         export_scheme,
+        check_for_updates,
         get_ai_integration_status,
         list_library,
         seed_local_library_fixture,
@@ -1016,6 +1070,7 @@ pub fn run() {
         generate_domain_demo_report,
         get_scheme_render_scene,
         export_scheme,
+        check_for_updates,
         get_ai_integration_status,
         list_library,
         create_scheme,
@@ -1027,6 +1082,7 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let server = AgentServer::new_demo();
             let app_handle = app.handle().clone();

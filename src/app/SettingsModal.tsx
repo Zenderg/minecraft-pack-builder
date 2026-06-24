@@ -1,4 +1,4 @@
-import { EyeOff, FolderOpen, KeyRound, Languages, PlugZap, RefreshCcw, X } from "lucide-react";
+import { BellRing, EyeOff, FolderOpen, KeyRound, Languages, PlugZap, RefreshCcw, X } from "lucide-react";
 
 import { languages, type Language } from "../i18n";
 import type {
@@ -6,7 +6,7 @@ import type {
   CurseForgeKeyState,
   SettingsSection,
 } from "../onboarding";
-import type { AgentStatus, AppDataPaths, CurseForgeCredentialStatus } from "../tauri";
+import type { AgentStatus, AppDataPaths, CurseForgeCredentialStatus, UpdateCheckResult } from "../tauri";
 import { getAgentDisplay, KeyForm, PromptBlock, SettingsPane, StatusRows } from "./settingsControls";
 import type { Translator } from "./types";
 
@@ -22,15 +22,20 @@ export function SettingsModal(props: {
   keyStatus: CurseForgeCredentialStatus | null;
   language: Language;
   onCheckKey: () => void;
+  onCheckUpdates: () => void;
   onClose: () => void;
   onLanguageChange: (language: Language) => void;
   onOpenDataFolder: () => void;
   onRestartOnboarding: () => void;
   onSectionChange: (section: SettingsSection) => void;
+  onToggleAutomaticUpdateChecks: (enabled: boolean) => void;
   onUpdateKey: (value: string) => void;
   paths: AppDataPaths | null;
   section: SettingsSection;
   t: Translator;
+  automaticUpdateChecks: boolean;
+  updateCheck: UpdateCheckResult | null;
+  updateCheckBusy: boolean;
 }) {
   const { t } = props;
   const agentDisplay = getAgentDisplay(props.agentStatus, t);
@@ -39,6 +44,7 @@ export function SettingsModal(props: {
     ["curseforge", t("settings.curseforgeKey")],
     ["language", t("settings.language")],
     ["data", t("settings.dataFolders")],
+    ["updates", t("settings.updates")],
   ];
 
   return (
@@ -149,9 +155,63 @@ export function SettingsModal(props: {
               />
             </SettingsPane>
           )}
+
+          {props.section === "updates" && (
+            <SettingsPane icon={<BellRing size={23} />} title={t("settings.updates")}>
+              <p>{t("settings.updateInstructions")}</p>
+              <label className="settings-toggle-row">
+                <input
+                  checked={props.automaticUpdateChecks}
+                  onChange={(event) => props.onToggleAutomaticUpdateChecks(event.currentTarget.checked)}
+                  type="checkbox"
+                />
+                <span>
+                  <strong>{t("settings.automaticUpdates")}</strong>
+                  <small>{t("settings.automaticUpdatesHelp")}</small>
+                </span>
+              </label>
+              <button
+                aria-busy={props.updateCheckBusy}
+                className={props.updateCheckBusy ? "secondary-action compact loading" : "secondary-action compact"}
+                disabled={props.updateCheckBusy}
+                onClick={props.onCheckUpdates}
+                type="button"
+              >
+                <RefreshCcw className={props.updateCheckBusy ? "button-spinner" : undefined} size={16} />
+                {props.updateCheckBusy ? t("settings.checkingUpdates") : t("settings.checkUpdates")}
+              </button>
+              <StatusRows
+                rows={[
+                  [t("settings.currentVersion"), props.updateCheck?.currentVersion ?? "0.1.0"],
+                  [t("settings.latestVersion"), props.updateCheck?.latestVersion ?? t("settings.upToDate")],
+                  [t("settings.updateStatus"), updateStatusText(props.updateCheck, t)],
+                  [t("settings.releaseDate"), props.updateCheck?.date ?? "--"],
+                ]}
+              />
+              {props.updateCheck?.notes && (
+                <p className="key-check-message valid">{props.updateCheck.notes}</p>
+              )}
+              {props.updateCheck?.errorMessage && (
+                <p className="key-check-message invalid">{props.updateCheck.errorMessage}</p>
+              )}
+            </SettingsPane>
+          )}
         </div>
       </div>
       </section>
     </div>
   );
+}
+
+function updateStatusText(updateCheck: UpdateCheckResult | null, t: Translator): string {
+  if (!updateCheck) {
+    return t("settings.updateNotChecked");
+  }
+  if (updateCheck.status === "available") {
+    return t("settings.updateAvailable").replace("{version}", updateCheck.latestVersion ?? "");
+  }
+  if (updateCheck.status === "failed") {
+    return t("settings.updateCheckFailed");
+  }
+  return t("settings.upToDate");
 }

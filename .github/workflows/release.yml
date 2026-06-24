@@ -1,0 +1,99 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+jobs:
+  bundle:
+    name: Bundle ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos
+            os: macos-latest
+            args: --target universal-apple-darwin
+          - platform: windows
+            os: windows-latest
+            args: ""
+          - platform: linux
+            os: ubuntu-22.04
+            args: ""
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.20.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos' && 'x86_64-apple-darwin,aarch64-apple-darwin' || '' }}
+
+      - name: Install Linux packaging dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test frontend
+        run: pnpm test
+
+      - name: Test Rust workspace
+        run: cargo test --workspace
+
+      - name: Build Tauri bundles for push
+        if: github.event_name == 'push' && github.ref_type == 'branch'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          args: ${{ matrix.args }}
+
+      - name: Upload push build artifacts
+        if: github.event_name == 'push' && github.ref_type == 'branch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: minecraft-pack-builder-${{ matrix.platform }}-${{ github.sha }}
+          path: |
+            target/release/bundle/**/*
+            target/*/release/bundle/**/*
+          if-no-files-found: warn
+
+      - name: Build Tauri bundles for release
+        if: github.event_name == 'workflow_dispatch' || github.ref_type == 'tag'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Minecraft Pack Builder ${{ github.ref_name }}
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      - name: Upload latest.json template
+        if: matrix.platform == 'linux' && (github.event_name == 'workflow_dispatch' || github.ref_type == 'tag')
+        uses: actions/upload-artifact@v4
+        with:
+          name: latest-json-template
+          path: docs/validation/phase-12-latest.template.json

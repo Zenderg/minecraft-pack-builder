@@ -74,6 +74,15 @@ export type AgentStatus = {
   toolCount: number;
 };
 
+export type UpdateCheckResult = {
+  status: "current" | "available" | "failed";
+  currentVersion: string;
+  latestVersion: string | null;
+  notes: string | null;
+  date: string | null;
+  errorMessage: string | null;
+};
+
 export type AgentEvent =
   | { libraryChanged: Record<string, never> }
   | { schemeChanged: { schemeId: number } };
@@ -348,6 +357,21 @@ export async function getAiIntegrationStatus(): Promise<AgentStatus> {
   }
 
   return invoke<AgentStatus>("get_ai_integration_status");
+}
+
+export async function checkForUpdates(): Promise<UpdateCheckResult> {
+  if (!isTauriRuntime()) {
+    return {
+      status: "current",
+      currentVersion: "0.1.0",
+      latestVersion: null,
+      notes: null,
+      date: null,
+      errorMessage: null,
+    };
+  }
+
+  return invoke<UpdateCheckResult>("check_for_updates");
 }
 
 export async function listenToAgentEvents(

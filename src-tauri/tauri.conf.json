@@ -27,7 +27,40 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
-    "icon": []
+    "targets": ["app", "dmg", "msi", "nsis", "appimage", "deb", "rpm"],
+    "createUpdaterArtifacts": true,
+    "icon": ["icons/icon.png"],
+    "category": "DeveloperTool",
+    "shortDescription": "Local-first Minecraft modpack scheme builder",
+    "longDescription": "Minecraft Pack Builder imports CurseForge modpacks, stores local schemes, exposes MCP-compatible AI tools, renders structures, validates changes, and exports Minecraft ecosystem files.",
+    "macOS": {
+      "hardenedRuntime": true,
+      "entitlements": null,
+      "signingIdentity": null
+    },
+    "windows": {
+      "wix": {
+        "language": "en-US"
+      },
+      "nsis": {
+        "displayLanguageSelector": false
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": []
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDEyQUQ3RURFMzVBQ0UyRDUKUldUVjRxdzEzbjZ0RWhXd3B6WFo0cHQvOUFiRUpXVENBeWdvWnUrU3AvajdFZlJqQm9uUmJDa2UK",
+      "endpoints": [
+        "https://github.com/Zenderg/minecraft-pack-builder/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

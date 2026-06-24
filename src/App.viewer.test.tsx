@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const tauriMocks = vi.hoisted(() => ({
   cancelCurseForgeImport: vi.fn(),
   checkCurseForgeApiKey: vi.fn(),
+  checkForUpdates: vi.fn(),
   createScheme: vi.fn(),
   deleteImportedModpack: vi.fn(),
   deleteScheme: vi.fn(),
@@ -34,6 +35,7 @@ const exportDialogMocks = vi.hoisted(() => ({
 vi.mock("./tauri", () => ({
   cancelCurseForgeImport: tauriMocks.cancelCurseForgeImport,
   checkCurseForgeApiKey: tauriMocks.checkCurseForgeApiKey,
+  checkForUpdates: tauriMocks.checkForUpdates,
   createScheme: tauriMocks.createScheme,
   deleteImportedModpack: tauriMocks.deleteImportedModpack,
   deleteScheme: tauriMocks.deleteScheme,
@@ -109,6 +111,14 @@ describe("phase 7 viewer workspace", () => {
       protocolVersion: "2025-06-18",
       activeClient: null,
       toolCount: 19,
+    });
+    tauriMocks.checkForUpdates.mockResolvedValue({
+      status: "current",
+      currentVersion: "0.1.0",
+      latestVersion: null,
+      notes: null,
+      date: null,
+      errorMessage: null,
     });
     tauriMocks.listenToModpackImportStatus.mockResolvedValue(() => {});
     tauriMocks.listenToModpackImportProgress.mockResolvedValue(() => {});
@@ -284,6 +294,43 @@ describe("phase 7 viewer workspace", () => {
     expect(prompt).toContain("minecraft-pack-builder");
     expect(prompt).toContain("Respond to me in the same language as the Minecraft Pack Builder interface: English.");
     expect(prompt).toContain("If the client must be restarted or MCP config must be reloaded");
+  });
+
+  it("shows update settings, persists automatic checks, and reports manual update results", async () => {
+    tauriMocks.checkForUpdates.mockResolvedValueOnce({
+      status: "available",
+      currentVersion: "0.1.0",
+      latestVersion: "0.2.0",
+      notes: "Packaging smoke build",
+      date: "2026-06-24T00:00:00Z",
+      errorMessage: null,
+    });
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".settings-link")?.click();
+    });
+
+    await act(async () => {
+      buttonByText(container, "Updates").click();
+    });
+
+    expect(await screenText(container, "Automatic update checks")).toBe(true);
+    expect(container.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked).toBe(true);
+    expect(await screenText(container, "Current version")).toBe(true);
+
+    await act(async () => {
+      buttonByText(container, "Check for updates").click();
+    });
+
+    expect(tauriMocks.checkForUpdates).toHaveBeenCalledTimes(2);
+    expect(await screenText(container, "Update available: 0.2.0")).toBe(true);
+    expect(await screenText(container, "Packaging smoke build")).toBe(true);
+
+    await act(async () => {
+      container.querySelector<HTMLInputElement>('input[type="checkbox"]')?.click();
+    });
+
+    expect(localStorage.getItem("mpb.autoUpdateChecks")).toBe("false");
   });
 });
 
