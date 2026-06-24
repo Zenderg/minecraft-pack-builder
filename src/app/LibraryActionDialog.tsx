@@ -15,7 +15,7 @@ export function LibraryActionDialog(props: {
 }) {
   const { dialog, t } = props;
   const isCreate = dialog.kind === "createScheme";
-  const isDelete = dialog.kind === "deleteScheme" || dialog.kind === "deleteModpack";
+  const isDelete = dialog.kind === "deleteScheme";
   const isInfo = dialog.kind === "infoModpack";
   const content = getLibraryDialogContent(dialog.kind);
   const title = t(content.titleKey);
@@ -138,13 +138,13 @@ function normalizeDimensionInput(value: string): number {
 
 function ModpackInfoRows({ modpack, t }: { modpack: LibraryModpack; t: Translator }) {
   const rows: Array<[string, string]> = [
-    [t("library.localName"), modpack.localName],
-    [t("library.releaseVersion"), modpack.versionName],
+    [t("library.instanceName"), modpack.displayName],
+    [t("library.instancePath"), modpack.instancePath],
     [t("library.minecraftVersion"), modpack.minecraftVersion ?? t("library.unknown")],
     [t("library.loader"), modpack.loader ?? t("library.unknown")],
-    [t("library.sourceUrl"), modpack.sourceUrl ?? t("library.unknown")],
-    [t("library.importStatus"), modpack.importStatus],
-    [t("library.importMessage"), modpack.importMessage ?? t("library.unknown")],
+    [t("library.loaderVersion"), modpack.loaderVersion ?? t("library.unknown")],
+    [t("library.instanceStatus"), modpack.status],
+    [t("library.instanceMessage"), modpack.statusMessage ?? t("library.unknown")],
     [t("library.schemeCount"), String(modpack.schemes.length)],
   ];
 

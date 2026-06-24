@@ -1,103 +1,45 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{mpsc, Mutex};
+use std::thread;
+use std::time::Duration;
 
-use credentials::{
-    curseforge_key_status, read_curseforge_key, save_curseforge_key, CurseForgeCredentialStatus,
-};
 use mpb_agent::{start_streamable_http_server, AgentServer, AgentStatus, McpHttpServerHandle};
 use mpb_assets::{
-    build_modpack_asset_index_with_events, discover_modpack_releases, download_release_archive,
-    parse_modpack_page_url, search_modpack_projects, AssetImportReport, CancellationToken,
-    CurseForgeGateway, CurseForgeHttpGateway, CurseForgeProject, DiscoveredReleases,
-    DownloadProgress, ModpackAssetImportRequest,
+    build_prism_asset_index, validate_prism_root, PrismAssetIndexRequest, PrismInstanceDescriptor,
+    PrismRootValidation,
 };
 use mpb_export::{write_scheme_export, ExportArtifact, ExportFormat};
 use mpb_storage::{
-    ensure_app_data_dirs, AppDataPaths, LibraryModpack, LibraryRepository, NewScheme,
+    ensure_app_data_dirs, AppDataPaths, LibraryInstance, LibraryRepository, NewPrismInstance,
+    NewScheme, PrismInstanceStatus,
 };
-use mpb_storage::{ImportStatus, NewImportedModpack};
+use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use tauri::{Emitter, Manager};
 use tauri_plugin_updater::UpdaterExt;
 
-mod credentials;
 mod render_scene;
 
 pub use render_scene::{
-    render_scene_from_scheme, RenderBlockDto, RenderChunkSummaryDto, RenderSceneDto, RenderStageDto,
+    render_scene_from_scheme, render_scene_from_scheme_with_registry_report, RenderBlockDto,
+    RenderChunkSummaryDto, RenderMaterialDto, RenderSceneDto, RenderStageDto,
 };
-
-#[derive(Default)]
-struct ImportController {
-    current: Mutex<Option<CancellationToken>>,
-}
 
 struct AgentController {
     server: AgentServer,
     _http: Mutex<Option<McpHttpServerHandle>>,
 }
 
-impl ImportController {
-    fn start(&self) -> Result<CancellationToken, String> {
-        let token = CancellationToken::new();
-        let mut current = self
-            .current
-            .lock()
-            .map_err(|_| "import controller lock is poisoned".to_string())?;
-        *current = Some(token.clone());
-        Ok(token)
-    }
-
-    fn cancel(&self) -> Result<(), String> {
-        let current = self
-            .current
-            .lock()
-            .map_err(|_| "import controller lock is poisoned".to_string())?;
-        if let Some(token) = current.as_ref() {
-            token.cancel();
-        }
-        Ok(())
-    }
-
-    fn clear(&self) -> Result<(), String> {
-        let mut current = self
-            .current
-            .lock()
-            .map_err(|_| "import controller lock is poisoned".to_string())?;
-        *current = None;
-        Ok(())
-    }
+struct PrismWatcherController {
+    watcher: Mutex<Option<RecommendedWatcher>>,
+    sync: Mutex<PrismSyncState>,
 }
 
-#[tauri::command]
-fn discover_app_paths(app: tauri::AppHandle) -> Result<AppDataPaths, String> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("Could not discover app data directory: {error}"))?;
-
-    ensure_app_data_dirs(app_data_dir).map_err(|error| error.to_string())
-}
-
-fn library_repository(app: &tauri::AppHandle) -> Result<(AppDataPaths, LibraryRepository), String> {
-    let paths = discover_app_paths(app.clone())?;
-    let database_path = paths.app_data_dir.join("library.sqlite3");
-    let database =
-        mpb_storage::LibraryDatabase::open(database_path).map_err(|error| error.to_string())?;
-    Ok((paths, LibraryRepository::new(database)))
-}
-
-#[tauri::command]
-fn open_app_data_folder(app: tauri::AppHandle) -> Result<AppDataPaths, String> {
-    let paths = discover_app_paths(app)?;
-
-    Command::new(open_folder_command_for_platform())
-        .arg(&paths.app_data_dir)
-        .spawn()
-        .map_err(|error| format!("Could not open app data folder: {error}"))?;
-
-    Ok(paths)
+#[derive(Debug, Default)]
+struct PrismSyncState {
+    running: bool,
+    pending: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -147,16 +89,262 @@ pub struct ExportDiagnosticError {
     pub diagnostic_path: PathBuf,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrismRootSelection {
+    pub validation: PrismRootValidation,
+    pub library: Vec<LibraryInstance>,
+    pub relink_candidates: Vec<PrismRelinkCandidate>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrismRelinkCandidate {
+    pub existing_id: i64,
+    pub existing_display_name: String,
+    pub existing_instance_path: PathBuf,
+    pub discovered_identity_fingerprint: String,
+    pub discovered_display_name: String,
+    pub discovered_instance_path: PathBuf,
+    pub minecraft_version: Option<String>,
+    pub loader: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LibraryChangedEvent {
+    library: Vec<LibraryInstance>,
+}
+
+#[tauri::command]
+fn discover_app_paths(app: tauri::AppHandle) -> Result<AppDataPaths, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Could not discover app data directory: {error}"))?;
+
+    ensure_app_data_dirs(app_data_dir).map_err(|error| error.to_string())
+}
+
+fn library_repository(app: &tauri::AppHandle) -> Result<(AppDataPaths, LibraryRepository), String> {
+    let paths = discover_app_paths(app.clone())?;
+    let database_path = paths.app_data_dir.join("library.sqlite3");
+    let database =
+        mpb_storage::LibraryDatabase::open(database_path).map_err(|error| error.to_string())?;
+    Ok((paths, LibraryRepository::new(database)))
+}
+
+#[tauri::command]
+fn open_app_data_folder(app: tauri::AppHandle) -> Result<AppDataPaths, String> {
+    let paths = discover_app_paths(app)?;
+
+    Command::new(open_folder_command_for_platform())
+        .arg(&paths.app_data_dir)
+        .spawn()
+        .map_err(|error| format!("Could not open app data folder: {error}"))?;
+
+    Ok(paths)
+}
+
+#[tauri::command]
+fn validate_prism_launcher_root(root_path: PathBuf) -> Result<PrismRootValidation, String> {
+    validate_prism_root(root_path).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn discover_prism_launcher_roots() -> Result<Vec<PrismRootValidation>, String> {
+    default_prism_root_candidates()
+        .into_iter()
+        .map(validate_prism_root)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn select_prism_launcher_root(
+    app: tauri::AppHandle,
+    root_path: PathBuf,
+) -> Result<PrismRootSelection, String> {
+    let validation = validate_prism_root(&root_path).map_err(|error| error.to_string())?;
+    if !validation.valid {
+        return Ok(PrismRootSelection {
+            validation,
+            library: list_library(app)?,
+            relink_candidates: Vec::new(),
+        });
+    }
+
+    let (_, repository) = library_repository(&app)?;
+    repository
+        .set_prism_root(Some(root_path))
+        .map_err(|error| error.to_string())?;
+    let relink_candidates = prism_relink_candidates(&repository, &validation.instances)?;
+    let skipped = relink_candidates
+        .iter()
+        .map(|candidate| candidate.discovered_identity_fingerprint.clone())
+        .collect::<Vec<_>>();
+    record_prism_instances_for_background_sync(&repository, &validation.instances, &skipped)?;
+    replace_prism_watcher(&app, &validation.root_path)?;
+    trigger_prism_background_sync(&app)?;
+    let library = repository
+        .list_library()
+        .map_err(|error| error.to_string())?;
+    app.emit(
+        "library_changed",
+        LibraryChangedEvent {
+            library: library.clone(),
+        },
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(PrismRootSelection {
+        validation,
+        library,
+        relink_candidates,
+    })
+}
+
+#[tauri::command]
+fn sync_prism_library(app: tauri::AppHandle) -> Result<Vec<LibraryInstance>, String> {
+    trigger_prism_background_sync(&app)?;
+    list_library(app)
+}
+
+fn sync_prism_library_for_app(app: &tauri::AppHandle) -> Result<Vec<LibraryInstance>, String> {
+    let (paths, repository) = library_repository(app)?;
+    if let Some(root) = repository
+        .get_prism_root()
+        .map_err(|error| error.to_string())?
+    {
+        let validation = validate_prism_root(root).map_err(|error| error.to_string())?;
+        if validation.valid {
+            let relink_candidates = prism_relink_candidates(&repository, &validation.instances)?;
+            let skipped = relink_candidates
+                .iter()
+                .map(|candidate| candidate.discovered_identity_fingerprint.clone())
+                .collect::<Vec<_>>();
+            sync_prism_instances(&repository, &paths, &validation.instances, &skipped)?;
+        }
+    }
+    repository.list_library().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn list_prism_relink_candidates(
+    app: tauri::AppHandle,
+) -> Result<Vec<PrismRelinkCandidate>, String> {
+    let (_, repository) = library_repository(&app)?;
+    let Some(root) = repository
+        .get_prism_root()
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(Vec::new());
+    };
+    let validation = validate_prism_root(root).map_err(|error| error.to_string())?;
+    if !validation.valid {
+        return Ok(Vec::new());
+    }
+    prism_relink_candidates(&repository, &validation.instances)
+}
+
+#[tauri::command]
+fn confirm_prism_instance_relink(
+    app: tauri::AppHandle,
+    existing_id: i64,
+    discovered_identity_fingerprint: String,
+) -> Result<Vec<LibraryInstance>, String> {
+    let (paths, repository) = library_repository(&app)?;
+    let root = repository
+        .get_prism_root()
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "No PrismLauncher Launcher Root is selected.".to_string())?;
+    let validation = validate_prism_root(root).map_err(|error| error.to_string())?;
+    let instance = validation
+        .instances
+        .iter()
+        .find(|instance| instance.identity_fingerprint == discovered_identity_fingerprint)
+        .ok_or_else(|| {
+            "The selected PrismLauncher instance is no longer present in the active Launcher Root."
+                .to_string()
+        })?;
+    let stored = repository
+        .relink_prism_instance(
+            existing_id,
+            new_prism_instance(
+                instance,
+                PrismInstanceStatus::Indexing,
+                Some("Indexing relinked PrismLauncher assets.".to_string()),
+            ),
+        )
+        .map_err(|error| error.to_string())?;
+    match build_prism_asset_index(PrismAssetIndexRequest {
+        instance_id: instance.instance_id.clone(),
+        identity_fingerprint: instance.identity_fingerprint.clone(),
+        content_fingerprint: instance.content_fingerprint.clone(),
+        instance_path: instance.instance_path.clone(),
+        minecraft_dir: instance.minecraft_dir.clone(),
+        diagnostics_dir: paths.diagnostics_dir.clone(),
+        minecraft_version: instance.minecraft_version.clone(),
+        loader: instance.loader.clone(),
+    }) {
+        Ok(report) => {
+            let message = format!(
+                "Ready. Indexed {} blocks from {} local archives.",
+                report.block_count, report.archive_count
+            );
+            repository
+                .update_prism_instance_status(stored.id, PrismInstanceStatus::Ready, Some(&message))
+                .map_err(|error| error.to_string())?;
+        }
+        Err(error) => {
+            let message = format!(
+                "Could not build Prism block registry: {error}. Schemes stay available for export, but viewer and editing are blocked until the instance is ready."
+            );
+            repository
+                .update_prism_instance_status(
+                    stored.id,
+                    PrismInstanceStatus::Failed,
+                    Some(&message),
+                )
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    let library = sync_prism_library_for_app(&app)?;
+    app.emit(
+        "library_changed",
+        LibraryChangedEvent {
+            library: library.clone(),
+        },
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(library)
+}
+
+#[tauri::command]
+fn list_library(app: tauri::AppHandle) -> Result<Vec<LibraryInstance>, String> {
+    let (_, repository) = library_repository(&app)?;
+    repository.list_library().map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 fn get_scheme_render_scene(
     app: tauri::AppHandle,
     scheme_id: i64,
 ) -> Result<RenderSceneDto, String> {
-    let (_, repository) = library_repository(&app)?;
+    let (paths, repository) = library_repository(&app)?;
     let stored = repository
         .load_scheme(scheme_id)
         .map_err(|error| error.to_string())?;
-    Ok(render_scene_from_scheme(scheme_id, &stored.scheme))
+    let registry_report = repository
+        .get_prism_instance(stored.record.prism_instance_id)
+        .ok()
+        .and_then(|instance| {
+            read_registry_report(&paths.diagnostics_dir, &instance.identity_fingerprint)
+        });
+    Ok(render_scene_from_scheme_with_registry_report(
+        scheme_id,
+        &stored.scheme,
+        registry_report.as_ref(),
+    ))
 }
 
 pub fn write_stored_scheme_export(
@@ -182,25 +370,23 @@ pub fn write_stored_scheme_export_with_diagnostics(
     diagnostics_dir: impl AsRef<Path>,
 ) -> Result<ExportWithDiagnostics, ExportDiagnosticError> {
     let destination_path = destination_path.as_ref().to_path_buf();
-    let diagnostics_dir = diagnostics_dir.as_ref();
+    let diagnostics_dir = diagnostics_dir.as_ref().to_path_buf();
     let diagnostic_path = diagnostics_dir.join(export_diagnostic_file_name(scheme_id, format));
-    let database = mpb_storage::LibraryDatabase::open(database_path).map_err(|error| {
-        ExportDiagnosticError {
-            message: error.to_string(),
-            diagnostic_path: diagnostic_path.clone(),
-        }
-    })?;
-    let repository = LibraryRepository::new(database);
-    let stored = repository
-        .load_scheme(scheme_id)
-        .map_err(|error| ExportDiagnosticError {
-            message: error.to_string(),
-            diagnostic_path: diagnostic_path.clone(),
-        })?;
-    let scheme = stored.scheme;
-    let result = write_scheme_export(&scheme, format, &destination_path);
+    let result = (|| {
+        let database =
+            mpb_storage::LibraryDatabase::open(database_path).map_err(|error| error.to_string())?;
+        let repository = LibraryRepository::new(database);
+        let stored = repository
+            .load_scheme(scheme_id)
+            .map_err(|error| error.to_string())?;
+        let scheme = stored.scheme;
+        let artifact = write_scheme_export(&scheme, format, &destination_path)
+            .map_err(|error| error.to_string())?;
+        Ok::<_, String>((artifact, scheme.block_count()))
+    })();
+
     match result {
-        Ok(artifact) => {
+        Ok((artifact, block_count)) => {
             let report = ExportDiagnosticReport {
                 operation: "export".to_string(),
                 status: "success".to_string(),
@@ -209,25 +395,23 @@ pub fn write_stored_scheme_export_with_diagnostics(
                 destination_path,
                 artifact_path: Some(artifact.path.clone()),
                 byte_len: Some(artifact.byte_len),
-                block_count: Some(artifact.block_count),
+                block_count: Some(block_count),
                 error_code: None,
                 error_message: None,
                 recovery_message: None,
             };
-            let diagnostic =
-                write_export_diagnostic_report(diagnostics_dir, &report).map_err(|message| {
-                    ExportDiagnosticError {
-                        message,
-                        diagnostic_path: diagnostics_dir
-                            .join(export_diagnostic_file_name(scheme_id, format)),
-                    }
+            let diagnostic = write_export_diagnostic(&diagnostics_dir, &diagnostic_path, report)
+                .map_err(|message| ExportDiagnosticError {
+                    message,
+                    diagnostic_path: diagnostic_path.clone(),
                 })?;
             Ok(ExportWithDiagnostics {
                 artifact,
                 diagnostic,
             })
         }
-        Err(error) => {
+        Err(error_message) => {
+            let recovery_message = export_recovery_message(&error_message).to_string();
             let report = ExportDiagnosticReport {
                 operation: "export".to_string(),
                 status: "failed".to_string(),
@@ -236,20 +420,19 @@ pub fn write_stored_scheme_export_with_diagnostics(
                 destination_path,
                 artifact_path: None,
                 byte_len: None,
-                block_count: Some(scheme.block_count()),
-                error_code: Some(error.code().to_string()),
-                error_message: Some(error.to_string()),
-                recovery_message: Some(export_recovery_message(error.code()).to_string()),
+                block_count: None,
+                error_code: Some("export_failed".to_string()),
+                error_message: Some(error_message.clone()),
+                recovery_message: Some(recovery_message),
             };
-            let diagnostic_path = write_export_diagnostic_report(diagnostics_dir, &report)
-                .map_or_else(
-                    |_| diagnostics_dir.join(export_diagnostic_file_name(scheme_id, format)),
-                    |diagnostic| diagnostic.path,
-                );
+            let diagnostic_path =
+                write_export_diagnostic(&diagnostics_dir, &diagnostic_path, report)
+                    .map(|diagnostic| diagnostic.path)
+                    .unwrap_or(diagnostic_path);
             Err(ExportDiagnosticError {
                 message: format!(
                     "Could not export scheme. {} Diagnostic report: {}",
-                    export_recovery_message(error.code()),
+                    error_message,
                     diagnostic_path.display()
                 ),
                 diagnostic_path,
@@ -258,17 +441,20 @@ pub fn write_stored_scheme_export_with_diagnostics(
     }
 }
 
-fn write_export_diagnostic_report(
+fn write_export_diagnostic(
     diagnostics_dir: &Path,
-    report: &ExportDiagnosticReport,
+    diagnostic_path: &Path,
+    report: ExportDiagnosticReport,
 ) -> Result<ExportDiagnosticArtifact, String> {
-    std::fs::create_dir_all(diagnostics_dir).map_err(|error| error.to_string())?;
-    let path = diagnostics_dir.join(export_diagnostic_file_name(report.scheme_id, report.format));
-    let json = serde_json::to_string_pretty(report).map_err(|error| error.to_string())?;
-    std::fs::write(&path, json).map_err(|error| error.to_string())?;
+    std::fs::create_dir_all(diagnostics_dir)
+        .map_err(|error| format!("Could not create diagnostics directory: {error}"))?;
+    let json = serde_json::to_string_pretty(&report)
+        .map_err(|error| format!("Could not serialize export diagnostic report: {error}"))?;
+    std::fs::write(diagnostic_path, json)
+        .map_err(|error| format!("Could not write export diagnostic report: {error}"))?;
     Ok(ExportDiagnosticArtifact {
-        path,
-        report: report.clone(),
+        path: diagnostic_path.to_path_buf(),
+        report,
     })
 }
 
@@ -276,15 +462,16 @@ fn export_diagnostic_file_name(scheme_id: i64, format: ExportFormat) -> String {
     format!("export-scheme-{scheme_id}-{}.json", format.extension())
 }
 
-fn export_recovery_message(error_code: &str) -> &'static str {
-    match error_code {
-        "export_write_failed" => {
-            "Choose another destination or check that the folder is writable, then try export again."
-        }
-        "export_dimensions_too_large" | "export_volume_too_large" => {
-            "Resize the scheme into the supported export limits before trying again."
-        }
-        _ => "Keep the scheme open, check the diagnostic report, and try export again.",
+fn export_recovery_message(error_message: &str) -> &'static str {
+    if error_message.contains("No such file")
+        || error_message.contains("cannot find the path")
+        || error_message.contains("parent")
+    {
+        "Choose another destination folder and try export again."
+    } else if error_message.contains("too large") || error_message.contains("exceeds") {
+        "Resize the scheme into the supported export limits before trying again."
+    } else {
+        "Keep the scheme open, check the diagnostic report, and try export again."
     }
 }
 
@@ -296,8 +483,8 @@ fn export_scheme(
     destination_path: PathBuf,
 ) -> Result<ExportArtifact, String> {
     let format = ExportFormat::from_extension(&format)
-        .ok_or_else(|| "Export format must be schem or litematic".to_string())?;
-    let paths = discover_app_paths(app)?;
+        .ok_or_else(|| format!("Unsupported export format: {format}"))?;
+    let paths = discover_app_paths(app.clone())?;
     let database_path = paths.app_data_dir.join("library.sqlite3");
     write_stored_scheme_export_with_diagnostics(
         database_path,
@@ -308,11 +495,6 @@ fn export_scheme(
     )
     .map(|result| result.artifact)
     .map_err(|error| error.message)
-}
-
-#[tauri::command]
-fn get_ai_integration_status(controller: tauri::State<AgentController>) -> AgentStatus {
-    controller.server.status()
 }
 
 #[tauri::command]
@@ -342,7 +524,7 @@ async fn check_for_updates(app: tauri::AppHandle) -> UpdateCheckResult {
                 latest_version: None,
                 notes: None,
                 date: None,
-                error_message: Some(format!("Could not check for updates: {error}")),
+                error_message: Some(error.to_string()),
             },
         },
         Err(error) => UpdateCheckResult {
@@ -351,539 +533,31 @@ async fn check_for_updates(app: tauri::AppHandle) -> UpdateCheckResult {
             latest_version: None,
             notes: None,
             date: None,
-            error_message: Some(format!("Updater is not available: {error}")),
+            error_message: Some(error.to_string()),
         },
     }
 }
 
 #[tauri::command]
-fn get_curseforge_key_status() -> CurseForgeCredentialStatus {
-    curseforge_key_status()
-}
-
-#[tauri::command]
-fn save_curseforge_api_key(api_key: String) -> Result<CurseForgeCredentialStatus, String> {
-    save_curseforge_key(&api_key).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn check_curseforge_api_key(api_key: String) -> Result<(), String> {
-    credentials::validate_curseforge_api_key(&api_key).map_err(|error| error.to_string())?;
-    let gateway = CurseForgeHttpGateway::new().map_err(|error| error.to_string())?;
-    gateway
-        .find_modpack_project(&api_key, "aoc")
-        .map_err(|error| error.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-fn discover_curseforge_releases(page_url: String) -> Result<DiscoveredReleases, String> {
-    let api_key = read_curseforge_key().map_err(|error| error.to_string())?;
-    let gateway = CurseForgeHttpGateway::new().map_err(|error| error.to_string())?;
-    discover_modpack_releases(&gateway, &api_key, &page_url).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn search_curseforge_modpacks(query: String) -> Result<Vec<CurseForgeProject>, String> {
-    let api_key = read_curseforge_key().map_err(|error| error.to_string())?;
-    let gateway = CurseForgeHttpGateway::new().map_err(|error| error.to_string())?;
-    search_modpack_projects(&gateway, &api_key, &query).map_err(|error| error.to_string())
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ModpackImportProgress {
-    modpack_id: i64,
-    stage: String,
-    bytes_downloaded: u64,
-    total_bytes: Option<u64>,
-    progress_percent: Option<u8>,
-}
-
-impl ModpackImportProgress {
-    fn from_download(modpack_id: i64, value: DownloadProgress) -> Self {
-        let progress_percent = value.total_bytes.and_then(|total| {
-            if total == 0 {
-                return None;
-            }
-            let ratio = value.bytes_downloaded as f64 / total as f64;
-            Some((10.0 + ratio.clamp(0.0, 1.0) * 20.0).round() as u8)
-        });
-        Self {
-            modpack_id,
-            stage: "download".to_string(),
-            bytes_downloaded: value.bytes_downloaded,
-            total_bytes: value.total_bytes,
-            progress_percent,
-        }
-    }
-
-    fn from_parse(modpack_id: i64, completed: u64, total: u64) -> Self {
-        let progress_percent = if total == 0 {
-            None
-        } else {
-            let ratio = completed as f64 / total as f64;
-            Some((30.0 + ratio.clamp(0.0, 1.0) * 65.0).round() as u8)
-        };
-        Self {
-            modpack_id,
-            stage: "parse".to_string(),
-            bytes_downloaded: 0,
-            total_bytes: None,
-            progress_percent,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ImportedModpackResult {
-    library: Vec<LibraryModpack>,
-    modpack_id: i64,
-    archive_path: PathBuf,
-    asset_report_path: PathBuf,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ModpackImportStatusChanged {
-    modpack_id: i64,
-    status: ImportStatus,
-    message: Option<String>,
-    stage: String,
-    library: Vec<LibraryModpack>,
-}
-
-#[tauri::command]
-fn import_curseforge_modpack(
-    app: tauri::AppHandle,
-    controller: tauri::State<ImportController>,
-    page_url: String,
-    file_id: u64,
-) -> Result<ImportedModpackResult, String> {
-    let api_key = read_curseforge_key().map_err(|error| error.to_string())?;
-    let gateway = CurseForgeHttpGateway::new().map_err(|error| error.to_string())?;
-    let parsed = parse_modpack_page_url(&page_url).map_err(|error| error.to_string())?;
-    let project = gateway
-        .find_modpack_project(&api_key, &parsed.slug)
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| {
-            format!(
-                "CurseForge modpack was not found for slug '{}'",
-                parsed.slug
-            )
-        })?;
-    let release = gateway
-        .list_project_files(&api_key, project.id)
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .find(|release| release.file_id == file_id)
-        .ok_or_else(|| format!("CurseForge release file {file_id} was not found"))?;
-    let summary = mpb_assets::filter_releases(
-        &[mpb_assets::ReleaseSummary {
-            file_id: release.file_id,
-            version_name: release.display_name.clone(),
-            file_name: release.file_name.clone(),
-            minecraft_versions: release
-                .game_versions
-                .iter()
-                .filter(|value| value.chars().next().is_some_and(|ch| ch.is_ascii_digit()))
-                .cloned()
-                .collect(),
-            loaders: release
-                .game_versions
-                .iter()
-                .filter(|value| matches!(value.as_str(), "Forge" | "NeoForge" | "Fabric" | "Quilt"))
-                .cloned()
-                .collect(),
-            file_date: release.file_date.clone(),
-            file_length: release.file_length,
-        }],
-        &mpb_assets::ReleaseFilter {
-            minecraft_version: None,
-            loader: None,
-        },
-    )
-    .into_iter()
-    .next()
-    .cloned()
-    .ok_or_else(|| "could not summarize selected release".to_string())?;
-
-    let (paths, repository) = library_repository(&app)?;
-    let safe_file_name = safe_path_segment(&release.file_name);
-    let cache_dir = paths
-        .app_data_dir
-        .join("modpacks")
-        .join(format!("{}-{}", parsed.slug, release.file_id));
-    let archive_path = cache_dir.join("archives").join(safe_file_name);
-    let asset_report_slug = format!("{}-{}", parsed.slug, release.file_id);
-    let import_asset_report_slug = asset_report_slug.clone();
-
-    let imported = repository
-        .create_imported_modpack(NewImportedModpack {
-            local_name: format!("{} - {}", project.name, summary.version_name),
-            source_slug: Some(project.slug),
-            source_url: Some(parsed.normalized_url),
-            version_name: summary.version_name.clone(),
-            minecraft_version: summary.minecraft_versions.first().cloned(),
-            loader: summary.loaders.first().cloned(),
-            cache_dir: Some(cache_dir.clone()),
-            import_status: ImportStatus::Importing,
-        })
-        .map_err(|error| error.to_string())?;
-    repository
-        .update_import_status(
-            imported.id,
-            ImportStatus::Importing,
-            Some("Queued for background processing...".to_string()),
-        )
-        .map_err(|error| error.to_string())?;
-    let library = repository
-        .list_library()
-        .map_err(|error| error.to_string())?;
-    let token = controller.start()?;
-    let import_app = app.clone();
-    let import_api_key = api_key.clone();
-    let import_release = release.clone();
-    let import_archive_path = archive_path.clone();
-    let import_cache_dir = cache_dir.clone();
-    let import_diagnostics_dir = paths.diagnostics_dir.clone();
-    let import_summary = summary.clone();
-    let import_modpack_id = imported.id;
-    std::thread::spawn(move || {
-        let result = finish_modpack_import(
-            import_app.clone(),
-            import_api_key,
-            import_release,
-            import_archive_path,
-            import_cache_dir,
-            import_diagnostics_dir,
-            import_asset_report_slug,
-            import_summary,
-            import_modpack_id,
-            token,
-        );
-        if let Err(message) = result {
-            let _ = set_import_status_and_emit(
-                &import_app,
-                import_modpack_id,
-                ImportStatus::Failed,
-                Some(message),
-                "failed",
-            );
-        }
-        if let Some(controller) = import_app.try_state::<ImportController>() {
-            let _ = controller.clear();
-        }
-    });
-
-    Ok(ImportedModpackResult {
-        library,
-        modpack_id: imported.id,
-        archive_path,
-        asset_report_path: paths
-            .diagnostics_dir
-            .join(format!("{}-assets.json", asset_report_slug)),
-    })
-}
-
-#[tauri::command]
-fn retry_modpack_import(
-    app: tauri::AppHandle,
-    controller: tauri::State<ImportController>,
-    modpack_id: i64,
-) -> Result<Vec<LibraryModpack>, String> {
-    let api_key = read_curseforge_key().map_err(|error| error.to_string())?;
-    let (_, repository) = library_repository(&app)?;
-    let modpack = repository
-        .get_imported_modpack(modpack_id)
-        .map_err(|error| error.to_string())?;
-    let page_url = modpack
-        .source_url
-        .clone()
-        .ok_or_else(|| "Imported modpack has no CurseForge source URL".to_string())?;
-    let cache_dir = modpack
-        .cache_dir
-        .clone()
-        .ok_or_else(|| "Imported modpack has no cache directory".to_string())?;
-    let file_id = curseforge_file_id_from_cache_dir(&cache_dir)?;
-    let gateway = CurseForgeHttpGateway::new().map_err(|error| error.to_string())?;
-    let parsed = parse_modpack_page_url(&page_url).map_err(|error| error.to_string())?;
-    let project = gateway
-        .find_modpack_project(&api_key, &parsed.slug)
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| {
-            format!(
-                "CurseForge modpack was not found for slug '{}'",
-                parsed.slug
-            )
-        })?;
-    let release = gateway
-        .list_project_files(&api_key, project.id)
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .find(|release| release.file_id == file_id)
-        .ok_or_else(|| format!("CurseForge release file {file_id} was not found"))?;
-    let summary = release_summary_from_release(&release)?;
-    let paths = discover_app_paths(app.clone())?;
-    let archive_path = cache_dir
-        .join("archives")
-        .join(safe_path_segment(&release.file_name));
-    let asset_report_slug = format!("{}-{}", parsed.slug, release.file_id);
-
-    repository
-        .update_import_status(
-            modpack_id,
-            ImportStatus::Importing,
-            Some("Queued for retry...".to_string()),
-        )
-        .map_err(|error| error.to_string())?;
-    let library = repository
-        .list_library()
-        .map_err(|error| error.to_string())?;
-
-    let token = controller.start()?;
-    let import_app = app.clone();
-    std::thread::spawn(move || {
-        let result = finish_modpack_import(
-            import_app.clone(),
-            api_key,
-            release,
-            archive_path,
-            cache_dir,
-            paths.diagnostics_dir,
-            asset_report_slug,
-            summary,
-            modpack_id,
-            token,
-        );
-        if let Err(message) = result {
-            let _ = set_import_status_and_emit(
-                &import_app,
-                modpack_id,
-                ImportStatus::Failed,
-                Some(message),
-                "failed",
-            );
-        }
-        if let Some(controller) = import_app.try_state::<ImportController>() {
-            let _ = controller.clear();
-        }
-    });
-
-    Ok(library)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn finish_modpack_import(
-    app: tauri::AppHandle,
-    api_key: String,
-    release: mpb_assets::CurseForgeRelease,
-    archive_path: PathBuf,
-    cache_dir: PathBuf,
-    diagnostics_dir: PathBuf,
-    asset_report_slug: String,
-    summary: mpb_assets::ReleaseSummary,
-    modpack_id: i64,
-    token: CancellationToken,
-) -> Result<(), String> {
-    let gateway = CurseForgeHttpGateway::new().map_err(|error| error.to_string())?;
-    let emit_app = app.clone();
-    set_import_status_and_emit(
-        &app,
-        modpack_id,
-        ImportStatus::Importing,
-        Some("Downloading selected release...".to_string()),
-        "download",
-    )?;
-    download_release_archive(
-        &gateway,
-        &api_key,
-        &release,
-        &archive_path,
-        &token,
-        |progress| {
-            let _ = emit_app.emit(
-                "modpack_import_progress",
-                ModpackImportProgress::from_download(modpack_id, progress),
-            );
-        },
-    )
-    .map_err(|error| error.to_string())?;
-
-    set_import_status_and_emit(
-        &app,
-        modpack_id,
-        ImportStatus::Importing,
-        Some("Parsing modpack assets...".to_string()),
-        "parse",
-    )?;
-    let parse_event_app = app.clone();
-    build_modpack_asset_index_with_events(
-        &gateway,
-        &api_key,
-        ModpackAssetImportRequest {
-            archive_path,
-            cache_dir,
-            diagnostics_dir,
-            source_slug: asset_report_slug,
-            release_name: summary.version_name.clone(),
-            minecraft_version: summary.minecraft_versions.first().cloned(),
-            loader: summary.loaders.first().cloned(),
-        },
-        &token,
-        |event| {
-            if let Some(progress) = event.progress {
-                let _ = parse_event_app.emit(
-                    "modpack_import_progress",
-                    ModpackImportProgress::from_parse(
-                        modpack_id,
-                        progress.completed,
-                        progress.total,
-                    ),
-                );
-            }
-            let _ = set_import_status_and_emit(
-                &parse_event_app,
-                modpack_id,
-                ImportStatus::Importing,
-                Some(event.message),
-                "parse",
-            );
-        },
-    )
-    .map_err(|error| format!("Could not parse modpack assets: {error}"))?;
-
-    set_import_status_and_emit(
-        &app,
-        modpack_id,
-        ImportStatus::Imported,
-        Some("Ready".to_string()),
-        "done",
-    )?;
-    Ok(())
-}
-
-fn set_import_status_and_emit(
-    app: &tauri::AppHandle,
-    modpack_id: i64,
-    status: ImportStatus,
-    message: Option<String>,
-    stage: &str,
-) -> Result<(), String> {
-    let (_, repository) = library_repository(app)?;
-    repository
-        .update_import_status(modpack_id, status, message.clone())
-        .map_err(|error| error.to_string())?;
-    let library = repository
-        .list_library()
-        .map_err(|error| error.to_string())?;
-    app.emit(
-        "modpack_import_status_changed",
-        ModpackImportStatusChanged {
-            modpack_id,
-            status,
-            message,
-            stage: stage.to_string(),
-            library,
-        },
-    )
-    .map_err(|error| error.to_string())
-}
-
-fn release_summary_from_release(
-    release: &mpb_assets::CurseForgeRelease,
-) -> Result<mpb_assets::ReleaseSummary, String> {
-    mpb_assets::filter_releases(
-        &[mpb_assets::ReleaseSummary {
-            file_id: release.file_id,
-            version_name: release.display_name.clone(),
-            file_name: release.file_name.clone(),
-            minecraft_versions: release
-                .game_versions
-                .iter()
-                .filter(|value| value.chars().next().is_some_and(|ch| ch.is_ascii_digit()))
-                .cloned()
-                .collect(),
-            loaders: release
-                .game_versions
-                .iter()
-                .filter(|value| matches!(value.as_str(), "Forge" | "NeoForge" | "Fabric" | "Quilt"))
-                .cloned()
-                .collect(),
-            file_date: release.file_date.clone(),
-            file_length: release.file_length,
-        }],
-        &mpb_assets::ReleaseFilter {
-            minecraft_version: None,
-            loader: None,
-        },
-    )
-    .into_iter()
-    .next()
-    .cloned()
-    .ok_or_else(|| "could not summarize selected release".to_string())
-}
-
-fn curseforge_file_id_from_cache_dir(cache_dir: &Path) -> Result<u64, String> {
-    let name = cache_dir
-        .file_name()
-        .and_then(|value| value.to_str())
-        .ok_or_else(|| "Imported modpack cache directory is not readable".to_string())?;
-    name.rsplit_once('-')
-        .and_then(|(_, file_id)| file_id.parse::<u64>().ok())
-        .ok_or_else(|| "Could not determine CurseForge file id for retry".to_string())
-}
-
-#[tauri::command]
-fn load_modpack_asset_report(
-    app: tauri::AppHandle,
-    modpack_id: i64,
-) -> Result<AssetImportReport, String> {
-    let (paths, repository) = library_repository(&app)?;
-    let modpack = repository
-        .get_imported_modpack(modpack_id)
-        .map_err(|error| error.to_string())?;
-    let cache_dir = modpack
-        .cache_dir
-        .ok_or_else(|| "Imported modpack has no asset cache directory".to_string())?;
-    let report_stem = cache_dir
-        .file_name()
-        .and_then(|value| value.to_str())
-        .ok_or_else(|| "Imported modpack cache directory is not readable".to_string())?;
-    let report_path = paths
-        .diagnostics_dir
-        .join(format!("{}-assets.json", report_stem));
-    let json = std::fs::read_to_string(&report_path)
-        .map_err(|error| format!("Could not read modpack asset diagnostics report: {error}"))?;
-    serde_json::from_str(&json)
-        .map_err(|error| format!("Could not parse modpack asset diagnostics report: {error}"))
-}
-
-#[tauri::command]
-fn cancel_curseforge_import(controller: tauri::State<ImportController>) -> Result<(), String> {
-    controller.cancel()
-}
-
-#[tauri::command]
-fn list_library(app: tauri::AppHandle) -> Result<Vec<LibraryModpack>, String> {
-    let (_, repository) = library_repository(&app)?;
-    repository.list_library().map_err(|error| error.to_string())
+fn get_ai_integration_status(
+    controller: tauri::State<AgentController>,
+) -> Result<AgentStatus, String> {
+    Ok(controller.server.status())
 }
 
 #[tauri::command]
 fn create_scheme(
     app: tauri::AppHandle,
-    modpack_id: i64,
+    prism_instance_id: i64,
     name: String,
     size_x: i64,
     size_y: i64,
     size_z: i64,
-) -> Result<Vec<LibraryModpack>, String> {
+) -> Result<Vec<LibraryInstance>, String> {
     let (_, repository) = library_repository(&app)?;
     repository
         .create_scheme(NewScheme {
-            modpack_id,
+            prism_instance_id,
             name,
             size_x,
             size_y,
@@ -898,7 +572,7 @@ fn rename_scheme(
     app: tauri::AppHandle,
     scheme_id: i64,
     name: String,
-) -> Result<Vec<LibraryModpack>, String> {
+) -> Result<Vec<LibraryInstance>, String> {
     let (_, repository) = library_repository(&app)?;
     repository
         .rename_scheme(scheme_id, &name)
@@ -907,41 +581,11 @@ fn rename_scheme(
 }
 
 #[tauri::command]
-fn delete_scheme(app: tauri::AppHandle, scheme_id: i64) -> Result<Vec<LibraryModpack>, String> {
+fn delete_scheme(app: tauri::AppHandle, scheme_id: i64) -> Result<Vec<LibraryInstance>, String> {
     let (_, repository) = library_repository(&app)?;
     repository
         .delete_scheme(scheme_id)
         .map_err(|error| error.to_string())?;
-    repository.list_library().map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn rename_imported_modpack(
-    app: tauri::AppHandle,
-    modpack_id: i64,
-    name: String,
-) -> Result<Vec<LibraryModpack>, String> {
-    let (_, repository) = library_repository(&app)?;
-    repository
-        .rename_imported_modpack(modpack_id, &name)
-        .map_err(|error| error.to_string())?;
-    repository.list_library().map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn delete_imported_modpack(
-    app: tauri::AppHandle,
-    modpack_id: i64,
-) -> Result<Vec<LibraryModpack>, String> {
-    let (_, repository) = library_repository(&app)?;
-    let deleted = repository
-        .delete_imported_modpack(modpack_id)
-        .map_err(|error| error.to_string())?;
-    if let Some(cache_dir) = deleted.cache_dir {
-        if cache_dir.exists() {
-            std::fs::remove_dir_all(cache_dir).map_err(|error| error.to_string())?;
-        }
-    }
     repository.list_library().map_err(|error| error.to_string())
 }
 
@@ -955,7 +599,401 @@ pub fn open_folder_command_for_platform() -> &'static str {
     }
 }
 
-fn safe_path_segment(value: &str) -> String {
+fn sync_prism_instances(
+    repository: &LibraryRepository,
+    paths: &AppDataPaths,
+    instances: &[PrismInstanceDescriptor],
+    skipped_identity_fingerprints: &[String],
+) -> Result<(), String> {
+    let mut active = Vec::with_capacity(instances.len());
+    for instance in instances {
+        active.push(instance.identity_fingerprint.clone());
+        if skipped_identity_fingerprints
+            .iter()
+            .any(|fingerprint| fingerprint == &instance.identity_fingerprint)
+        {
+            continue;
+        }
+        let existing = repository
+            .get_prism_instance_by_identity_fingerprint(&instance.identity_fingerprint)
+            .map_err(|error| error.to_string())?;
+        if let Some(existing) = &existing {
+            let unchanged = existing.content_fingerprint == instance.content_fingerprint;
+            let registry_current = registry_report_is_current(&paths.diagnostics_dir, instance);
+            if unchanged && existing.status == PrismInstanceStatus::Ready && registry_current {
+                repository
+                    .upsert_prism_instance(new_prism_instance(
+                        instance,
+                        PrismInstanceStatus::Ready,
+                        existing.status_message.clone(),
+                    ))
+                    .map_err(|error| error.to_string())?;
+                continue;
+            }
+            if unchanged && existing.status == PrismInstanceStatus::Failed {
+                repository
+                    .upsert_prism_instance(new_prism_instance(
+                        instance,
+                        PrismInstanceStatus::Failed,
+                        existing.status_message.clone(),
+                    ))
+                    .map_err(|error| error.to_string())?;
+                continue;
+            }
+        }
+
+        let stored = repository
+            .upsert_prism_instance(new_prism_instance(
+                instance,
+                PrismInstanceStatus::Indexing,
+                Some("Indexing local PrismLauncher assets.".to_string()),
+            ))
+            .map_err(|error| error.to_string())?;
+
+        match build_prism_asset_index(PrismAssetIndexRequest {
+            instance_id: instance.instance_id.clone(),
+            identity_fingerprint: instance.identity_fingerprint.clone(),
+            content_fingerprint: instance.content_fingerprint.clone(),
+            instance_path: instance.instance_path.clone(),
+            minecraft_dir: instance.minecraft_dir.clone(),
+            diagnostics_dir: paths.diagnostics_dir.clone(),
+            minecraft_version: instance.minecraft_version.clone(),
+            loader: instance.loader.clone(),
+        }) {
+            Ok(report) => {
+                let message = format!(
+                    "Ready. Indexed {} blocks from {} local archives.",
+                    report.block_count, report.archive_count
+                );
+                repository
+                    .update_prism_instance_status(
+                        stored.id,
+                        PrismInstanceStatus::Ready,
+                        Some(&message),
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
+            Err(error) => {
+                let message = format!(
+                    "Could not build Prism block registry: {error}. Schemes stay available for export, but viewer and editing are blocked until the instance is ready."
+                );
+                repository
+                    .update_prism_instance_status(
+                        stored.id,
+                        PrismInstanceStatus::Failed,
+                        Some(&message),
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+    }
+    repository
+        .mark_prism_instances_missing_except(&active)
+        .map_err(|error| error.to_string())
+}
+
+pub fn record_prism_instances_for_background_sync(
+    repository: &LibraryRepository,
+    instances: &[PrismInstanceDescriptor],
+    skipped_identity_fingerprints: &[String],
+) -> Result<(), String> {
+    let mut active = Vec::with_capacity(instances.len());
+    for instance in instances {
+        active.push(instance.identity_fingerprint.clone());
+        if skipped_identity_fingerprints
+            .iter()
+            .any(|fingerprint| fingerprint == &instance.identity_fingerprint)
+        {
+            continue;
+        }
+
+        let existing = repository
+            .get_prism_instance_by_identity_fingerprint(&instance.identity_fingerprint)
+            .map_err(|error| error.to_string())?;
+        let (status, message) = match existing {
+            Some(existing) if existing.content_fingerprint == instance.content_fingerprint => {
+                (existing.status, existing.status_message)
+            }
+            _ => (
+                PrismInstanceStatus::Indexing,
+                Some("Waiting for background PrismLauncher indexing.".to_string()),
+            ),
+        };
+        repository
+            .upsert_prism_instance(new_prism_instance(instance, status, message))
+            .map_err(|error| error.to_string())?;
+    }
+    repository
+        .mark_prism_instances_missing_except(&active)
+        .map_err(|error| error.to_string())
+}
+
+fn trigger_prism_background_sync(app: &tauri::AppHandle) -> Result<(), String> {
+    let controller = app.state::<PrismWatcherController>();
+    {
+        let mut sync = controller
+            .sync
+            .lock()
+            .map_err(|_| "Could not lock PrismLauncher sync state.".to_string())?;
+        if sync.running {
+            sync.pending = true;
+            return Ok(());
+        }
+        sync.running = true;
+        sync.pending = false;
+    }
+
+    let app_handle = app.clone();
+    thread::spawn(move || loop {
+        let result = sync_prism_library_for_app(&app_handle);
+        match result {
+            Ok(library) => {
+                let _ = app_handle.emit("library_changed", LibraryChangedEvent { library });
+            }
+            Err(error) => {
+                eprintln!("PrismLauncher background sync failed: {error}");
+            }
+        }
+
+        let controller = app_handle.state::<PrismWatcherController>();
+        if let Ok(mut sync) = controller.sync.lock() {
+            if sync.pending {
+                sync.pending = false;
+                continue;
+            }
+            sync.running = false;
+        }
+        break;
+    });
+    Ok(())
+}
+
+fn new_prism_instance(
+    instance: &PrismInstanceDescriptor,
+    status: PrismInstanceStatus,
+    status_message: Option<String>,
+) -> NewPrismInstance {
+    NewPrismInstance {
+        instance_id: instance.instance_id.clone(),
+        display_name: instance.display_name.clone(),
+        instance_path: instance.instance_path.clone(),
+        minecraft_dir: instance.minecraft_dir.clone(),
+        minecraft_version: instance.minecraft_version.clone(),
+        loader: instance.loader.clone(),
+        loader_version: instance.loader_version.clone(),
+        identity_fingerprint: instance.identity_fingerprint.clone(),
+        content_fingerprint: instance.content_fingerprint.clone(),
+        status,
+        status_message,
+    }
+}
+
+fn registry_report_path(diagnostics_dir: &Path, identity_fingerprint: &str) -> PathBuf {
+    diagnostics_dir.join(format!(
+        "{}-registry.json",
+        safe_report_stem(identity_fingerprint)
+    ))
+}
+
+fn prism_root_from_instance_path(instance_path: &Path) -> Option<PathBuf> {
+    let instances_dir = instance_path.parent()?;
+    if instances_dir.file_name()?.to_string_lossy() != "instances" {
+        return None;
+    }
+    instances_dir.parent().map(Path::to_path_buf)
+}
+
+fn registry_report_is_current(diagnostics_dir: &Path, instance: &PrismInstanceDescriptor) -> bool {
+    let path = registry_report_path(diagnostics_dir, &instance.identity_fingerprint);
+    let Some(report) = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
+    else {
+        return false;
+    };
+    if report
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        != Some(4)
+    {
+        return false;
+    }
+    if report
+        .get("runtimeStatus")
+        .and_then(serde_json::Value::as_str)
+        == Some("ready")
+    {
+        return true;
+    }
+    !runtime_prerequisites_present(instance)
+}
+
+pub fn runtime_prerequisites_present(instance: &PrismInstanceDescriptor) -> bool {
+    let loader = instance.loader.as_deref().unwrap_or_default();
+    let normalized_loader = loader.to_ascii_lowercase();
+    let Some(minecraft_version) = instance.minecraft_version.as_deref() else {
+        return false;
+    };
+    let Some(root) = prism_root_from_instance_path(&instance.instance_path) else {
+        return false;
+    };
+    let libraries = root.join("libraries");
+
+    if normalized_loader.contains("neoforge") {
+        return neoforge_runtime_prerequisites_present(&libraries, minecraft_version);
+    }
+    if normalized_loader.contains("forge") {
+        return forge_runtime_prerequisites_present(&root, &libraries, instance, minecraft_version);
+    }
+    if normalized_loader.contains("fabric") {
+        return fabric_runtime_prerequisites_present(&libraries, minecraft_version);
+    }
+    false
+}
+
+fn neoforge_runtime_prerequisites_present(libraries: &Path, minecraft_version: &str) -> bool {
+    let Ok(entries) = std::fs::read_dir(libraries.join("net/neoforged/neoform")) else {
+        return false;
+    };
+    entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| entry.file_name().to_str().map(ToString::to_string))
+        .filter_map(|version| {
+            version
+                .strip_prefix(&format!("{minecraft_version}-"))
+                .map(ToString::to_string)
+        })
+        .any(|neoform_version| {
+            libraries
+                .join(format!(
+                    "net/minecraft/client/{minecraft_version}-{neoform_version}/client-{minecraft_version}-{neoform_version}-mappings.txt"
+                ))
+                .is_file()
+        })
+}
+
+fn forge_runtime_prerequisites_present(
+    root: &Path,
+    libraries: &Path,
+    instance: &PrismInstanceDescriptor,
+    minecraft_version: &str,
+) -> bool {
+    let Some(loader_version) = instance.loader_version.as_deref() else {
+        return false;
+    };
+    let Some(mcp_version) = forge_mcp_version(root, loader_version) else {
+        return false;
+    };
+    libraries
+        .join(format!(
+            "net/minecraft/client/{minecraft_version}-{mcp_version}/client-{minecraft_version}-{mcp_version}-mappings.txt"
+        ))
+        .is_file()
+}
+
+fn forge_mcp_version(root: &Path, loader_version: &str) -> Option<String> {
+    let meta_path = root
+        .join("meta")
+        .join("net.minecraftforge")
+        .join(format!("{loader_version}.json"));
+    let text = std::fs::read_to_string(meta_path).ok()?;
+    let metadata = serde_json::from_str::<serde_json::Value>(&text).ok()?;
+    let arguments = metadata.get("minecraftArguments")?.as_str()?;
+    argument_value(arguments, "--fml.mcpVersion").map(ToString::to_string)
+}
+
+fn fabric_runtime_prerequisites_present(libraries: &Path, minecraft_version: &str) -> bool {
+    [
+        libraries.join(format!(
+            "com/mojang/minecraft/{minecraft_version}/minecraft-{minecraft_version}-server.jar"
+        )),
+        libraries.join(format!(
+            "net/minecraft/server/{minecraft_version}/server-{minecraft_version}.jar"
+        )),
+    ]
+    .into_iter()
+    .any(|path| path.is_file())
+}
+
+fn argument_value<'a>(arguments: &'a str, name: &str) -> Option<&'a str> {
+    let mut parts = arguments.split_whitespace();
+    while let Some(part) = parts.next() {
+        if part == name {
+            return parts.next();
+        }
+    }
+    None
+}
+
+fn read_registry_report(
+    diagnostics_dir: &Path,
+    identity_fingerprint: &str,
+) -> Option<serde_json::Value> {
+    let path = registry_report_path(diagnostics_dir, identity_fingerprint);
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|json| serde_json::from_str(&json).ok())
+}
+
+fn prism_relink_candidates(
+    repository: &LibraryRepository,
+    discovered: &[PrismInstanceDescriptor],
+) -> Result<Vec<PrismRelinkCandidate>, String> {
+    let stored = repository
+        .list_prism_instances()
+        .map_err(|error| error.to_string())?;
+    let discovered_identities = discovered
+        .iter()
+        .map(|instance| instance.identity_fingerprint.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut candidates = Vec::new();
+
+    for instance in discovered {
+        if stored
+            .iter()
+            .any(|record| record.identity_fingerprint == instance.identity_fingerprint)
+        {
+            continue;
+        }
+        let Some(existing) = stored.iter().find(|record| {
+            !discovered_identities.contains(record.identity_fingerprint.as_str())
+                && possible_relink_match(record, instance)
+        }) else {
+            continue;
+        };
+        candidates.push(PrismRelinkCandidate {
+            existing_id: existing.id,
+            existing_display_name: existing.display_name.clone(),
+            existing_instance_path: existing.instance_path.clone(),
+            discovered_identity_fingerprint: instance.identity_fingerprint.clone(),
+            discovered_display_name: instance.display_name.clone(),
+            discovered_instance_path: instance.instance_path.clone(),
+            minecraft_version: instance.minecraft_version.clone(),
+            loader: instance.loader.clone(),
+        });
+    }
+
+    Ok(candidates)
+}
+
+fn possible_relink_match(
+    existing: &mpb_storage::PrismInstanceRecord,
+    discovered: &PrismInstanceDescriptor,
+) -> bool {
+    normalized_match_key(&existing.display_name) == normalized_match_key(&discovered.display_name)
+        && existing.minecraft_version == discovered.minecraft_version
+        && existing.loader == discovered.loader
+}
+
+fn normalized_match_key(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .flat_map(|character| character.to_lowercase())
+        .collect()
+}
+
+fn safe_report_stem(value: &str) -> String {
     let cleaned = value
         .chars()
         .map(|character| {
@@ -967,28 +1005,87 @@ fn safe_path_segment(value: &str) -> String {
         })
         .collect::<String>();
     if cleaned.is_empty() {
-        "modpack.zip".to_string()
+        "prism-instance".to_string()
     } else {
         cleaned
     }
 }
 
+fn replace_prism_watcher(app: &tauri::AppHandle, root: &Path) -> Result<(), String> {
+    let instances_dir = root.join("instances");
+    if !instances_dir.is_dir() {
+        return Ok(());
+    }
+
+    let app_handle = app.clone();
+    let (event_tx, event_rx) = mpsc::channel();
+    let mut watcher = RecommendedWatcher::new(
+        move |event| {
+            let _ = event_tx.send(event);
+        },
+        Config::default(),
+    )
+    .map_err(|error| format!("Could not start PrismLauncher watcher: {error}"))?;
+    watcher
+        .watch(&instances_dir, RecursiveMode::Recursive)
+        .map_err(|error| {
+            format!(
+                "Could not watch PrismLauncher instances at {}: {error}",
+                instances_dir.display()
+            )
+        })?;
+
+    thread::spawn(move || {
+        while event_rx.recv().is_ok() {
+            thread::sleep(Duration::from_millis(700));
+            while event_rx.try_recv().is_ok() {}
+            if let Err(error) = trigger_prism_background_sync(&app_handle) {
+                eprintln!("PrismLauncher watcher sync failed: {error}");
+            }
+        }
+    });
+
+    let controller = app.state::<PrismWatcherController>();
+    let mut guard = controller
+        .watcher
+        .lock()
+        .map_err(|_| "Could not lock PrismLauncher watcher state".to_string())?;
+    *guard = Some(watcher);
+    Ok(())
+}
+
+fn default_prism_root_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    if let Some(home) = home {
+        if cfg!(target_os = "macos") {
+            candidates.push(home.join("Library/Application Support/PrismLauncher"));
+        } else if cfg!(target_os = "windows") {
+            if let Some(app_data) = std::env::var_os("APPDATA") {
+                candidates.push(PathBuf::from(app_data).join("PrismLauncher"));
+            }
+            candidates.push(home.join("scoop/persist/prismlauncher"));
+        } else {
+            candidates.push(home.join(".local/share/PrismLauncher"));
+            candidates
+                .push(home.join(".var/app/org.prismlauncher.PrismLauncher/data/PrismLauncher"));
+        }
+    }
+    candidates
+}
+
 pub fn run() {
     let builder = tauri::Builder::default();
 
-    #[cfg(debug_assertions)]
     let builder = builder.invoke_handler(tauri::generate_handler![
         discover_app_paths,
         open_app_data_folder,
-        get_curseforge_key_status,
-        save_curseforge_api_key,
-        check_curseforge_api_key,
-        discover_curseforge_releases,
-        search_curseforge_modpacks,
-        import_curseforge_modpack,
-        retry_modpack_import,
-        cancel_curseforge_import,
-        load_modpack_asset_report,
+        discover_prism_launcher_roots,
+        validate_prism_launcher_root,
+        select_prism_launcher_root,
+        sync_prism_library,
+        list_prism_relink_candidates,
+        confirm_prism_instance_relink,
         get_scheme_render_scene,
         export_scheme,
         check_for_updates,
@@ -996,34 +1093,7 @@ pub fn run() {
         list_library,
         create_scheme,
         rename_scheme,
-        delete_scheme,
-        rename_imported_modpack,
-        delete_imported_modpack
-    ]);
-
-    #[cfg(not(debug_assertions))]
-    let builder = builder.invoke_handler(tauri::generate_handler![
-        discover_app_paths,
-        open_app_data_folder,
-        get_curseforge_key_status,
-        save_curseforge_api_key,
-        check_curseforge_api_key,
-        discover_curseforge_releases,
-        search_curseforge_modpacks,
-        import_curseforge_modpack,
-        retry_modpack_import,
-        cancel_curseforge_import,
-        load_modpack_asset_report,
-        get_scheme_render_scene,
-        export_scheme,
-        check_for_updates,
-        get_ai_integration_status,
-        list_library,
-        create_scheme,
-        rename_scheme,
-        delete_scheme,
-        rename_imported_modpack,
-        delete_imported_modpack
+        delete_scheme
     ]);
 
     builder
@@ -1031,7 +1101,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let paths = discover_app_paths(app.handle().clone())
-                .map_err(|error| Box::<dyn std::error::Error>::from(error))?;
+                .map_err(Box::<dyn std::error::Error>::from)?;
             let server = AgentServer::new_storage(
                 paths.app_data_dir.join("library.sqlite3"),
                 paths.diagnostics_dir,
@@ -1047,9 +1117,18 @@ pub fn run() {
                 server,
                 _http: Mutex::new(Some(http)),
             });
+            app.manage(PrismWatcherController {
+                watcher: Mutex::new(None),
+                sync: Mutex::new(PrismSyncState::default()),
+            });
+            if let Ok((_, repository)) = library_repository(app.handle()) {
+                if let Ok(Some(root)) = repository.get_prism_root() {
+                    let _ = replace_prism_watcher(app.handle(), &root);
+                    let _ = trigger_prism_background_sync(app.handle());
+                }
+            }
             Ok(())
         })
-        .manage(ImportController::default())
         .run(tauri::generate_context!())
         .expect("failed to run Minecraft Pack Builder desktop app");
 }

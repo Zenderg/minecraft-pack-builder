@@ -2,7 +2,7 @@ use app_tauri_lib::{write_stored_scheme_export, write_stored_scheme_export_with_
 use mpb_core::{BlockPlacement, BlockRegistry, Coordinate, SchemeOperation, StageRef};
 use mpb_export::ExportFormat;
 use mpb_storage::{
-    ImportStatus, LibraryDatabase, LibraryRepository, NewImportedModpack, NewScheme,
+    LibraryDatabase, LibraryRepository, NewPrismInstance, NewScheme, PrismInstanceStatus,
 };
 use tempfile::tempdir;
 
@@ -82,21 +82,24 @@ fn create_exportable_scheme(root: &std::path::Path) -> std::path::PathBuf {
     let database_path = root.join("library.sqlite3");
     let database = LibraryDatabase::open(&database_path).expect("open database");
     let repository = LibraryRepository::new(database);
-    let modpack = repository
-        .create_imported_modpack(NewImportedModpack {
-            local_name: "Stored Pack".to_string(),
-            source_slug: None,
-            source_url: None,
-            version_name: "1.0.0".to_string(),
+    let instance = repository
+        .upsert_prism_instance(NewPrismInstance {
+            instance_id: "stored-pack".to_string(),
+            display_name: "Stored Pack".to_string(),
+            instance_path: root.join("PrismLauncher/instances/stored-pack"),
+            minecraft_dir: root.join("PrismLauncher/instances/stored-pack/.minecraft"),
             minecraft_version: Some("1.20.1".to_string()),
             loader: Some("Forge".to_string()),
-            cache_dir: None,
-            import_status: ImportStatus::Imported,
+            loader_version: Some("47.4.0".to_string()),
+            identity_fingerprint: "stored-pack-identity".to_string(),
+            content_fingerprint: "stored-pack-content".to_string(),
+            status: PrismInstanceStatus::Ready,
+            status_message: None,
         })
-        .expect("create modpack");
+        .expect("create instance");
     let record = repository
         .create_scheme(NewScheme {
-            modpack_id: modpack.id,
+            prism_instance_id: instance.id,
             name: "Stored Scheme".to_string(),
             size_x: 4,
             size_y: 4,

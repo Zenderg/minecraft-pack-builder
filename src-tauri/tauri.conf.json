@@ -22,7 +22,11 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$APPDATA/**"]
+      }
     }
   },
   "bundle": {
@@ -32,7 +36,7 @@
     "icon": ["icons/icon.png", "icons/icon.ico", "icons/icon.icns"],
     "category": "DeveloperTool",
     "shortDescription": "Local-first Minecraft modpack scheme builder",
-    "longDescription": "Minecraft Pack Builder imports CurseForge modpacks, stores local schemes, exposes MCP-compatible AI tools, renders structures, validates changes, and exports Minecraft ecosystem files.",
+    "longDescription": "Minecraft Pack Builder connects to local PrismLauncher instances, stores linked building schemes, exposes MCP-compatible AI tools, renders structures, validates changes, and exports Minecraft ecosystem files.",
     "macOS": {
       "hardenedRuntime": true,
       "entitlements": null,

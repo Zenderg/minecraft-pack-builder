@@ -1,29 +1,23 @@
-import { ArrowLeft, ArrowRight, Box, KeyRound, Languages, PlugZap } from "lucide-react";
+import { ArrowLeft, ArrowRight, Box, FolderOpen, Languages, PlugZap } from "lucide-react";
 
 import { languages, type Language } from "../i18n";
-import { canFinishOnboardingWithKey, type CurseForgeKeyCheckResult, type CurseForgeKeyState } from "../onboarding";
-import type { CurseForgeCredentialStatus } from "../tauri";
-import { KeyForm, PromptBlock, StatusRows, StepIcon } from "./settingsControls";
+import { canFinishOnboardingWithPrism, type PrismRootState } from "../onboarding";
+import type { PrismRootValidation } from "../tauri";
+import { PromptBlock, StatusRows, StepIcon } from "./settingsControls";
 import type { Translator } from "./types";
 
 export function OnboardingScreen(props: {
-  apiKeyInput: string;
-  isSavingKey: boolean;
-  keyState: CurseForgeKeyState;
-  keyStatus: CurseForgeCredentialStatus | null;
-  keyCheckResult: CurseForgeKeyCheckResult;
-  keyCheckMessage: string;
-  keyNotice: "idle" | "missing" | "saved" | "replaced" | "unavailable";
   language: Language;
   onBack: () => void;
-  onCheckKey: () => void;
+  onChoosePrismRoot: () => void;
   onFinish: () => void;
   onLanguageChange: (language: Language) => void;
   onNextAi: () => void;
   onNextLanguage: () => void;
   onSkip: () => void;
-  onUpdateKey: (value: string) => void;
-  step: "language" | "ai" | "curseforge";
+  prismRoot: PrismRootState;
+  prismValidation: PrismRootValidation | null;
+  step: "language" | "ai" | "prism";
   t: Translator;
 }) {
   const { t } = props;
@@ -105,27 +99,29 @@ export function OnboardingScreen(props: {
           </div>
         )}
 
-        {props.step === "curseforge" && (
+        {props.step === "prism" && (
           <div className="onboarding-step">
             <StepIcon>
-              <KeyRound size={22} />
+              <FolderOpen size={22} />
             </StepIcon>
-            <h2>{t("onboarding.keyTitle")}</h2>
-            <p>{t("onboarding.keyBody")}</p>
-            <KeyForm
-              apiKeyInput={props.apiKeyInput}
-              isSavingKey={props.isSavingKey}
-              keyCheckResult={props.keyCheckResult}
-              keyCheckMessage={props.keyCheckMessage}
-              keyNotice={props.keyNotice}
-              keyState={props.keyState}
-              keyStatus={props.keyStatus}
-              onCheckKey={props.onCheckKey}
-              onUpdateKey={props.onUpdateKey}
-              t={t}
+            <h2>{t("onboarding.prismTitle")}</h2>
+            <p>{t("onboarding.prismBody")}</p>
+            <p className="subtle-line">{t("settings.prismFolderHint")}</p>
+            <StatusRows
+              rows={[
+                [t("settings.status"), props.prismValidation?.message ?? t("settings.prismDetecting")],
+                [
+                  t("settings.prismInstances"),
+                  props.prismValidation ? String(props.prismValidation.instanceCount) : t("library.unknown"),
+                ],
+              ]}
             />
+            <button className="secondary-action compact" onClick={props.onChoosePrismRoot} type="button">
+              <FolderOpen size={16} />
+              {t("settings.choosePrismRoot")}
+            </button>
             <div className="onboarding-actions split">
-              <button className="ghost-action" onClick={props.onFinish} type="button">
+              <button className="ghost-action" onClick={props.onSkip} type="button">
                 {t("onboarding.skip")}
               </button>
               <div className="nav-actions">
@@ -135,7 +131,7 @@ export function OnboardingScreen(props: {
                 </button>
                 <button
                   className="primary-action compact"
-                  disabled={!canFinishOnboardingWithKey(props.keyState)}
+                  disabled={!canFinishOnboardingWithPrism(props.prismRoot)}
                   onClick={props.onFinish}
                   type="button"
                 >
@@ -149,4 +145,3 @@ export function OnboardingScreen(props: {
     </main>
   );
 }
-

@@ -1,19 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  canFinishOnboardingWithKey,
+  canFinishOnboardingWithPrism,
   createInitialAppFlow,
-  getCurseForgeKeyInputCheckResult,
-  getAddModpackTarget,
   getPreviousOnboardingStep,
-  getCurseForgeKeyButtonState,
-  isCurseForgeKeyCheckBusy,
   onboardingReducer,
-  shouldShowExistingKeyNotice,
-  type CurseForgeKeyState,
 } from "./onboarding";
 
-describe("phase 2 onboarding flow", () => {
+describe("Prism onboarding flow", () => {
   it("starts in onboarding until the first launch flow is completed or skipped", () => {
     expect(createInitialAppFlow({ onboardingComplete: false }).screen).toBe("onboarding");
     expect(createInitialAppFlow({ onboardingComplete: true }).screen).toBe("workspace");
@@ -23,12 +17,10 @@ describe("phase 2 onboarding flow", () => {
     const state = onboardingReducer(
       {
         screen: "workspace",
-        onboardingStep: "curseforge",
-        curseForgeKey: "saved",
+        onboardingStep: "prism",
+        prismRoot: "valid",
         settingsSection: "ai",
-        keyNotice: "saved",
         settingsModalOpen: true,
-        importModalOpen: false,
       },
       { type: "restartOnboarding" },
     );
@@ -38,38 +30,34 @@ describe("phase 2 onboarding flow", () => {
     expect(state.settingsModalOpen).toBe(false);
   });
 
-  it("allows skipping onboarding into the workspace without a CurseForge key", () => {
+  it("allows skipping onboarding into the workspace without a Prism root", () => {
     const state = onboardingReducer(
       {
         screen: "onboarding",
-        onboardingStep: "curseforge",
-        curseForgeKey: "missing",
-        settingsSection: "curseforge",
-        keyNotice: "idle",
+        onboardingStep: "prism",
+        prismRoot: "unknown",
+        settingsSection: "prism",
         settingsModalOpen: false,
-        importModalOpen: false,
       },
       { type: "skipOnboarding" },
     );
 
     expect(state.screen).toBe("workspace");
-    expect(state.curseForgeKey).toBe("missing");
+    expect(state.prismRoot).toBe("unknown");
   });
 
   it("allows returning to previous onboarding steps without leaving onboarding", () => {
     expect(getPreviousOnboardingStep("ai")).toBe("language");
-    expect(getPreviousOnboardingStep("curseforge")).toBe("ai");
+    expect(getPreviousOnboardingStep("prism")).toBe("ai");
     expect(getPreviousOnboardingStep("language")).toBe("language");
 
     const state = onboardingReducer(
       {
         screen: "onboarding",
-        onboardingStep: "curseforge",
-        curseForgeKey: "missing",
-        settingsSection: "curseforge",
-        keyNotice: "idle",
+        onboardingStep: "prism",
+        prismRoot: "unknown",
+        settingsSection: "prism",
         settingsModalOpen: false,
-        importModalOpen: false,
       },
       { type: "previousOnboardingStep" },
     );
@@ -78,88 +66,25 @@ describe("phase 2 onboarding flow", () => {
     expect(state.onboardingStep).toBe("ai");
   });
 
-  it("routes add-modpack to settings when the CurseForge key is missing or unavailable", () => {
-    const missing: CurseForgeKeyState = "missing";
-    const unavailable: CurseForgeKeyState = "unavailable";
-    const saved: CurseForgeKeyState = "saved";
-
-    expect(getAddModpackTarget(missing)).toEqual({
-      screen: "workspace",
-      settingsSection: "curseforge",
-      settingsModalOpen: true,
-      importModalOpen: false,
-    });
-    expect(getAddModpackTarget(unavailable)).toEqual({
-      screen: "workspace",
-      settingsSection: "curseforge",
-      settingsModalOpen: true,
-      importModalOpen: false,
-    });
-    expect(getAddModpackTarget(saved)).toEqual({
-      screen: "workspace",
-      settingsSection: "curseforge",
-      settingsModalOpen: false,
-      importModalOpen: true,
-    });
-  });
-
-  it("distinguishes first save from replacement without exposing the key value", () => {
-    const saved = onboardingReducer(
+  it("tracks Prism root validity without storing any secret values", () => {
+    const state = onboardingReducer(
       {
         screen: "settings",
-        onboardingStep: "curseforge",
-        curseForgeKey: "missing",
-        settingsSection: "curseforge",
-        keyNotice: "idle",
+        onboardingStep: "prism",
+        prismRoot: "unknown",
+        settingsSection: "prism",
         settingsModalOpen: true,
-        importModalOpen: false,
       },
-      { type: "keySaved" },
+      { type: "setPrismRootState", state: "valid" },
     );
 
-    expect(saved.curseForgeKey).toBe("saved");
-    expect(saved.keyNotice).toBe("saved");
-    expect(JSON.stringify(saved)).not.toContain("secret-token");
-
-    const replaced = onboardingReducer(saved, { type: "keySaved" });
-
-    expect(replaced.curseForgeKey).toBe("saved");
-    expect(replaced.keyNotice).toBe("replaced");
+    expect(state.prismRoot).toBe("valid");
+    expect(JSON.stringify(state)).not.toContain("api-key");
   });
 
-  it("prechecks CurseForge key input before the online phase 5 validation", () => {
-    expect(getCurseForgeKeyInputCheckResult("")).toBe("empty");
-    expect(getCurseForgeKeyInputCheckResult("  abc123  ")).toBe("ready");
-  });
-
-  it("treats only the active key check as a busy state", () => {
-    expect(isCurseForgeKeyCheckBusy("checking")).toBe(true);
-    expect(isCurseForgeKeyCheckBusy("idle")).toBe(false);
-    expect(isCurseForgeKeyCheckBusy("valid")).toBe(false);
-    expect(isCurseForgeKeyCheckBusy("invalid")).toBe(false);
-  });
-
-  it("keeps the key check button visibly loading while disabled", () => {
-    expect(getCurseForgeKeyButtonState("checking", true)).toEqual({
-      disabled: true,
-      loading: true,
-    });
-    expect(getCurseForgeKeyButtonState("valid", false)).toEqual({
-      disabled: false,
-      loading: false,
-    });
-  });
-
-  it("shows the existing-key notice only before replacing or checking a key", () => {
-    expect(shouldShowExistingKeyNotice("saved", "", "idle")).toBe(true);
-    expect(shouldShowExistingKeyNotice("saved", "new-key", "idle")).toBe(false);
-    expect(shouldShowExistingKeyNotice("saved", "", "valid")).toBe(false);
-    expect(shouldShowExistingKeyNotice("missing", "", "idle")).toBe(false);
-  });
-
-  it("allows finishing the CurseForge onboarding step only after a key exists", () => {
-    expect(canFinishOnboardingWithKey("missing")).toBe(false);
-    expect(canFinishOnboardingWithKey("unavailable")).toBe(false);
-    expect(canFinishOnboardingWithKey("saved")).toBe(true);
+  it("allows finishing the Prism onboarding step only after a valid root exists", () => {
+    expect(canFinishOnboardingWithPrism("unknown")).toBe(false);
+    expect(canFinishOnboardingWithPrism("invalid")).toBe(false);
+    expect(canFinishOnboardingWithPrism("valid")).toBe(true);
   });
 });

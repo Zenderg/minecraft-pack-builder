@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { LibraryModpack } from "./library";
+import type { LibraryModpack, LibraryScheme, PrismInstanceStatus } from "./library";
 import type { RenderScene } from "./renderViewer";
 
 export type AppDataPaths = {
@@ -8,60 +8,43 @@ export type AppDataPaths = {
   diagnosticsDir: string;
 };
 
-export type CurseForgeCredentialStatus = {
-  state: "missing" | "saved" | "unavailable";
-  backend: string;
-  message?: string | null;
-  apiKey?: null;
+export type PrismInstanceDescriptor = {
+  instanceId: string;
+  displayName: string;
+  instancePath: string;
+  minecraftDir: string;
+  minecraftVersion: string | null;
+  loader: string | null;
+  loaderVersion: string | null;
+  identityFingerprint: string;
+  contentFingerprint: string;
+  status: PrismInstanceStatus;
+  statusMessage: string | null;
 };
 
-export type CurseForgeProject = {
-  id: number;
-  name: string;
-  slug: string;
-  logoUrl: string | null;
+export type PrismRootValidation = {
+  rootPath: string;
+  valid: boolean;
+  message: string;
+  instanceCount: number;
+  instances: PrismInstanceDescriptor[];
 };
 
-export type CurseForgeReleaseSummary = {
-  fileId: number;
-  versionName: string;
-  fileName: string;
-  minecraftVersions: string[];
-  loaders: string[];
-  fileDate: string;
-  fileLength: number;
-};
-
-export type CurseForgeReleaseDiscovery = {
-  modpack: CurseForgeProject;
-  sourceUrl: string;
-  releases: CurseForgeReleaseSummary[];
-  minecraftVersions: string[];
-  loaders: string[];
-  defaultFileId: number;
-};
-
-export type ImportProgress = {
-  modpackId: number;
-  stage: string;
-  bytesDownloaded: number;
-  totalBytes: number | null;
-  progressPercent: number | null;
-};
-
-export type ImportedModpackResult = {
+export type PrismRootSelection = {
+  validation: PrismRootValidation;
   library: LibraryModpack[];
-  modpackId: number;
-  archivePath: string;
-  assetReportPath: string;
+  relinkCandidates: PrismRelinkCandidate[];
 };
 
-export type ModpackImportStatusChanged = {
-  modpackId: number;
-  status: LibraryModpack["importStatus"];
-  message: string | null;
-  stage: string;
-  library: LibraryModpack[];
+export type PrismRelinkCandidate = {
+  existingId: number;
+  existingDisplayName: string;
+  existingInstancePath: string;
+  discoveredIdentityFingerprint: string;
+  discoveredDisplayName: string;
+  discoveredInstancePath: string;
+  minecraftVersion: string | null;
+  loader: string | null;
 };
 
 export type AgentStatus = {
@@ -96,8 +79,22 @@ export type ExportArtifact = {
   schemeId?: number;
 };
 
+export type LibraryChangedEvent = {
+  library: LibraryModpack[];
+};
+
 function isTauriRuntime(): boolean {
   return "__TAURI_INTERNALS__" in window;
+}
+
+function normalizeLibrary(library: LibraryModpack[]): LibraryModpack[] {
+  return library.map((instance) => ({
+    ...instance,
+    schemes: instance.schemes.map((scheme: LibraryScheme) => ({
+      ...scheme,
+      modpackId: scheme.modpackId ?? scheme.prismInstanceId ?? instance.id,
+    })),
+  }));
 }
 
 export async function discoverAppPaths(): Promise<AppDataPaths | null> {
@@ -116,49 +113,43 @@ export async function openAppDataFolder(): Promise<AppDataPaths | null> {
   return invoke<AppDataPaths>("open_app_data_folder");
 }
 
-export async function getCurseForgeKeyStatus(): Promise<CurseForgeCredentialStatus> {
+export async function discoverPrismLauncherRoots(): Promise<PrismRootValidation[]> {
+  if (!isTauriRuntime()) {
+    return [];
+  }
+
+  return invoke<PrismRootValidation[]>("discover_prism_launcher_roots");
+}
+
+export async function validatePrismLauncherRoot(rootPath: string): Promise<PrismRootValidation> {
   if (!isTauriRuntime()) {
     return {
-      state: "saved",
-      backend: "Browser fallback",
-      message: "Desktop builds use OS secure storage",
-      apiKey: null,
+      rootPath,
+      valid: false,
+      message: "Desktop builds validate PrismLauncher Launcher Root folders.",
+      instanceCount: 0,
+      instances: [],
     };
   }
 
-  return invoke<CurseForgeCredentialStatus>("get_curseforge_key_status");
+  return invoke<PrismRootValidation>("validate_prism_launcher_root", { rootPath });
 }
 
-export async function saveCurseForgeApiKey(apiKey: string): Promise<CurseForgeCredentialStatus> {
+export async function selectPrismLauncherRoot(rootPath: string): Promise<PrismRootSelection> {
   if (!isTauriRuntime()) {
-    if (apiKey.trim().length === 0 || apiKey.toLowerCase().includes("invalid")) {
-      return {
-        state: "unavailable",
-        backend: "Browser fallback",
-        message: "CurseForge did not accept this API key",
-        apiKey: null,
-      };
-    }
     return {
-      state: "saved",
-      backend: "Browser fallback",
-      message: "Desktop builds save this in OS secure storage",
-      apiKey: null,
+      validation: await validatePrismLauncherRoot(rootPath),
+      library: [],
+      relinkCandidates: [],
     };
   }
 
-  return invoke<CurseForgeCredentialStatus>("save_curseforge_api_key", { apiKey });
-}
-
-export async function checkCurseForgeApiKey(apiKey: string): Promise<void> {
-  if (!isTauriRuntime()) {
-    if (apiKey.trim().length === 0 || apiKey.toLowerCase().includes("invalid")) {
-      throw new Error("CurseForge did not accept this API key");
-    }
-    return;
-  }
-
-  return invoke<void>("check_curseforge_api_key", { apiKey });
+  const selection = await invoke<PrismRootSelection>("select_prism_launcher_root", { rootPath });
+  return {
+    ...selection,
+    library: normalizeLibrary(selection.library),
+    relinkCandidates: selection.relinkCandidates ?? [],
+  };
 }
 
 let browserLibrary: LibraryModpack[] = [];
@@ -169,7 +160,31 @@ export async function listLibrary(): Promise<LibraryModpack[]> {
     return structuredClone(browserLibrary);
   }
 
-  return invoke<LibraryModpack[]>("list_library");
+  return normalizeLibrary(await invoke<LibraryModpack[]>("list_library"));
+}
+
+export async function listPrismRelinkCandidates(): Promise<PrismRelinkCandidate[]> {
+  if (!isTauriRuntime()) {
+    return [];
+  }
+
+  return invoke<PrismRelinkCandidate[]>("list_prism_relink_candidates");
+}
+
+export async function confirmPrismInstanceRelink(
+  existingId: number,
+  discoveredIdentityFingerprint: string,
+): Promise<LibraryModpack[]> {
+  if (!isTauriRuntime()) {
+    return structuredClone(browserLibrary);
+  }
+
+  return normalizeLibrary(
+    await invoke<LibraryModpack[]>("confirm_prism_instance_relink", {
+      existingId,
+      discoveredIdentityFingerprint,
+    }),
+  );
 }
 
 export async function createScheme(
@@ -178,12 +193,12 @@ export async function createScheme(
   dimensions: [number, number, number],
 ): Promise<LibraryModpack[]> {
   if (!isTauriRuntime()) {
-    browserLibrary = browserLibrary.map((modpack) =>
-      modpack.id === modpackId
+    browserLibrary = browserLibrary.map((instance) =>
+      instance.id === modpackId && instance.status === "ready"
         ? {
-            ...modpack,
+            ...instance,
             schemes: [
-              ...modpack.schemes,
+              ...instance.schemes,
               {
                 id: browserNextSchemeId++,
                 modpackId,
@@ -192,67 +207,46 @@ export async function createScheme(
               },
             ],
           }
-        : modpack,
+        : instance,
     );
     return structuredClone(browserLibrary);
   }
 
-  return invoke<LibraryModpack[]>("create_scheme", {
-    modpackId,
-    name,
-    sizeX: dimensions[0],
-    sizeY: dimensions[1],
-    sizeZ: dimensions[2],
-  });
+  return normalizeLibrary(
+    await invoke<LibraryModpack[]>("create_scheme", {
+      prismInstanceId: modpackId,
+      name,
+      sizeX: dimensions[0],
+      sizeY: dimensions[1],
+      sizeZ: dimensions[2],
+    }),
+  );
 }
 
 export async function renameScheme(schemeId: number, name: string): Promise<LibraryModpack[]> {
   if (!isTauriRuntime()) {
-    browserLibrary = browserLibrary.map((modpack) => ({
-      ...modpack,
-      schemes: modpack.schemes.map((scheme) =>
+    browserLibrary = browserLibrary.map((instance) => ({
+      ...instance,
+      schemes: instance.schemes.map((scheme) =>
         scheme.id === schemeId ? { ...scheme, name } : scheme,
       ),
     }));
     return structuredClone(browserLibrary);
   }
 
-  return invoke<LibraryModpack[]>("rename_scheme", { schemeId, name });
+  return normalizeLibrary(await invoke<LibraryModpack[]>("rename_scheme", { schemeId, name }));
 }
 
 export async function deleteScheme(schemeId: number): Promise<LibraryModpack[]> {
   if (!isTauriRuntime()) {
-    browserLibrary = browserLibrary.map((modpack) => ({
-      ...modpack,
-      schemes: modpack.schemes.filter((scheme) => scheme.id !== schemeId),
+    browserLibrary = browserLibrary.map((instance) => ({
+      ...instance,
+      schemes: instance.schemes.filter((scheme) => scheme.id !== schemeId),
     }));
     return structuredClone(browserLibrary);
   }
 
-  return invoke<LibraryModpack[]>("delete_scheme", { schemeId });
-}
-
-export async function renameImportedModpack(
-  modpackId: number,
-  name: string,
-): Promise<LibraryModpack[]> {
-  if (!isTauriRuntime()) {
-    browserLibrary = browserLibrary.map((modpack) =>
-      modpack.id === modpackId ? { ...modpack, localName: browserUniqueModpackName(name, modpackId) } : modpack,
-    );
-    return structuredClone(browserLibrary);
-  }
-
-  return invoke<LibraryModpack[]>("rename_imported_modpack", { modpackId, name });
-}
-
-export async function deleteImportedModpack(modpackId: number): Promise<LibraryModpack[]> {
-  if (!isTauriRuntime()) {
-    browserLibrary = browserLibrary.filter((modpack) => modpack.id !== modpackId);
-    return structuredClone(browserLibrary);
-  }
-
-  return invoke<LibraryModpack[]>("delete_imported_modpack", { modpackId });
+  return normalizeLibrary(await invoke<LibraryModpack[]>("delete_scheme", { schemeId }));
 }
 
 export async function getSchemeRenderScene(schemeId: number): Promise<RenderScene> {
@@ -301,7 +295,7 @@ export async function getAiIntegrationStatus(): Promise<AgentStatus> {
       endpoint: "http://127.0.0.1:47392/mcp",
       protocolVersion: "2025-06-18",
       activeClient: null,
-      toolCount: 19,
+      toolCount: 18,
     };
   }
 
@@ -335,102 +329,14 @@ export async function listenToAgentEvents(
   });
 }
 
-export async function searchCurseForgeModpacks(query: string): Promise<CurseForgeProject[]> {
-  if (!isTauriRuntime()) {
-    return [];
-  }
-
-  return invoke<CurseForgeProject[]>("search_curseforge_modpacks", { query });
-}
-
-export async function discoverCurseForgeReleases(
-  pageUrl: string,
-): Promise<CurseForgeReleaseDiscovery> {
-  if (!isTauriRuntime()) {
-    throw new Error("CurseForge release discovery requires the Tauri desktop app");
-  }
-
-  return invoke<CurseForgeReleaseDiscovery>("discover_curseforge_releases", { pageUrl });
-}
-
-export async function importCurseForgeModpack(
-  pageUrl: string,
-  fileId: number,
-  onProgress: (progress: ImportProgress) => void,
-): Promise<ImportedModpackResult> {
-  if (!isTauriRuntime()) {
-    void onProgress;
-    void pageUrl;
-    void fileId;
-    throw new Error("CurseForge import requires the Tauri desktop app");
-  }
-
-  const unlisten = await listen<ImportProgress>("modpack_import_progress", (event) => {
-    onProgress(event.payload);
-  });
-  try {
-    return await invoke<ImportedModpackResult>("import_curseforge_modpack", { pageUrl, fileId });
-  } finally {
-    unlisten();
-  }
-}
-
-export async function retryModpackImport(modpackId: number): Promise<LibraryModpack[]> {
-  if (!isTauriRuntime()) {
-    browserLibrary = browserLibrary.map((modpack) =>
-      modpack.id === modpackId
-        ? { ...modpack, importStatus: "importing", importMessage: "Retry queued..." }
-        : modpack,
-    );
-    return structuredClone(browserLibrary);
-  }
-
-  return invoke<LibraryModpack[]>("retry_modpack_import", { modpackId });
-}
-
-export async function listenToModpackImportStatus(
-  onChanged: (event: ModpackImportStatusChanged) => void,
+export async function listenToLibraryChanged(
+  onChanged: (event: LibraryChangedEvent) => void,
 ): Promise<() => void> {
   if (!isTauriRuntime()) {
     return () => {};
   }
 
-  return listen<ModpackImportStatusChanged>("modpack_import_status_changed", (event) => {
-    onChanged(event.payload);
+  return listen<LibraryChangedEvent>("library_changed", (event) => {
+    onChanged({ library: normalizeLibrary(event.payload.library) });
   });
-}
-
-export async function listenToModpackImportProgress(
-  onProgress: (event: ImportProgress) => void,
-): Promise<() => void> {
-  if (!isTauriRuntime()) {
-    return () => {};
-  }
-
-  return listen<ImportProgress>("modpack_import_progress", (event) => {
-    onProgress(event.payload);
-  });
-}
-
-export async function cancelCurseForgeImport(): Promise<void> {
-  if (!isTauriRuntime()) {
-    return;
-  }
-
-  return invoke<void>("cancel_curseforge_import");
-}
-
-function browserUniqueModpackName(requestedName: string, excludingId: number): string {
-  const baseName = requestedName.trim() || "Imported modpack";
-  let candidate = baseName;
-  let suffix = 2;
-
-  while (
-    browserLibrary.some((modpack) => modpack.id !== excludingId && modpack.localName === candidate)
-  ) {
-    candidate = `${baseName} (${suffix})`;
-    suffix += 1;
-  }
-
-  return candidate;
 }

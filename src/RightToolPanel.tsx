@@ -1,3 +1,4 @@
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { ChevronDown, Database, Layers3 } from "lucide-react";
 import { useState } from "react";
 
@@ -89,8 +90,21 @@ export function RightToolPanel({
                 <ul className="materials-list">
                   {toolContext.materials.map((material) => (
                     <li key={material.blockId}>
-                      <span>{material.blockId}</span>
-                      <strong>{material.count}</strong>
+                      <MaterialPreview texturePath={material.texturePath} />
+                      <span className="material-name">
+                        <span>{material.displayName ?? material.blockId}</span>
+                        {material.displayName && material.displayName !== material.blockId ? (
+                          <small>{material.blockId}</small>
+                        ) : null}
+                      </span>
+                      <strong className="material-count">
+                        <span>{material.count}</span>
+                        {material.stackCount && material.maxStackSize ? (
+                          <small>
+                            {material.stackCount} {t("materials.stacks")}
+                          </small>
+                        ) : null}
+                      </strong>
                     </li>
                   ))}
                 </ul>
@@ -102,5 +116,20 @@ export function RightToolPanel({
         </section>
       </div>
     </aside>
+  );
+}
+
+function MaterialPreview({ texturePath }: { texturePath?: string | null }) {
+  if (!texturePath) {
+    return <span className="material-preview empty" aria-hidden="true" />;
+  }
+
+  return (
+    <img
+      alt=""
+      className="material-preview"
+      draggable={false}
+      src={convertFileSrc(texturePath)}
+    />
   );
 }

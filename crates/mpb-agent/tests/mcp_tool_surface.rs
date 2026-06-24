@@ -54,8 +54,7 @@ fn initializes_mcp_server_and_lists_full_phase_9_tool_surface() {
     assert_eq!(
         names,
         vec![
-            "list_imported_modpacks",
-            "add_modpack",
+            "list_instances",
             "list_schemes",
             "create_scheme",
             "rename_scheme",
@@ -100,16 +99,12 @@ fn tool_input_schemas_define_every_required_property() {
         }
     }
 
-    let add_modpack = tools
+    let create_scheme = tools
         .iter()
-        .find(|tool| tool["name"] == "add_modpack")
-        .expect("add_modpack tool");
+        .find(|tool| tool["name"] == "create_scheme")
+        .expect("create_scheme tool");
     assert_eq!(
-        add_modpack["inputSchema"]["properties"]["pageUrl"]["type"],
-        "string"
-    );
-    assert_eq!(
-        add_modpack["inputSchema"]["properties"]["fileId"]["type"],
+        create_scheme["inputSchema"]["properties"]["instanceId"]["type"],
         "integer"
     );
 }

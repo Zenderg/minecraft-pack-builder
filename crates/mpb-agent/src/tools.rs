@@ -7,9 +7,9 @@ use mpb_core::{
 };
 use mpb_export::{write_scheme_export, ExportError, ExportFormat};
 use mpb_storage::{
-    ImportStatus, LibraryDatabase, LibraryModpack, LibraryRepository, NewScheme, StoredScheme,
+    LibraryDatabase, LibraryInstance, LibraryRepository, NewScheme, PrismInstanceStatus,
+    StoredScheme,
 };
-use serde::Deserialize;
 use serde_json::{json, Value};
 use thiserror::Error;
 
@@ -78,35 +78,30 @@ pub(crate) fn dispatch_tool(
     arguments: Value,
 ) -> Result<ToolOutcome, ToolFailure> {
     match name {
-        "list_imported_modpacks" => Ok(ToolOutcome::read(json!({
-            "modpacks": workspace.modpacks
+        "list_instances" => Ok(ToolOutcome::read(json!({
+            "instances": workspace.instances
         }))),
-        "add_modpack" => Err(ToolFailure::new(
-            "curseforge_import_requires_desktop_backend",
-            "Modpack import must run through the desktop backend with secure CurseForge credentials.",
-            json!({ "acceptedArguments": ["pageUrl", "fileId"] }),
-        )),
         "list_schemes" => {
-            let modpack_id = required_i64(&arguments, "modpackId")?;
+            let instance_id = required_i64(&arguments, "instanceId")?;
             Ok(ToolOutcome::read(json!({
                 "schemes": workspace
                     .schemes
                     .values()
-                    .filter(|scheme| scheme.modpack_id == modpack_id)
+                    .filter(|scheme| scheme.instance_id == instance_id)
                     .map(scheme_summary)
                     .collect::<Vec<_>>()
             })))
         }
         "create_scheme" => {
-            let modpack_id = required_i64(&arguments, "modpackId")?;
-            ensure_modpack_exists(workspace, modpack_id)?;
+            let instance_id = required_i64(&arguments, "instanceId")?;
+            ensure_instance_ready(workspace, instance_id)?;
             let name = required_string(&arguments, "name")?;
             let dimensions = parse_dimensions(&arguments)?;
             let id = workspace.next_scheme_id;
             workspace.next_scheme_id += 1;
             let scheme = AgentScheme {
                 id,
-                modpack_id,
+                instance_id,
                 name: name.clone(),
                 scheme: mpb_core::Scheme::new(&name, dimensions),
             };
@@ -226,7 +221,10 @@ pub(crate) fn dispatch_tool(
             let scheme_id = required_i64(&arguments, "schemeId")?;
             let name = required_string(&arguments, "name")?;
             let scheme = workspace_scheme_mut(workspace, scheme_id)?;
-            let stage_id = scheme.scheme.add_stage(&name).map_err(ToolFailure::scheme)?;
+            let stage_id = scheme
+                .scheme
+                .add_stage(&name)
+                .map_err(ToolFailure::scheme)?;
             Ok(ToolOutcome::changed(
                 json!({ "stageId": stage_id, "scheme": scheme_content(scheme) }),
                 AgentEvent::SchemeChanged { scheme_id },
@@ -285,7 +283,9 @@ pub(crate) fn dispatch_tool(
         "get_materials" => {
             let scheme_id = required_i64(&arguments, "schemeId")?;
             let scheme = workspace_scheme(workspace, scheme_id)?;
-            Ok(ToolOutcome::read(json!({ "materials": scheme.scheme.materials() })))
+            Ok(ToolOutcome::read(json!({
+                "materials": scheme_materials_content(&scheme.scheme, None)
+            })))
         }
         "export_scheme" => {
             let scheme_id = required_i64(&arguments, "schemeId")?;
@@ -318,36 +318,31 @@ pub(crate) fn dispatch_storage_tool(
 ) -> Result<ToolOutcome, ToolFailure> {
     let repository = open_repository(config.database_path)?;
     match name {
-        "list_imported_modpacks" => {
+        "list_instances" => {
             let library = repository.list_library().map_err(ToolFailure::storage)?;
             Ok(ToolOutcome::read(json!({
-                "modpacks": library.iter().map(storage_modpack_summary).collect::<Vec<_>>()
+                "instances": library.iter().map(storage_instance_summary).collect::<Vec<_>>()
             })))
         }
-        "add_modpack" => Err(ToolFailure::new(
-            "curseforge_import_requires_desktop_backend",
-            "Modpack import must run through the desktop backend with secure CurseForge credentials.",
-            json!({ "acceptedArguments": ["pageUrl", "fileId"] }),
-        )),
         "list_schemes" => {
-            let modpack_id = required_i64(&arguments, "modpackId")?;
+            let instance_id = required_i64(&arguments, "instanceId")?;
             let library = repository.list_library().map_err(ToolFailure::storage)?;
-            let modpack = library
+            let instance = library
                 .iter()
-                .find(|modpack| modpack.id == modpack_id)
-                .ok_or_else(|| not_found("modpack", modpack_id))?;
+                .find(|instance| instance.id == instance_id)
+                .ok_or_else(|| not_found("instance", instance_id))?;
             Ok(ToolOutcome::read(json!({
-                "schemes": modpack.schemes.iter().map(storage_scheme_summary).collect::<Vec<_>>()
+                "schemes": instance.schemes.iter().map(storage_scheme_summary).collect::<Vec<_>>()
             })))
         }
         "create_scheme" => {
-            let modpack_id = required_i64(&arguments, "modpackId")?;
-            ensure_storage_modpack_ready(&repository, modpack_id)?;
+            let instance_id = required_i64(&arguments, "instanceId")?;
+            ensure_storage_instance_ready(&repository, instance_id)?;
             let name = required_string(&arguments, "name")?;
             let dimensions = parse_dimensions(&arguments)?;
             let record = repository
                 .create_scheme(NewScheme {
-                    modpack_id,
+                    prism_instance_id: instance_id,
                     name,
                     size_x: i64::from(dimensions.x),
                     size_y: i64::from(dimensions.y),
@@ -391,9 +386,12 @@ pub(crate) fn dispatch_storage_tool(
             let stored = repository
                 .load_scheme(scheme_id)
                 .map_err(ToolFailure::storage)?;
+            let registry_report =
+                registry_report_for_scheme(&repository, config.diagnostics_dir, &stored)?;
             Ok(ToolOutcome::read(stored_scheme_content(
                 &stored.record,
                 &stored.scheme,
+                Some(&registry_report),
             )))
         }
         "read_current_selection" => Ok(ToolOutcome::read(selection_content(*selection))),
@@ -405,7 +403,10 @@ pub(crate) fn dispatch_storage_tool(
                 let coordinate = parse_coordinate_field(arguments, "coordinate")?;
                 let block = parse_block(&arguments["block"])?;
                 scheme
-                    .apply(registry, SchemeOperation::Place(BlockPlacement { coordinate, block }))
+                    .apply(
+                        registry,
+                        SchemeOperation::Place(BlockPlacement { coordinate, block }),
+                    )
                     .map_err(ToolFailure::scheme)
             },
         ),
@@ -461,12 +462,20 @@ pub(crate) fn dispatch_storage_tool(
             let mut stored = repository
                 .load_scheme(scheme_id)
                 .map_err(ToolFailure::storage)?;
-            let stage_id = stored.scheme.add_stage(&name).map_err(ToolFailure::scheme)?;
+            let stage_id = stored
+                .scheme
+                .add_stage(&name)
+                .map_err(ToolFailure::scheme)?;
             repository
                 .save_scheme(scheme_id, &stored.scheme)
                 .map_err(ToolFailure::storage)?;
+            let registry_report =
+                registry_report_for_scheme(&repository, config.diagnostics_dir, &stored)?;
             Ok(ToolOutcome::changed(
-                json!({ "stageId": stage_id, "scheme": stored_scheme_content(&stored.record, &stored.scheme) }),
+                json!({
+                    "stageId": stage_id,
+                    "scheme": stored_scheme_content(&stored.record, &stored.scheme, Some(&registry_report))
+                }),
                 AgentEvent::SchemeChanged { scheme_id },
             ))
         }
@@ -484,8 +493,12 @@ pub(crate) fn dispatch_storage_tool(
             repository
                 .save_scheme(scheme_id, &stored.scheme)
                 .map_err(ToolFailure::storage)?;
+            let registry_report =
+                registry_report_for_scheme(&repository, config.diagnostics_dir, &stored)?;
             Ok(ToolOutcome::changed(
-                json!({ "scheme": stored_scheme_content(&stored.record, &stored.scheme) }),
+                json!({
+                    "scheme": stored_scheme_content(&stored.record, &stored.scheme, Some(&registry_report))
+                }),
                 AgentEvent::SchemeChanged { scheme_id },
             ))
         }
@@ -524,7 +537,11 @@ pub(crate) fn dispatch_storage_tool(
             let stored = repository
                 .load_scheme(scheme_id)
                 .map_err(ToolFailure::storage)?;
-            Ok(ToolOutcome::read(json!({ "materials": stored.scheme.materials() })))
+            let registry_report =
+                registry_report_for_scheme(&repository, config.diagnostics_dir, &stored)?;
+            Ok(ToolOutcome::read(json!({
+                "materials": scheme_materials_content(&stored.scheme, Some(&registry_report))
+            })))
         }
         "export_scheme" => {
             let scheme_id = required_i64(&arguments, "schemeId")?;
@@ -607,20 +624,14 @@ fn tool_recovery_message(code: &str) -> &'static str {
             "Adjust the request coordinates to stay inside the scheme dimensions, then call the tool again."
         }
         "unknown_block" | "invalid_block_state" => {
-            "Use a block id and states from the imported modpack registry, then call the tool again."
+            "Use a block id and states from the ready Prism instance registry, then call the tool again."
         }
-        "not_found" => "Refresh the library context and retry with an existing modpack or scheme id.",
-        "curseforge_import_requires_desktop_backend" => {
-            "Start modpack import through the desktop backend so credentials and files stay controlled."
-        }
-        "import_not_ready" => {
-            "Wait until modpack processing reaches Ready, refresh the library context, then retry."
-        }
-        "import_failed" => {
-            "Open the import diagnostics in the desktop app, fix the import problem, then retry."
+        "not_found" => "Refresh the library context and retry with an existing instance or scheme id.",
+        "instance_not_ready" => {
+            "Wait until Prism instance indexing reaches Ready, or fix the instance diagnostics in the desktop app."
         }
         "missing_asset_registry" | "invalid_asset_registry" => {
-            "Re-run or retry the modpack import so the desktop app can build the block registry."
+            "Let the desktop app finish Prism instance indexing so it can build the block registry."
         }
         "storage_error" => "Refresh the desktop app state and retry. If the error repeats, inspect the app diagnostics.",
         _ => "Adjust the request, keep the current scheme open, and call the tool again.",
@@ -632,24 +643,25 @@ fn open_repository(database_path: &Path) -> Result<LibraryRepository, ToolFailur
     Ok(LibraryRepository::new(database))
 }
 
-fn storage_modpack_summary(modpack: &LibraryModpack) -> Value {
+fn storage_instance_summary(instance: &LibraryInstance) -> Value {
     json!({
-        "id": modpack.id,
-        "localName": &modpack.local_name,
-        "sourceUrl": &modpack.source_url,
-        "versionName": &modpack.version_name,
-        "minecraftVersion": &modpack.minecraft_version,
-        "loader": &modpack.loader,
-        "importStatus": modpack.import_status,
-        "importMessage": &modpack.import_message,
-        "schemeCount": modpack.schemes.len(),
+        "id": instance.id,
+        "instanceId": &instance.instance_id,
+        "displayName": &instance.display_name,
+        "instancePath": &instance.instance_path,
+        "minecraftVersion": &instance.minecraft_version,
+        "loader": &instance.loader,
+        "loaderVersion": &instance.loader_version,
+        "status": instance.status,
+        "statusMessage": &instance.status_message,
+        "schemeCount": instance.schemes.len(),
     })
 }
 
 fn storage_scheme_summary(scheme: &mpb_storage::SchemeRecord) -> Value {
     json!({
         "id": scheme.id,
-        "modpackId": scheme.modpack_id,
+        "instanceId": scheme.prism_instance_id,
         "name": &scheme.name,
         "dimensions": [scheme.dimensions.0, scheme.dimensions.1, scheme.dimensions.2],
     })
@@ -659,18 +671,22 @@ fn stored_scheme_summary(record: &mpb_storage::SchemeRecord, scheme: &Scheme) ->
     let dimensions = scheme.dimensions();
     json!({
         "id": record.id,
-        "modpackId": record.modpack_id,
+        "instanceId": record.prism_instance_id,
         "name": scheme.name(),
         "dimensions": [dimensions.x, dimensions.y, dimensions.z],
         "blockCount": scheme.block_count(),
     })
 }
 
-fn stored_scheme_content(record: &mpb_storage::SchemeRecord, scheme: &Scheme) -> Value {
+fn stored_scheme_content(
+    record: &mpb_storage::SchemeRecord,
+    scheme: &Scheme,
+    registry_report: Option<&Value>,
+) -> Value {
     let dimensions = scheme.dimensions();
     json!({
         "id": record.id,
-        "modpackId": record.modpack_id,
+        "instanceId": record.prism_instance_id,
         "name": scheme.name(),
         "dimensions": [dimensions.x, dimensions.y, dimensions.z],
         "stages": scheme.stages(),
@@ -679,39 +695,32 @@ fn stored_scheme_content(record: &mpb_storage::SchemeRecord, scheme: &Scheme) ->
             .map(|(coordinate, block)| block_content(*coordinate, block))
             .collect::<Vec<_>>(),
         "blockCount": scheme.block_count(),
-        "materials": scheme.materials(),
+        "materials": scheme_materials_content(scheme, registry_report),
     })
 }
 
-fn ensure_storage_modpack_ready(
+fn ensure_storage_instance_ready(
     repository: &LibraryRepository,
-    modpack_id: i64,
+    instance_id: i64,
 ) -> Result<(), ToolFailure> {
-    let modpack = repository
-        .get_imported_modpack(modpack_id)
+    let instance = repository
+        .get_prism_instance(instance_id)
         .map_err(ToolFailure::storage)?;
-    match modpack.import_status {
-        ImportStatus::Imported => Ok(()),
-        ImportStatus::Importing => Err(ToolFailure::new(
-            "import_not_ready",
+    if instance.status == PrismInstanceStatus::Ready {
+        Ok(())
+    } else {
+        Err(ToolFailure::new(
+            "instance_not_ready",
             format!(
-                "Modpack {} is still processing and cannot accept scheme changes yet.",
-                modpack.local_name
-            ),
-            json!({ "modpackId": modpack_id, "importStatus": modpack.import_status }),
-        )),
-        ImportStatus::Failed => Err(ToolFailure::new(
-            "import_failed",
-            format!(
-                "Modpack {} failed to import and cannot accept scheme changes.",
-                modpack.local_name
+                "Prism instance {} is {} and cannot accept scheme changes yet.",
+                instance.display_name, instance.status
             ),
             json!({
-                "modpackId": modpack_id,
-                "importStatus": modpack.import_status,
-                "importMessage": modpack.import_message,
+                "instanceId": instance_id,
+                "status": instance.status,
+                "statusMessage": instance.status_message,
             }),
-        )),
+        ))
     }
 }
 
@@ -725,14 +734,17 @@ fn mutate_stored_scheme(
     let mut stored = repository
         .load_scheme(scheme_id)
         .map_err(ToolFailure::storage)?;
-    ensure_storage_modpack_ready(repository, stored.record.modpack_id)?;
+    ensure_storage_instance_ready(repository, stored.record.prism_instance_id)?;
     let registry = registry_for_scheme(repository, diagnostics_dir, &stored)?;
     operation(&mut stored.scheme, &registry, arguments)?;
     repository
         .save_scheme(scheme_id, &stored.scheme)
         .map_err(ToolFailure::storage)?;
+    let registry_report = registry_report_for_scheme(repository, diagnostics_dir, &stored)?;
     Ok(ToolOutcome::changed(
-        json!({ "scheme": stored_scheme_content(&stored.record, &stored.scheme) }),
+        json!({
+            "scheme": stored_scheme_content(&stored.record, &stored.scheme, Some(&registry_report))
+        }),
         AgentEvent::SchemeChanged { scheme_id },
     ))
 }
@@ -742,76 +754,84 @@ fn registry_for_scheme(
     diagnostics_dir: &Path,
     stored: &StoredScheme,
 ) -> Result<BlockRegistry, ToolFailure> {
-    let modpack = repository
-        .get_imported_modpack(stored.record.modpack_id)
+    let instance = repository
+        .get_prism_instance(stored.record.prism_instance_id)
         .map_err(ToolFailure::storage)?;
-    if modpack.import_status != ImportStatus::Imported {
-        ensure_storage_modpack_ready(repository, modpack.id)?;
+    if instance.status != PrismInstanceStatus::Ready {
+        ensure_storage_instance_ready(repository, instance.id)?;
     }
-    let cache_dir = modpack.cache_dir.ok_or_else(|| {
-        ToolFailure::new(
-            "missing_asset_registry",
-            format!(
-                "Modpack {} has no asset cache directory.",
-                modpack.local_name
-            ),
-            json!({ "modpackId": modpack.id }),
-        )
-    })?;
-    let report_stem = cache_dir
-        .file_name()
-        .and_then(|value| value.to_str())
-        .ok_or_else(|| {
-            ToolFailure::new(
-                "missing_asset_registry",
-                format!(
-                    "Modpack {} has no readable asset cache directory.",
-                    modpack.local_name
-                ),
-                json!({ "modpackId": modpack.id }),
-            )
-        })?;
-    let report_path = diagnostics_dir.join(format!("{report_stem}-assets.json"));
+    let report = registry_report_for_instance(diagnostics_dir, &instance)?;
+    block_registry_from_report(&report, instance.id)
+}
+
+fn registry_report_for_scheme(
+    repository: &LibraryRepository,
+    diagnostics_dir: &Path,
+    stored: &StoredScheme,
+) -> Result<Value, ToolFailure> {
+    let instance = repository
+        .get_prism_instance(stored.record.prism_instance_id)
+        .map_err(ToolFailure::storage)?;
+    if instance.status != PrismInstanceStatus::Ready {
+        ensure_storage_instance_ready(repository, instance.id)?;
+    }
+    registry_report_for_instance(diagnostics_dir, &instance)
+}
+
+fn registry_report_for_instance(
+    diagnostics_dir: &Path,
+    instance: &mpb_storage::PrismInstanceRecord,
+) -> Result<Value, ToolFailure> {
+    let report_path = diagnostics_dir.join(format!(
+        "{}-registry.json",
+        safe_report_stem(&instance.identity_fingerprint)
+    ));
     let json_text = std::fs::read_to_string(&report_path).map_err(|error| {
         ToolFailure::new(
             "missing_asset_registry",
             format!(
-                "Could not read imported block registry at {}: {error}",
+                "Could not read Prism instance block registry at {}: {error}",
                 report_path.display()
             ),
-            json!({ "modpackId": modpack.id, "path": report_path }),
+            json!({ "instanceId": instance.id, "path": report_path }),
         )
     })?;
-    let report: AssetRegistryReport = serde_json::from_str(&json_text).map_err(|error| {
+    serde_json::from_str(&json_text).map_err(|error| {
         ToolFailure::new(
             "invalid_asset_registry",
             format!(
-                "Could not parse imported block registry at {}: {error}",
+                "Could not parse Prism instance block registry at {}: {error}",
                 report_path.display()
             ),
-            json!({ "modpackId": modpack.id, "path": report_path }),
+            json!({ "instanceId": instance.id, "path": report_path }),
         )
-    })?;
-    Ok(BlockRegistry::from_block_ids(
-        report.blocks.into_iter().map(|block| block.identifier),
-    ))
+    })
 }
 
-#[derive(Debug, Deserialize)]
-struct AssetRegistryReport {
-    blocks: Vec<AssetRegistryBlock>,
-}
-
-#[derive(Debug, Deserialize)]
-struct AssetRegistryBlock {
-    identifier: String,
+fn block_registry_from_report(
+    report: &Value,
+    instance_id: i64,
+) -> Result<BlockRegistry, ToolFailure> {
+    let blocks = report["blocks"]
+        .as_array()
+        .ok_or_else(|| {
+            ToolFailure::new(
+                "invalid_asset_registry",
+                "Prism registry report has no blocks array",
+                json!({ "instanceId": instance_id }),
+            )
+        })?
+        .iter()
+        .filter_map(|block| block["identifier"].as_str().map(ToString::to_string))
+        .collect::<Vec<_>>();
+    Ok(BlockRegistry::from_block_ids(blocks))
 }
 
 fn scheme_summary(scheme: &AgentScheme) -> Value {
     let dimensions = scheme.scheme.dimensions();
     json!({
         "id": scheme.id,
-        "modpackId": scheme.modpack_id,
+        "instanceId": scheme.instance_id,
         "name": scheme.name,
         "dimensions": [dimensions.x, dimensions.y, dimensions.z],
         "blockCount": scheme.scheme.block_count()
@@ -822,7 +842,7 @@ fn scheme_content(scheme: &AgentScheme) -> Value {
     let dimensions = scheme.scheme.dimensions();
     json!({
         "id": scheme.id,
-        "modpackId": scheme.modpack_id,
+        "instanceId": scheme.instance_id,
         "name": scheme.name,
         "dimensions": [dimensions.x, dimensions.y, dimensions.z],
         "stages": scheme.scheme.stages(),
@@ -832,8 +852,77 @@ fn scheme_content(scheme: &AgentScheme) -> Value {
             .map(|(coordinate, block)| block_content(*coordinate, block))
             .collect::<Vec<_>>(),
         "blockCount": scheme.scheme.block_count(),
-        "materials": scheme.scheme.materials(),
+        "materials": scheme_materials_content(&scheme.scheme, None),
     })
+}
+
+#[derive(Debug, Clone, Default)]
+struct MaterialMetadata {
+    display_name: Option<String>,
+    item_id: Option<String>,
+    max_stack_size: Option<u32>,
+    texture_path: Option<String>,
+}
+
+fn scheme_materials_content(scheme: &Scheme, registry_report: Option<&Value>) -> Vec<Value> {
+    let metadata = registry_report
+        .map(registry_material_metadata)
+        .unwrap_or_default();
+    scheme
+        .materials()
+        .into_iter()
+        .map(|line| {
+            let material = metadata.get(&line.block_id).cloned().unwrap_or_default();
+            let max_stack_size = material.max_stack_size;
+            json!({
+                "blockId": line.block_id,
+                "displayName": material.display_name.unwrap_or_else(|| line.block_id.clone()),
+                "count": line.count,
+                "itemId": material.item_id,
+                "maxStackSize": max_stack_size,
+                "stackCount": max_stack_size
+                    .filter(|size| *size > 0)
+                    .map(|size| line.count.div_ceil(size)),
+                "texturePath": material.texture_path,
+            })
+        })
+        .collect()
+}
+
+fn registry_material_metadata(report: &Value) -> BTreeMap<String, MaterialMetadata> {
+    report
+        .get("blocks")
+        .and_then(Value::as_array)
+        .map(|blocks| {
+            blocks
+                .iter()
+                .filter_map(|block| {
+                    let identifier = block.get("identifier")?.as_str()?.to_string();
+                    Some((
+                        identifier,
+                        MaterialMetadata {
+                            display_name: block
+                                .get("displayName")
+                                .and_then(Value::as_str)
+                                .map(ToString::to_string),
+                            item_id: block
+                                .get("itemId")
+                                .and_then(Value::as_str)
+                                .map(ToString::to_string),
+                            max_stack_size: block
+                                .get("maxStackSize")
+                                .and_then(Value::as_u64)
+                                .and_then(|value| u32::try_from(value).ok()),
+                            texture_path: block
+                                .get("texturePath")
+                                .and_then(Value::as_str)
+                                .map(ToString::to_string),
+                        },
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn block_content(coordinate: Coordinate, block: &SchemeBlock) -> Value {
@@ -953,6 +1042,24 @@ fn required_array3(arguments: &Value, field: &str) -> Result<[i32; 3], ToolFailu
     Ok(parsed)
 }
 
+fn safe_report_stem(value: &str) -> String {
+    let cleaned = value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    if cleaned.is_empty() {
+        "prism-instance".to_string()
+    } else {
+        cleaned
+    }
+}
+
 fn required_string(arguments: &Value, field: &str) -> Result<String, ToolFailure> {
     arguments
         .get(field)
@@ -976,15 +1083,23 @@ fn required_u32(arguments: &Value, field: &str) -> Result<u32, ToolFailure> {
         .map_err(|_| invalid_arguments(format!("{field} must be a positive integer")))
 }
 
-fn ensure_modpack_exists(workspace: &AgentWorkspace, modpack_id: i64) -> Result<(), ToolFailure> {
-    if workspace
-        .modpacks
+fn ensure_instance_ready(workspace: &AgentWorkspace, instance_id: i64) -> Result<(), ToolFailure> {
+    let instance = workspace
+        .instances
         .iter()
-        .any(|modpack| modpack.id == modpack_id)
-    {
+        .find(|instance| instance.id == instance_id)
+        .ok_or_else(|| not_found("instance", instance_id))?;
+    if instance.status == "ready" {
         Ok(())
     } else {
-        Err(not_found("modpack", modpack_id))
+        Err(ToolFailure::new(
+            "instance_not_ready",
+            format!(
+                "Prism instance {} is {} and cannot accept scheme changes yet.",
+                instance.display_name, instance.status
+            ),
+            json!({ "instanceId": instance_id, "status": instance.status }),
+        ))
     }
 }
 
@@ -1023,4 +1138,147 @@ fn not_found(entity: &'static str, id: i64) -> ToolFailure {
 #[allow(dead_code)]
 fn material_count(materials: &[MaterialLine]) -> u32 {
     materials.iter().map(|line| line.count).sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use mpb_core::{BlockPlacement, Coordinate};
+    use mpb_storage::{NewPrismInstance, NewScheme};
+
+    use super::*;
+
+    #[test]
+    fn storage_get_materials_uses_registry_metadata_without_faking_stack_sizes() {
+        let test_dir = std::env::temp_dir().join(format!(
+            "mpb-agent-materials-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let _ = fs::remove_dir_all(&test_dir);
+        fs::create_dir_all(&test_dir).expect("create test dir");
+        let database_path = test_dir.join("library.sqlite3");
+        let diagnostics_dir = test_dir.join("diagnostics");
+        fs::create_dir_all(&diagnostics_dir).expect("create diagnostics dir");
+
+        let database = LibraryDatabase::open(&database_path).expect("open database");
+        let repository = LibraryRepository::new(database);
+        let instance = repository
+            .upsert_prism_instance(NewPrismInstance {
+                instance_id: "aoc".to_string(),
+                display_name: "AOC".to_string(),
+                instance_path: PathBuf::from("/PrismLauncher/instances/aoc"),
+                minecraft_dir: PathBuf::from("/PrismLauncher/instances/aoc/minecraft"),
+                minecraft_version: Some("1.21.1".to_string()),
+                loader: Some("NeoForge".to_string()),
+                loader_version: Some("21.1.233".to_string()),
+                identity_fingerprint: "identity-aoc".to_string(),
+                content_fingerprint: "content-aoc".to_string(),
+                status: PrismInstanceStatus::Ready,
+                status_message: None,
+            })
+            .expect("insert instance");
+        let record = repository
+            .create_scheme(NewScheme {
+                prism_instance_id: instance.id,
+                name: "Factory".to_string(),
+                size_x: 5,
+                size_y: 5,
+                size_z: 5,
+            })
+            .expect("create scheme");
+        let mut stored = repository.load_scheme(record.id).expect("load scheme");
+        let registry = BlockRegistry::from_block_ids([
+            "minecraft:stone".to_string(),
+            "create:andesite_casing".to_string(),
+        ]);
+        for index in 0..65 {
+            stored
+                .scheme
+                .apply(
+                    &registry,
+                    SchemeOperation::Place(BlockPlacement::new(
+                        Coordinate::new(index % 5, (index / 5) % 5, index / 25),
+                        "minecraft:stone",
+                        [],
+                        StageRef::Unassigned,
+                    )),
+                )
+                .expect("place stone");
+        }
+        stored
+            .scheme
+            .apply(
+                &registry,
+                SchemeOperation::Place(BlockPlacement::new(
+                    Coordinate::new(4, 4, 4),
+                    "create:andesite_casing",
+                    [],
+                    StageRef::Unassigned,
+                )),
+            )
+            .expect("place casing");
+        repository
+            .save_scheme(record.id, &stored.scheme)
+            .expect("save scheme");
+
+        let report_path = diagnostics_dir.join("identity-aoc-registry.json");
+        fs::write(
+            &report_path,
+            serde_json::to_string_pretty(&json!({
+                "status": "ready",
+                "blocks": [
+                    {
+                        "identifier": "minecraft:stone",
+                        "displayName": "Stone",
+                        "itemId": "minecraft:stone",
+                        "maxStackSize": 64,
+                        "texturePath": "/tmp/stone.png"
+                    },
+                    {
+                        "identifier": "create:andesite_casing",
+                        "displayName": "Andesite Casing",
+                        "itemId": "create:andesite_casing",
+                        "maxStackSize": null,
+                        "texturePath": null
+                    }
+                ]
+            }))
+            .expect("serialize report"),
+        )
+        .expect("write report");
+
+        let outcome = dispatch_storage_tool(
+            StorageWorkspaceConfig {
+                database_path: &database_path,
+                diagnostics_dir: &diagnostics_dir,
+            },
+            &mut None,
+            "get_materials",
+            json!({ "schemeId": record.id }),
+        )
+        .expect("get materials");
+
+        let materials = outcome.value["materials"].as_array().expect("materials");
+        let stone = materials
+            .iter()
+            .find(|line| line["blockId"] == "minecraft:stone")
+            .expect("stone material");
+        assert_eq!(stone["displayName"], "Stone");
+        assert_eq!(stone["itemId"], "minecraft:stone");
+        assert_eq!(stone["maxStackSize"], 64);
+        assert_eq!(stone["stackCount"], 2);
+        assert_eq!(stone["texturePath"], "/tmp/stone.png");
+
+        let casing = materials
+            .iter()
+            .find(|line| line["blockId"] == "create:andesite_casing")
+            .expect("casing material");
+        assert_eq!(casing["displayName"], "Andesite Casing");
+        assert!(casing["maxStackSize"].is_null());
+        assert!(casing["stackCount"].is_null());
+
+        let _ = fs::remove_dir_all(&test_dir);
+    }
 }

@@ -22,9 +22,10 @@ mpb-core = { path = "../crates/mpb-core" }
 mpb-export = { path = "../crates/mpb-export" }
 mpb-render = { path = "../crates/mpb-render" }
 mpb-storage = { path = "../crates/mpb-storage" }
+notify = "6"
 serde.workspace = true
 serde_json.workspace = true
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2"
 

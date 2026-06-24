@@ -1,23 +1,26 @@
-export type ImportStatus = "imported" | "importing" | "failed";
+export type PrismInstanceStatus = "pending" | "indexing" | "ready" | "failed" | "missing";
 
 export type SchemeDimensions = [number, number, number];
 
 export type LibraryScheme = {
   id: number;
   modpackId: number;
+  prismInstanceId?: number;
   name: string;
   dimensions: SchemeDimensions;
 };
 
 export type LibraryModpack = {
   id: number;
-  localName: string;
-  sourceUrl: string | null;
-  versionName: string;
+  instanceId: string;
+  displayName: string;
+  instancePath: string;
+  minecraftDir: string;
   minecraftVersion: string | null;
   loader: string | null;
-  importStatus: ImportStatus;
-  importMessage: string | null;
+  loaderVersion: string | null;
+  status: PrismInstanceStatus;
+  statusMessage: string | null;
   schemes: LibraryScheme[];
 };
 
@@ -50,19 +53,15 @@ export type ModpackMenuPointerTarget = "menuButton" | "menuSurface" | "outside";
 export type LibraryDialogKind =
   | "createScheme"
   | "renameScheme"
-  | "renameModpack"
   | "infoModpack"
-  | "deleteScheme"
-  | "deleteModpack";
+  | "deleteScheme";
 export type LibraryDialogContent = {
   titleKey:
     | "library.createSchemeTitle"
     | "library.renameSchemeTitle"
-    | "library.renameModpackTitle"
     | "library.informationTitle"
-    | "library.deleteSchemeTitle"
-    | "library.deleteModpackTitle";
-  bodyKey?: "library.informationDescription" | "library.confirmDeleteScheme" | "library.confirmDeleteModpack";
+    | "library.deleteSchemeTitle";
+  bodyKey?: "library.informationDescription" | "library.confirmDeleteScheme";
   fieldKey?: "library.nameLabel";
   tone: "form" | "info" | "danger";
 };
@@ -146,8 +145,6 @@ export function getLibraryDialogContent(kind: LibraryDialogKind): LibraryDialogC
       return { titleKey: "library.createSchemeTitle", fieldKey: "library.nameLabel", tone: "form" };
     case "renameScheme":
       return { titleKey: "library.renameSchemeTitle", fieldKey: "library.nameLabel", tone: "form" };
-    case "renameModpack":
-      return { titleKey: "library.renameModpackTitle", fieldKey: "library.nameLabel", tone: "form" };
     case "infoModpack":
       return {
         titleKey: "library.informationTitle",
@@ -158,12 +155,6 @@ export function getLibraryDialogContent(kind: LibraryDialogKind): LibraryDialogC
       return {
         titleKey: "library.deleteSchemeTitle",
         bodyKey: "library.confirmDeleteScheme",
-        tone: "danger",
-      };
-    case "deleteModpack":
-      return {
-        titleKey: "library.deleteModpackTitle",
-        bodyKey: "library.confirmDeleteModpack",
         tone: "danger",
       };
   }

@@ -5,49 +5,45 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const tauriMocks = vi.hoisted(() => ({
-  cancelCurseForgeImport: vi.fn(),
-  checkCurseForgeApiKey: vi.fn(),
   checkForUpdates: vi.fn(),
+  confirmPrismInstanceRelink: vi.fn(),
   createScheme: vi.fn(),
-  deleteImportedModpack: vi.fn(),
   deleteScheme: vi.fn(),
   discoverAppPaths: vi.fn(),
+  discoverPrismLauncherRoots: vi.fn(),
   exportScheme: vi.fn(),
   getAiIntegrationStatus: vi.fn(),
-  getCurseForgeKeyStatus: vi.fn(),
   getSchemeRenderScene: vi.fn(),
   listLibrary: vi.fn(),
+  listPrismRelinkCandidates: vi.fn(),
   listenToAgentEvents: vi.fn(),
-  listenToModpackImportProgress: vi.fn(),
-  listenToModpackImportStatus: vi.fn(),
   openAppDataFolder: vi.fn(),
-  renameImportedModpack: vi.fn(),
   renameScheme: vi.fn(),
-  retryModpackImport: vi.fn(),
-  saveCurseForgeApiKey: vi.fn(),
+  listenToLibraryChanged: vi.fn(),
+  selectPrismLauncherRoot: vi.fn(),
 }));
 
 vi.mock("./tauri", () => ({
-  cancelCurseForgeImport: tauriMocks.cancelCurseForgeImport,
-  checkCurseForgeApiKey: tauriMocks.checkCurseForgeApiKey,
   checkForUpdates: tauriMocks.checkForUpdates,
+  confirmPrismInstanceRelink: tauriMocks.confirmPrismInstanceRelink,
   createScheme: tauriMocks.createScheme,
-  deleteImportedModpack: tauriMocks.deleteImportedModpack,
   deleteScheme: tauriMocks.deleteScheme,
   discoverAppPaths: tauriMocks.discoverAppPaths,
+  discoverPrismLauncherRoots: tauriMocks.discoverPrismLauncherRoots,
   exportScheme: tauriMocks.exportScheme,
   getAiIntegrationStatus: tauriMocks.getAiIntegrationStatus,
-  getCurseForgeKeyStatus: tauriMocks.getCurseForgeKeyStatus,
   getSchemeRenderScene: tauriMocks.getSchemeRenderScene,
   listLibrary: tauriMocks.listLibrary,
+  listPrismRelinkCandidates: tauriMocks.listPrismRelinkCandidates,
   listenToAgentEvents: tauriMocks.listenToAgentEvents,
-  listenToModpackImportProgress: tauriMocks.listenToModpackImportProgress,
-  listenToModpackImportStatus: tauriMocks.listenToModpackImportStatus,
+  listenToLibraryChanged: tauriMocks.listenToLibraryChanged,
   openAppDataFolder: tauriMocks.openAppDataFolder,
-  renameImportedModpack: tauriMocks.renameImportedModpack,
   renameScheme: tauriMocks.renameScheme,
-  retryModpackImport: tauriMocks.retryModpackImport,
-  saveCurseForgeApiKey: tauriMocks.saveCurseForgeApiKey,
+  selectPrismLauncherRoot: tauriMocks.selectPrismLauncherRoot,
+}));
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: vi.fn(),
 }));
 
 import { App } from "./App";
@@ -114,19 +110,15 @@ describe("create scheme dialog", () => {
     installLocalStorageMock();
     localStorage.setItem("mpb.onboardingComplete", "true");
     tauriMocks.discoverAppPaths.mockResolvedValue(null);
-    tauriMocks.getCurseForgeKeyStatus.mockResolvedValue({
-      state: "saved",
-      backend: "Test secure storage",
-      message: null,
-      apiKey: null,
-    });
+    tauriMocks.discoverPrismLauncherRoots.mockResolvedValue([]);
+    tauriMocks.listPrismRelinkCandidates.mockResolvedValue([]);
     tauriMocks.getAiIntegrationStatus.mockResolvedValue({
       serverRunning: true,
       transport: "streamable-http",
       endpoint: "http://127.0.0.1:7777/mcp",
       protocolVersion: "2025-06-18",
       activeClient: null,
-      toolCount: 19,
+      toolCount: 18,
     });
     tauriMocks.checkForUpdates.mockResolvedValue({
       status: "current",
@@ -137,31 +129,34 @@ describe("create scheme dialog", () => {
       errorMessage: null,
     });
     tauriMocks.listenToAgentEvents.mockResolvedValue(() => {});
-    tauriMocks.listenToModpackImportStatus.mockResolvedValue(() => {});
-    tauriMocks.listenToModpackImportProgress.mockResolvedValue(() => {});
+    tauriMocks.listenToLibraryChanged.mockResolvedValue(() => {});
     tauriMocks.listLibrary.mockResolvedValue([
       {
         id: 1,
-        localName: "AOC - 1.0.0",
-        sourceUrl: "https://www.curseforge.com/minecraft/modpacks/aoc",
-        versionName: "1.0.0",
+        instanceId: "aoc",
+        displayName: "AOC - 1.0.0",
+        instancePath: "/PrismLauncher/instances/aoc",
+        minecraftDir: "/PrismLauncher/instances/aoc/.minecraft",
         minecraftVersion: "1.20.1",
         loader: "Forge",
-        importStatus: "imported",
-        importMessage: null,
+        loaderVersion: "47.4.0",
+        status: "ready",
+        statusMessage: null,
         schemes: [],
       },
     ]);
     tauriMocks.createScheme.mockResolvedValue([
       {
         id: 1,
-        localName: "AOC - 1.0.0",
-        sourceUrl: "https://www.curseforge.com/minecraft/modpacks/aoc",
-        versionName: "1.0.0",
+        instanceId: "aoc",
+        displayName: "AOC - 1.0.0",
+        instancePath: "/PrismLauncher/instances/aoc",
+        minecraftDir: "/PrismLauncher/instances/aoc/.minecraft",
         minecraftVersion: "1.20.1",
         loader: "Forge",
-        importStatus: "imported",
-        importMessage: null,
+        loaderVersion: "47.4.0",
+        status: "ready",
+        statusMessage: null,
         schemes: [
           {
             id: 10,

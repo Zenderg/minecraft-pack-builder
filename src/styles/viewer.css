@@ -2,6 +2,8 @@
   display: grid;
   grid-template-rows: minmax(0, 1fr);
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .content-grid {
@@ -11,6 +13,7 @@
   gap: 14px;
   height: 100%;
   min-height: 0;
+  overflow: hidden;
   padding: 14px;
 }
 
@@ -270,6 +273,8 @@
   display: grid;
   grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
   gap: 14px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .tools-sidebar {
@@ -407,15 +412,58 @@ code {
 }
 
 .materials-list li {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
   color: #cfdad5;
   font-size: 12px;
 }
 
 .materials-list strong {
   color: var(--accent-strong);
+}
+
+.material-preview {
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  image-rendering: pixelated;
+  object-fit: cover;
+}
+
+.material-preview.empty {
+  display: block;
+}
+
+.material-name,
+.material-count {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.material-name span,
+.material-name small,
+.material-count span,
+.material-count small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.material-name small,
+.material-count small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.material-count {
+  justify-items: end;
+  text-align: right;
 }
 
 .path-label {

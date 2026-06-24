@@ -3,35 +3,26 @@ use serde_json::{json, Value};
 pub(crate) fn tool_definitions() -> Vec<Value> {
     vec![
         tool_schema(
-            "list_imported_modpacks",
-            "List imported local modpack snapshots.",
+            "list_instances",
+            "List PrismLauncher instances from the active Launcher Root.",
             json!({}),
             vec![],
         ),
         tool_schema(
-            "add_modpack",
-            "Request a CurseForge modpack import through the desktop backend.",
-            json!({
-                "pageUrl": string_schema("CurseForge modpack page URL."),
-                "fileId": integer_schema("CurseForge release file id.")
-            }),
-            vec!["pageUrl", "fileId"],
-        ),
-        tool_schema(
             "list_schemes",
-            "List schemes inside an imported modpack.",
-            json!({ "modpackId": integer_schema("Imported modpack id.") }),
-            vec!["modpackId"],
+            "List schemes inside a PrismLauncher instance.",
+            json!({ "instanceId": integer_schema("Prism instance id.") }),
+            vec!["instanceId"],
         ),
         tool_schema(
             "create_scheme",
-            "Create a scheme in an imported modpack.",
+            "Create a scheme in a ready PrismLauncher instance.",
             json!({
-                "modpackId": integer_schema("Imported modpack id."),
+                "instanceId": integer_schema("Prism instance id."),
                 "name": string_schema("Scheme name."),
                 "dimensions": vector3_schema("Scheme dimensions [x, y, z].")
             }),
-            vec!["modpackId", "name", "dimensions"],
+            vec!["instanceId", "name", "dimensions"],
         ),
         tool_schema(
             "rename_scheme",
@@ -147,7 +138,7 @@ pub(crate) fn tool_definitions() -> Vec<Value> {
         ),
         tool_schema(
             "get_materials",
-            "Get material counts for a scheme.",
+            "Get material counts for a scheme, enriched with local Prism registry names, item ids, texture paths, and stack counts when authoritative max stack sizes are available.",
             json!({ "schemeId": integer_schema("Scheme id.") }),
             vec!["schemeId"],
         ),

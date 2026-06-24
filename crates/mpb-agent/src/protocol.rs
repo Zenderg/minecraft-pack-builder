@@ -128,7 +128,7 @@ pub(crate) fn initialize_result(id: Value) -> Value {
                 "name": "minecraft-pack-builder",
                 "version": env!("CARGO_PKG_VERSION")
             },
-            "instructions": "Use these tools to import modpacks, inspect and mutate schemes, validate changes, read selections, and prepare exports. Mutating tools are validated atomically by the Rust core."
+            "instructions": "Use these tools to inspect PrismLauncher instances, create and mutate schemes, validate changes, read selections, and prepare exports. Mutating tools are validated atomically by the Rust core."
         }),
     )
 }

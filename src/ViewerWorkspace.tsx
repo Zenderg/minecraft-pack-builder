@@ -1,6 +1,7 @@
 import { Cuboid, Loader2, MousePointer2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { InstancedMesh, Material } from "three";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import type { InstancedMesh, Material, Texture } from "three";
 
 import { formatBackendError } from "./backendErrors";
 import { translate } from "./i18n";
@@ -13,6 +14,7 @@ import {
   getVisibleRenderBlocks,
   type RenderMaterialLine,
   type RenderBlock,
+  type RenderModelElement,
   type RenderScene,
   type RenderSceneMetrics,
   type StageOption,
@@ -44,6 +46,33 @@ export type ViewerToolContext = {
 type ThreeRuntime = {
   rebuildBlocks: () => void;
 };
+
+type RenderBlockInstance = {
+  block: RenderBlock;
+  element: RenderModelElement;
+};
+
+function elementsForBlock(block: RenderBlock): RenderModelElement[] {
+  if (block.modelElements?.length) {
+    return block.modelElements;
+  }
+  return [
+    {
+      from: [0, 0, 0],
+      to: [16, 16, 16],
+      faceTexturePaths: block.faceTexturePaths ?? {},
+    },
+  ];
+}
+
+function parseModelVector(value: string): [number, number, number] {
+  const parts = value.split(",").map(Number);
+  return [
+    Number.isFinite(parts[0]) ? parts[0] : 0,
+    Number.isFinite(parts[1]) ? parts[1] : 0,
+    Number.isFinite(parts[2]) ? parts[2] : 0,
+  ];
+}
 
 export function ViewerWorkspace({
   modpack,
@@ -168,7 +197,7 @@ function ReadyViewer({
           <span>{scene.schemeName}</span>
           <code>{metrics.dimensions}</code>
         </span>
-        <span>{modpack?.localName ?? t("workspace.library")}</span>
+        <span>{modpack?.displayName ?? t("workspace.library")}</span>
         {metrics.isLargeScheme && <strong>{t("viewer.largeScheme")}</strong>}
       </div>
     </>
@@ -285,6 +314,32 @@ function ThreeSchemeViewer({
       const raycaster = new THREE.Raycaster();
       const pointer = new THREE.Vector2();
       const interactiveMeshes: Array<{ mesh: InstancedMesh; blocks: RenderBlock[] }> = [];
+      const textureLoader = new THREE.TextureLoader();
+      const materialKeySeparator = "\u001f";
+      const textureCache = new Map<string, Texture>();
+
+      function textureForPath(path: string): Texture {
+        const cached = textureCache.get(path);
+        if (cached) {
+          return cached;
+        }
+        const texture = textureLoader.load(
+          convertFileSrc(path),
+          (loaded) => {
+            loaded.needsUpdate = true;
+          },
+          undefined,
+          () => {
+            textureCache.delete(path);
+          },
+        );
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.magFilter = THREE.NearestFilter;
+        texture.minFilter = THREE.NearestMipmapNearestFilter;
+        texture.generateMipmaps = true;
+        textureCache.set(path, texture);
+        return texture;
+      }
 
       function rebuildBlocks() {
         for (const item of interactiveMeshes) {
@@ -294,36 +349,97 @@ function ThreeSchemeViewer({
         }
         interactiveMeshes.length = 0;
 
-        const byMaterial = new Map<string, RenderBlock[]>();
+        const byMaterial = new Map<string, RenderBlockInstance[]>();
         for (const block of blocksRef.current) {
-          const key = `${block.color}:${block.alpha ?? 1}`;
-          byMaterial.set(key, [...(byMaterial.get(key) ?? []), block]);
+          for (const element of elementsForBlock(block)) {
+            const faceTextures = element.faceTexturePaths ?? block.faceTexturePaths;
+            const key = [
+              element.from.join(","),
+              element.to.join(","),
+              faceTextures?.east ?? block.texturePath ?? "",
+              faceTextures?.west ?? block.texturePath ?? "",
+              faceTextures?.up ?? block.texturePath ?? "",
+              faceTextures?.down ?? block.texturePath ?? "",
+              faceTextures?.south ?? block.texturePath ?? "",
+              faceTextures?.north ?? block.texturePath ?? "",
+              block.color,
+              block.alpha ?? 1,
+            ].join(materialKeySeparator);
+            byMaterial.set(key, [...(byMaterial.get(key) ?? []), { block, element }]);
+          }
         }
 
-        for (const [key, materialBlocks] of byMaterial) {
-          const [color, alphaValue] = key.split(":");
-          const alpha = Number(alphaValue);
-          const geometry = new THREE.BoxGeometry(1, 1, 1);
-          const material = new THREE.MeshStandardMaterial({
+        for (const [key, materialInstances] of byMaterial) {
+          const [
+            fromValue,
+            toValue,
+            eastTexturePath,
+            westTexturePath,
+            upTexturePath,
+            downTexturePath,
+            southTexturePath,
+            northTexturePath,
             color,
-            opacity: alpha,
-            transparent: alpha < 1,
-            roughness: 0.88,
-            metalness: 0.04,
-          });
-          const mesh = new THREE.InstancedMesh(geometry, material, materialBlocks.length);
+            alphaValue,
+          ] = key.split(materialKeySeparator);
+          const from = parseModelVector(fromValue);
+          const to = parseModelVector(toValue);
+          const alpha = Number(alphaValue);
+          const texturePaths = [
+            eastTexturePath,
+            westTexturePath,
+            upTexturePath,
+            downTexturePath,
+            southTexturePath,
+            northTexturePath,
+          ];
+          const geometry = new THREE.BoxGeometry(
+            Math.max(0.001, (to[0] - from[0]) / 16),
+            Math.max(0.001, (to[1] - from[1]) / 16),
+            Math.max(0.001, (to[2] - from[2]) / 16),
+          );
+          const material = texturePaths.some(Boolean)
+            ? texturePaths.map((texturePath) => {
+                const texture = texturePath ? textureForPath(texturePath) : null;
+                return new THREE.MeshStandardMaterial({
+                  color: texture ? "#ffffff" : color,
+                  map: texture,
+                  opacity: alpha,
+                  transparent: true,
+                  alphaTest: texture ? 0.35 : 0,
+                  side: THREE.DoubleSide,
+                  roughness: 0.88,
+                  metalness: 0.04,
+                });
+              })
+            : new THREE.MeshStandardMaterial({
+                color,
+                opacity: alpha,
+                transparent: alpha < 1,
+                roughness: 0.88,
+                metalness: 0.04,
+              });
+          const mesh = new THREE.InstancedMesh(geometry, material, materialInstances.length);
           const matrix = new THREE.Matrix4();
-          materialBlocks.forEach((block, index) => {
+          materialInstances.forEach(({ block, element }, index) => {
+            const elementCenter = [
+              (element.from[0] + element.to[0]) / 32,
+              (element.from[1] + element.to[1]) / 32,
+              (element.from[2] + element.to[2]) / 32,
+            ] as const;
             matrix.makeTranslation(
-              block.coordinate[0] + 0.5,
-              block.coordinate[1] + 0.5,
-              block.coordinate[2] + 0.5,
+              block.coordinate[0] + elementCenter[0],
+              block.coordinate[1] + elementCenter[1],
+              block.coordinate[2] + elementCenter[2],
             );
             mesh.setMatrixAt(index, matrix);
           });
           mesh.instanceMatrix.needsUpdate = true;
           scene.add(mesh);
-          interactiveMeshes.push({ mesh, blocks: materialBlocks });
+          interactiveMeshes.push({
+            mesh,
+            blocks: materialInstances.map((instance) => instance.block),
+          });
         }
       }
 
@@ -398,6 +514,10 @@ function ThreeSchemeViewer({
           item.mesh.geometry.dispose();
           disposeMaterial(item.mesh.material);
         }
+        for (const texture of textureCache.values()) {
+          texture.dispose();
+        }
+        textureCache.clear();
         renderer.dispose();
       };
     }

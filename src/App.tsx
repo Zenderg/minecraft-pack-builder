@@ -1,14 +1,10 @@
-import {
-  Bot,
-  Box,
-  PackagePlus,
-  Settings,
-} from "lucide-react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { Bot, Box, Settings } from "lucide-react";
 import { useCallback, useEffect, useReducer, useState } from "react";
 
-import { getInitialLanguage, type Language, translate } from "./i18n";
 import { formatBackendError } from "./backendErrors";
-import { ImportWizardWorkspace } from "./importWizard";
+import { chooseExportDestination, type ExportFormat } from "./exportDialog";
+import { getInitialLanguage, type Language, translate } from "./i18n";
 import {
   clampSidebarWidth,
   createEmptyLibraryDraft,
@@ -22,43 +18,31 @@ import {
   type LibrarySelection,
   type SchemeDimensions,
 } from "./library";
+import { createInitialAppFlow, onboardingReducer, type PrismRootState } from "./onboarding";
+import { RightToolPanel } from "./RightToolPanel";
+import { type StageOptionId } from "./renderViewer";
 import {
-  createInitialAppFlow,
-  getCurseForgeKeyInputCheckResult,
-  onboardingReducer,
-  type CurseForgeKeyCheckResult,
-} from "./onboarding";
-import {
-  cancelCurseForgeImport,
-  checkCurseForgeApiKey,
   checkForUpdates,
   createScheme,
-  deleteImportedModpack,
   deleteScheme,
   discoverAppPaths,
+  discoverPrismLauncherRoots,
   exportScheme,
-  getCurseForgeKeyStatus,
   getAiIntegrationStatus,
+  confirmPrismInstanceRelink,
   listLibrary,
+  listPrismRelinkCandidates,
   listenToAgentEvents,
-  listenToModpackImportProgress,
-  listenToModpackImportStatus,
+  listenToLibraryChanged,
   openAppDataFolder,
-  renameImportedModpack,
   renameScheme,
-  retryModpackImport,
-  saveCurseForgeApiKey,
-  type AppDataPaths,
+  selectPrismLauncherRoot,
   type AgentStatus,
-  type CurseForgeCredentialStatus,
-  type ImportProgress,
+  type AppDataPaths,
+  type PrismRelinkCandidate,
+  type PrismRootValidation,
   type UpdateCheckResult,
 } from "./tauri";
-import { chooseExportDestination, type ExportFormat } from "./exportDialog";
-import { type StageOptionId } from "./renderViewer";
-import { RightToolPanel } from "./RightToolPanel";
-import { ViewerWorkspace, type ViewerToolContext } from "./ViewerWorkspace";
-import { ImportJobDialog, importJobStageFromMessage } from "./app/ImportJobDialog";
 import { ExportSchemeDialog } from "./app/ExportSchemeDialog";
 import { LibraryActionDialog } from "./app/LibraryActionDialog";
 import { LibraryTree } from "./app/LibraryTree";
@@ -66,12 +50,12 @@ import { OnboardingScreen } from "./app/OnboardingScreen";
 import { SettingsModal } from "./app/SettingsModal";
 import { getAgentDisplay } from "./app/settingsControls";
 import type { ExportDialog, LibraryDialog } from "./app/types";
+import { ViewerWorkspace, type ViewerToolContext } from "./ViewerWorkspace";
 import "./styles.css";
 import "./styles/appShell.css";
 import "./styles/library.css";
 import "./styles/viewer.css";
 import "./styles/onboarding.css";
-import "./styles/importJob.css";
 import "./styles/settings.css";
 
 const onboardingStorageKey = "mpb.onboardingComplete";
@@ -88,32 +72,34 @@ export function App() {
       }),
   );
   const [paths, setPaths] = useState<AppDataPaths | null>(null);
-  const [keyStatus, setKeyStatus] = useState<CurseForgeCredentialStatus | null>(null);
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
   const [automaticUpdateChecks, setAutomaticUpdateChecks] = useState(
     () => localStorage.getItem(automaticUpdateChecksStorageKey) !== "false",
   );
   const [updateCheck, setUpdateCheck] = useState<UpdateCheckResult | null>(null);
   const [updateCheckBusy, setUpdateCheckBusy] = useState(false);
-  const [apiKeyInput, setApiKeyInput] = useState("");
-  const [keyCheckResult, setKeyCheckResult] = useState<CurseForgeKeyCheckResult>("idle");
-  const [keyCheckMessage, setKeyCheckMessage] = useState("");
-  const [isSavingKey, setIsSavingKey] = useState(false);
   const [diagnosticsMessage, setDiagnosticsMessage] = useState("");
+  const [prismValidation, setPrismValidation] = useState<PrismRootValidation | null>(null);
   const [library, setLibrary] = useState<LibraryModpack[]>([]);
   const [librarySelection, setLibrarySelection] = useState<LibrarySelection | null>(null);
   const [libraryMessage, setLibraryMessage] = useState("");
   const [libraryDialog, setLibraryDialog] = useState<LibraryDialog | null>(null);
   const [exportDialog, setExportDialog] = useState<ExportDialog | null>(null);
-  const [importJobModpackId, setImportJobModpackId] = useState<number | null>(null);
-  const [importProgressByModpack, setImportProgressByModpack] = useState<Record<number, ImportProgress>>({});
-  const [importLogsByModpack, setImportLogsByModpack] = useState<Record<number, string[]>>({});
-  const [importStageByModpack, setImportStageByModpack] = useState<Record<number, string>>({});
+  const [relinkCandidate, setRelinkCandidate] = useState<PrismRelinkCandidate | null>(null);
+  const [dismissedRelinks, setDismissedRelinks] = useState<Set<string>>(new Set());
   const [expandedModpackIds, setExpandedModpackIds] = useState<Set<number>>(new Set());
   const [sidebarWidth, setSidebarWidth] = useState<number>(sidebarWidthLimits.default);
   const [viewerStageId, setViewerStageId] = useState<StageOptionId | null>(null);
   const [viewerRevision, setViewerRevision] = useState(0);
   const [viewerToolContext, setViewerToolContext] = useState<ViewerToolContext | null>(null);
+
+  const t = (key: Parameters<typeof translate>[1]) => translate(language, key);
+  const selectedModpack =
+    library.find((modpack) => modpack.id === librarySelection?.modpackId) ?? null;
+  const selectedScheme =
+    selectedModpack?.schemes.find((scheme) => scheme.id === librarySelection?.schemeId) ?? null;
+  const agentDisplay = getAgentDisplay(agentStatus, t);
+
   const handleViewerStageChange = useCallback((stageId: StageOptionId | null) => {
     setViewerStageId(stageId);
   }, []);
@@ -121,22 +107,13 @@ export function App() {
     setViewerToolContext(context);
   }, []);
 
-  const t = (key: Parameters<typeof translate>[1]) => translate(language, key);
-  const selectedModpack =
-    library.find((modpack) => modpack.id === librarySelection?.modpackId) ?? null;
-  const selectedScheme =
-    selectedModpack?.schemes.find((scheme) => scheme.id === librarySelection?.schemeId) ?? null;
-  const importJobModpack =
-    library.find((modpack) => modpack.id === importJobModpackId) ?? null;
-  const agentDisplay = getAgentDisplay(agentStatus, t);
-
   useEffect(() => {
-    if (selectedScheme) {
+    if (selectedScheme && selectedModpack?.status === "ready") {
       return;
     }
     setViewerStageId(null);
     setViewerToolContext(null);
-  }, [selectedScheme]);
+  }, [selectedScheme, selectedModpack?.status]);
 
   useEffect(() => {
     discoverAppPaths()
@@ -145,24 +122,27 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    getCurseForgeKeyStatus()
-      .then((status) => {
-        setKeyStatus(status);
-        dispatch({ type: "setCurseForgeKeyState", state: status.state });
+    discoverPrismLauncherRoots()
+      .then(async (roots) => {
+        const validRoot = roots.find((root) => root.valid);
+        if (!validRoot) {
+          dispatch({ type: "setPrismRootState", state: "invalid" });
+          return;
+        }
+        const selection = await selectPrismLauncherRoot(validRoot.rootPath);
+        setPrismValidation(selection.validation);
+        applyLibrary(selection.library, librarySelection);
+        showRelinkCandidate(selection.relinkCandidates);
+        dispatch({ type: "setPrismRootState", state: "valid" });
       })
       .catch((error: unknown) => {
-        setKeyStatus({
-          state: "unavailable",
-          backend: "OS secure credential storage",
-          message: formatBackendError(error),
-          apiKey: null,
-        });
-        dispatch({ type: "keyUnavailable" });
+        setLibraryMessage(formatBackendError(error));
+        dispatch({ type: "setPrismRootState", state: "invalid" });
       });
   }, []);
 
   useEffect(() => {
-    refreshLibrary();
+    void refreshLibrary();
   }, []);
 
   useEffect(() => {
@@ -221,52 +201,10 @@ export function App() {
     };
   }, [language]);
 
-  function appendImportLog(modpackId: number, message: string) {
-    const trimmed = message.trim();
-    if (!trimmed) {
-      return;
-    }
-    const timestamp = new Date().toLocaleTimeString();
-    setImportLogsByModpack((current) => {
-      const previous = current[modpackId] ?? [];
-      const nextLine = `${timestamp} ${trimmed}`;
-      if (previous[previous.length - 1] === nextLine) {
-        return current;
-      }
-      return {
-        ...current,
-        [modpackId]: [...previous.slice(-80), nextLine],
-      };
-    });
-  }
-
-  function clearImportJobHistory(modpackId: number) {
-    setImportLogsByModpack((current) => {
-      if (!(modpackId in current)) {
-        return current;
-      }
-      const next = { ...current };
-      delete next[modpackId];
-      return next;
-    });
-    setImportProgressByModpack((current) => {
-      if (!(modpackId in current)) {
-        return current;
-      }
-      const next = { ...current };
-      delete next[modpackId];
-      return next;
-    });
-  }
-
   useEffect(() => {
     let unlisten: (() => void) | null = null;
-    listenToModpackImportStatus((event) => {
-      applyLibrary(event.library, { modpackId: event.modpackId, schemeId: -1 });
-      setImportStageByModpack((current) => ({ ...current, [event.modpackId]: event.stage }));
-      if (event.message) {
-        appendImportLog(event.modpackId, event.message);
-      }
+    listenToLibraryChanged((event) => {
+      applyLibrary(event.library, librarySelection);
     })
       .then((nextUnlisten) => {
         unlisten = nextUnlisten;
@@ -276,22 +214,7 @@ export function App() {
     return () => {
       unlisten?.();
     };
-  }, []);
-
-  useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    listenToModpackImportProgress((event) => {
-      setImportProgressByModpack((current) => ({ ...current, [event.modpackId]: event }));
-    })
-      .then((nextUnlisten) => {
-        unlisten = nextUnlisten;
-      })
-      .catch((error: unknown) => setLibraryMessage(formatBackendError(error)));
-
-    return () => {
-      unlisten?.();
-    };
-  }, []);
+  }, [librarySelection]);
 
   function applyLibrary(nextLibrary: LibraryModpack[], requestedSelection = librarySelection) {
     const previousLibrary = library;
@@ -336,13 +259,74 @@ export function App() {
     try {
       const nextLibrary = await listLibrary();
       applyLibrary(nextLibrary, librarySelection);
+      const candidates = await listPrismRelinkCandidates();
+      showRelinkCandidate(candidates);
       setLibraryMessage("");
     } catch (error) {
       setLibraryMessage(formatBackendError(error));
     }
   }
 
+  async function handleChoosePrismRoot() {
+    try {
+      const selected = await open({ directory: true, multiple: false });
+      if (typeof selected !== "string") {
+        return;
+      }
+      const selection = await selectPrismLauncherRoot(selected);
+      setPrismValidation(selection.validation);
+      dispatch({
+        type: "setPrismRootState",
+        state: selection.validation.valid ? "valid" : "invalid",
+      });
+      applyLibrary(selection.library, librarySelection);
+      showRelinkCandidate(selection.relinkCandidates);
+      setLibraryMessage(selection.validation.message);
+    } catch (error) {
+      setLibraryMessage(formatBackendError(error));
+      dispatch({ type: "setPrismRootState", state: "invalid" });
+    }
+  }
+
+  function showRelinkCandidate(candidates: PrismRelinkCandidate[]) {
+    const candidate = candidates.find(
+      (item) => !dismissedRelinks.has(item.discoveredIdentityFingerprint),
+    );
+    setRelinkCandidate((current) => current ?? candidate ?? null);
+  }
+
+  async function handleConfirmRelink() {
+    if (!relinkCandidate) {
+      return;
+    }
+    try {
+      const nextLibrary = await confirmPrismInstanceRelink(
+        relinkCandidate.existingId,
+        relinkCandidate.discoveredIdentityFingerprint,
+      );
+      applyLibrary(nextLibrary, librarySelection);
+      setDismissedRelinks((current) => new Set(current).add(relinkCandidate.discoveredIdentityFingerprint));
+      setRelinkCandidate(null);
+      setLibraryMessage(t("library.autosaved"));
+    } catch (error) {
+      setLibraryMessage(formatBackendError(error));
+    }
+  }
+
+  function handleSkipRelink() {
+    if (!relinkCandidate) {
+      return;
+    }
+    setDismissedRelinks((current) => new Set(current).add(relinkCandidate.discoveredIdentityFingerprint));
+    setRelinkCandidate(null);
+  }
+
   function handleCreateScheme(modpackId: number) {
+    const modpack = library.find((item) => item.id === modpackId);
+    if (modpack?.status !== "ready") {
+      setLibraryMessage(t("library.instanceNotReady"));
+      return;
+    }
     const draft = createEmptyLibraryDraft(modpackId);
     setLibraryDialog({ kind: "createScheme", ...draft });
   }
@@ -355,26 +339,13 @@ export function App() {
     setLibraryDialog({ kind: "deleteScheme", scheme });
   }
 
-  function handleRenameModpack(modpack: LibraryModpack) {
-    setLibraryDialog({ kind: "renameModpack", modpack, name: modpack.localName });
-  }
-
   function handleShowModpackInfo(modpack: LibraryModpack) {
     setLibraryDialog({ kind: "infoModpack", modpack });
   }
 
-  function handleDeleteModpack(modpack: LibraryModpack) {
-    setLibraryDialog({ kind: "deleteModpack", modpack });
-  }
-
   function handleLibraryDialogNameChange(name: string) {
     setLibraryDialog((dialog) => {
-      if (
-        !dialog ||
-        dialog.kind === "deleteScheme" ||
-        dialog.kind === "deleteModpack" ||
-        dialog.kind === "infoModpack"
-      ) {
+      if (!dialog || dialog.kind === "deleteScheme" || dialog.kind === "infoModpack") {
         return dialog;
       }
       return { ...dialog, name };
@@ -440,20 +411,6 @@ export function App() {
         applyLibrary(nextLibrary, nextSelection);
       }
 
-      if (libraryDialog.kind === "renameModpack") {
-        const name = libraryDialog.name.trim();
-        if (!name) {
-          return;
-        }
-        const nextLibrary = await renameImportedModpack(libraryDialog.modpack.id, name);
-        applyLibrary(nextLibrary, librarySelection);
-      }
-
-      if (libraryDialog.kind === "deleteModpack") {
-        const nextLibrary = await deleteImportedModpack(libraryDialog.modpack.id);
-        applyLibrary(nextLibrary, null);
-      }
-
       setLibraryDialog(null);
       setLibraryMessage(t("library.autosaved"));
     } catch (error) {
@@ -473,55 +430,7 @@ export function App() {
 
   function restartOnboarding() {
     localStorage.removeItem(onboardingStorageKey);
-    setKeyCheckResult("idle");
-    setKeyCheckMessage("");
     dispatch({ type: "restartOnboarding" });
-  }
-
-  function handleAddModpack() {
-    dispatch({ type: "startAddModpack" });
-  }
-
-  async function handleCheckAndSaveKey() {
-    const inputCheckResult = getCurseForgeKeyInputCheckResult(apiKeyInput);
-    if (inputCheckResult === "empty") {
-      setKeyCheckResult("empty");
-      setKeyCheckMessage("");
-      return;
-    }
-
-    setIsSavingKey(true);
-    setKeyCheckResult("checking");
-    setKeyCheckMessage("");
-    try {
-      await checkCurseForgeApiKey(apiKeyInput);
-      const status = await saveCurseForgeApiKey(apiKeyInput);
-      setKeyStatus(status);
-      setApiKeyInput("");
-      if (status.state === "saved") {
-        setKeyCheckResult("valid");
-        dispatch({ type: "keySaved" });
-      } else {
-        setKeyCheckResult("invalid");
-        setKeyCheckMessage(status.message ?? t("settings.keyCheckInvalid"));
-        dispatch({ type: "keyUnavailable" });
-      }
-    } catch (error) {
-      setKeyCheckResult("invalid");
-      setKeyCheckMessage(formatBackendError(error));
-    } finally {
-      setIsSavingKey(false);
-    }
-  }
-
-  function handleUpdateKeyInput(value: string) {
-    setApiKeyInput(value);
-    setKeyCheckResult("idle");
-    setKeyCheckMessage("");
-  }
-
-  function handleCheckKey() {
-    void handleCheckAndSaveKey();
   }
 
   async function handleOpenDataFolder() {
@@ -620,22 +529,16 @@ export function App() {
   if (flow.screen === "onboarding") {
     return (
       <OnboardingScreen
-        apiKeyInput={apiKeyInput}
-        isSavingKey={isSavingKey}
-        keyState={flow.curseForgeKey}
-        keyStatus={keyStatus}
-        keyCheckResult={keyCheckResult}
-        keyCheckMessage={keyCheckMessage}
-        keyNotice={flow.keyNotice}
         language={language}
         onBack={() => dispatch({ type: "previousOnboardingStep" })}
-        onCheckKey={handleCheckKey}
+        onChoosePrismRoot={handleChoosePrismRoot}
         onFinish={completeOnboarding}
         onLanguageChange={setLanguage}
-        onNextAi={() => dispatch({ type: "setOnboardingStep", step: "curseforge" })}
+        onNextAi={() => dispatch({ type: "setOnboardingStep", step: "prism" })}
         onNextLanguage={() => dispatch({ type: "setOnboardingStep", step: "ai" })}
         onSkip={skipOnboarding}
-        onUpdateKey={handleUpdateKeyInput}
+        prismRoot={flow.prismRoot as PrismRootState}
+        prismValidation={prismValidation}
         step={flow.onboardingStep}
         t={t}
       />
@@ -661,11 +564,6 @@ export function App() {
           </div>
         </div>
 
-        <button className="primary-action" onClick={handleAddModpack} type="button">
-          <PackagePlus size={17} />
-          <span>{t("workspace.addModpack")}</span>
-        </button>
-
         <section className="library-panel">
           <div className="panel-title">
             <span>{t("workspace.library")}</span>
@@ -674,13 +572,10 @@ export function App() {
             expandedModpackIds={expandedModpackIds}
             library={library}
             onCreateScheme={handleCreateScheme}
-            onDeleteModpack={handleDeleteModpack}
             onDeleteScheme={handleDeleteScheme}
             onExportScheme={handleOpenExportDialog}
-            onRenameModpack={handleRenameModpack}
             onRenameScheme={handleRenameScheme}
             onSelect={setLibrarySelection}
-            onShowImportJob={(modpack) => setImportJobModpackId(modpack.id)}
             onShowModpackInfo={handleShowModpackInfo}
             onToggleModpack={handleToggleModpack}
             selected={librarySelection}
@@ -691,7 +586,7 @@ export function App() {
 
         <button
           className="settings-link"
-          onClick={() => dispatch({ type: "openSettings", section: "ai" })}
+          onClick={() => dispatch({ type: "openSettings", section: "prism" })}
           type="button"
         >
           <Settings size={17} />
@@ -706,7 +601,7 @@ export function App() {
       />
 
       <section className="workspace">
-        {selectedScheme && (
+        {selectedScheme && selectedModpack?.status === "ready" && (
           <div className="content-grid">
             <ViewerWorkspace
               modpack={selectedModpack}
@@ -725,50 +620,34 @@ export function App() {
             />
           </div>
         )}
+        {selectedScheme && selectedModpack?.status !== "ready" && (
+          <div className="viewer-empty-state">
+            <h2>{t("viewer.blockedTitle")}</h2>
+            <p>{selectedModpack?.statusMessage ?? t("viewer.blockedBody")}</p>
+          </div>
+        )}
       </section>
       {flow.settingsModalOpen && (
         <SettingsModal
-          apiKeyInput={apiKeyInput}
-          diagnosticsMessage={diagnosticsMessage}
-          isSavingKey={isSavingKey}
-          keyCheckResult={keyCheckResult}
-          keyCheckMessage={keyCheckMessage}
-          keyNotice={flow.keyNotice}
-          keyState={flow.curseForgeKey}
-          keyStatus={keyStatus}
-          language={language}
           agentStatus={agentStatus}
           automaticUpdateChecks={automaticUpdateChecks}
-          onCheckKey={handleCheckKey}
+          diagnosticsMessage={diagnosticsMessage}
+          language={language}
           onCheckUpdates={() => void handleCheckUpdates()}
+          onChoosePrismRoot={handleChoosePrismRoot}
           onClose={() => dispatch({ type: "closeSettings" })}
           onLanguageChange={setLanguage}
           onOpenDataFolder={handleOpenDataFolder}
           onRestartOnboarding={restartOnboarding}
           onSectionChange={(section) => dispatch({ type: "openSettings", section })}
           onToggleAutomaticUpdateChecks={handleToggleAutomaticUpdateChecks}
-          onUpdateKey={handleUpdateKeyInput}
           paths={paths}
+          prismValidation={prismValidation}
           section={flow.settingsSection}
           t={t}
           updateCheck={updateCheck}
           updateCheckBusy={updateCheckBusy}
         />
-      )}
-      {flow.importModalOpen && (
-        <div className="modal-backdrop" role="presentation">
-          <ImportWizardWorkspace
-            library={library}
-            onClose={() => dispatch({ type: "closeImportWizard" })}
-            onImported={(nextLibrary, modpackId) => {
-              applyLibrary(nextLibrary, { modpackId, schemeId: -1 });
-              setImportStageByModpack((current) => ({ ...current, [modpackId]: "queued" }));
-              appendImportLog(modpackId, t("import.addStarted"));
-              setLibraryMessage(t("import.addStarted"));
-            }}
-            t={t}
-          />
-        </div>
       )}
       {libraryDialog && (
         <LibraryActionDialog
@@ -790,41 +669,51 @@ export function App() {
           t={t}
         />
       )}
-      {importJobModpack && (
-        <ImportJobDialog
-          logs={importLogsByModpack[importJobModpack.id] ?? []}
-          modpack={importJobModpack}
-          onCancel={async () => {
-            try {
-              await cancelCurseForgeImport();
-              appendImportLog(importJobModpack.id, t("import.cancelRequested"));
-            } catch (error) {
-              appendImportLog(importJobModpack.id, formatBackendError(error));
-            }
-          }}
-          onClose={() => setImportJobModpackId(null)}
-          onDelete={() => {
-            setImportJobModpackId(null);
-            handleDeleteModpack(importJobModpack);
-          }}
-          onRetry={async () => {
-            clearImportJobHistory(importJobModpack.id);
-            try {
-              const nextLibrary = await retryModpackImport(importJobModpack.id);
-              applyLibrary(nextLibrary, { modpackId: importJobModpack.id, schemeId: -1 });
-              setImportStageByModpack((current) => ({
-                ...current,
-                [importJobModpack.id]: "queued",
-              }));
-              appendImportLog(importJobModpack.id, t("import.retryQueued"));
-            } catch (error) {
-              appendImportLog(importJobModpack.id, formatBackendError(error));
-            }
-          }}
-          progress={importProgressByModpack[importJobModpack.id] ?? null}
-          stage={importStageByModpack[importJobModpack.id] ?? importJobStageFromMessage(importJobModpack)}
-          t={t}
-        />
+      {relinkCandidate && (
+        <div className="modal-backdrop" role="presentation">
+          <section className="settings-modal relink-modal" aria-label={t("library.relinkTitle")} role="dialog">
+            <header className="settings-modal-header">
+              <div>
+                <h2>{t("library.relinkTitle")}</h2>
+                <span>{t("library.relinkBody")}</span>
+              </div>
+            </header>
+            <dl className="status-rows">
+              <div>
+                <dt>{t("library.relinkExisting")}</dt>
+                <dd>
+                  {relinkCandidate.existingDisplayName}
+                  <br />
+                  {relinkCandidate.existingInstancePath}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("library.relinkDiscovered")}</dt>
+                <dd>
+                  {relinkCandidate.discoveredDisplayName}
+                  <br />
+                  {relinkCandidate.discoveredInstancePath}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("library.minecraftVersion")}</dt>
+                <dd>{relinkCandidate.minecraftVersion ?? t("library.unknown")}</dd>
+              </div>
+              <div>
+                <dt>{t("library.loader")}</dt>
+                <dd>{relinkCandidate.loader ?? t("library.unknown")}</dd>
+              </div>
+            </dl>
+            <footer className="dialog-actions">
+              <button className="secondary-action compact" onClick={handleSkipRelink} type="button">
+                {t("library.relinkSkip")}
+              </button>
+              <button className="primary-action compact" onClick={() => void handleConfirmRelink()} type="button">
+                {t("library.relinkConfirm")}
+              </button>
+            </footer>
+          </section>
+        </div>
       )}
     </main>
   );

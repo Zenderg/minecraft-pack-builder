@@ -9,7 +9,6 @@ describe("desktop viewer layout CSS", () => {
     "styles/library.css",
     "styles/viewer.css",
     "styles/onboarding.css",
-    "styles/importJob.css",
     "styles/settings.css",
   ]
     .map((file) => readFileSync(join(process.cwd(), "src", file), "utf8"))
@@ -55,12 +54,16 @@ describe("desktop viewer layout CSS", () => {
   });
 
   it("bounds the right tools rail so expanded sections scroll inside the sidebar", () => {
+    const workspaceBlock = css.match(/\.workspace\s*\{[^}]*\}/)?.[0] ?? "";
     const contentGridBlock = css.match(/\.content-grid\s*\{[^}]*\}/)?.[0] ?? "";
     const toolsSidebarBlock = css.match(/\.tools-sidebar\s*\{[^}]*\}/)?.[0] ?? "";
     const toolTreeBlock = css.match(/\.tool-tree\s*\{[^}]*\}/)?.[0] ?? "";
 
+    expect(workspaceBlock).toMatch(/min-height:\s*0/);
+    expect(workspaceBlock).toMatch(/overflow:\s*hidden/);
     expect(contentGridBlock).toMatch(/grid-template-rows:\s*minmax\(0,\s*1fr\)/);
     expect(contentGridBlock).toMatch(/height:\s*100%/);
+    expect(contentGridBlock).toMatch(/overflow:\s*hidden/);
     expect(toolsSidebarBlock).toMatch(/min-height:\s*0/);
     expect(toolsSidebarBlock).toMatch(/overflow:\s*hidden/);
     expect(toolTreeBlock).toMatch(/overflow-y:\s*auto/);

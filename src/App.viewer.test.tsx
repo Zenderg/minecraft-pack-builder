@@ -5,26 +5,22 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const tauriMocks = vi.hoisted(() => ({
-  cancelCurseForgeImport: vi.fn(),
-  checkCurseForgeApiKey: vi.fn(),
   checkForUpdates: vi.fn(),
+  confirmPrismInstanceRelink: vi.fn(),
   createScheme: vi.fn(),
-  deleteImportedModpack: vi.fn(),
   deleteScheme: vi.fn(),
   discoverAppPaths: vi.fn(),
+  discoverPrismLauncherRoots: vi.fn(),
   exportScheme: vi.fn(),
   getAiIntegrationStatus: vi.fn(),
-  getCurseForgeKeyStatus: vi.fn(),
   getSchemeRenderScene: vi.fn(),
   listLibrary: vi.fn(),
+  listPrismRelinkCandidates: vi.fn(),
   listenToAgentEvents: vi.fn(),
-  listenToModpackImportProgress: vi.fn(),
-  listenToModpackImportStatus: vi.fn(),
+  listenToLibraryChanged: vi.fn(),
   openAppDataFolder: vi.fn(),
-  renameImportedModpack: vi.fn(),
   renameScheme: vi.fn(),
-  retryModpackImport: vi.fn(),
-  saveCurseForgeApiKey: vi.fn(),
+  selectPrismLauncherRoot: vi.fn(),
 }));
 
 const exportDialogMocks = vi.hoisted(() => ({
@@ -32,30 +28,34 @@ const exportDialogMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("./tauri", () => ({
-  cancelCurseForgeImport: tauriMocks.cancelCurseForgeImport,
-  checkCurseForgeApiKey: tauriMocks.checkCurseForgeApiKey,
   checkForUpdates: tauriMocks.checkForUpdates,
+  confirmPrismInstanceRelink: tauriMocks.confirmPrismInstanceRelink,
   createScheme: tauriMocks.createScheme,
-  deleteImportedModpack: tauriMocks.deleteImportedModpack,
   deleteScheme: tauriMocks.deleteScheme,
   discoverAppPaths: tauriMocks.discoverAppPaths,
+  discoverPrismLauncherRoots: tauriMocks.discoverPrismLauncherRoots,
   exportScheme: tauriMocks.exportScheme,
   getAiIntegrationStatus: tauriMocks.getAiIntegrationStatus,
-  getCurseForgeKeyStatus: tauriMocks.getCurseForgeKeyStatus,
   getSchemeRenderScene: tauriMocks.getSchemeRenderScene,
   listLibrary: tauriMocks.listLibrary,
+  listPrismRelinkCandidates: tauriMocks.listPrismRelinkCandidates,
   listenToAgentEvents: tauriMocks.listenToAgentEvents,
-  listenToModpackImportProgress: tauriMocks.listenToModpackImportProgress,
-  listenToModpackImportStatus: tauriMocks.listenToModpackImportStatus,
+  listenToLibraryChanged: tauriMocks.listenToLibraryChanged,
   openAppDataFolder: tauriMocks.openAppDataFolder,
-  renameImportedModpack: tauriMocks.renameImportedModpack,
   renameScheme: tauriMocks.renameScheme,
-  retryModpackImport: tauriMocks.retryModpackImport,
-  saveCurseForgeApiKey: tauriMocks.saveCurseForgeApiKey,
+  selectPrismLauncherRoot: tauriMocks.selectPrismLauncherRoot,
 }));
 
 vi.mock("./exportDialog", () => ({
   chooseExportDestination: exportDialogMocks.chooseExportDestination,
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  convertFileSrc: (path: string) => `asset://${path}`,
+}));
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: vi.fn(),
 }));
 
 import { App } from "./App";
@@ -70,9 +70,35 @@ const renderSceneFixture: RenderScene = {
     { id: 2, name: "Stage 2", order: 2 },
   ],
   blocks: [
-    { coordinate: [0, 0, 0], blockId: "minecraft:stone_bricks", stageId: 1, color: "#9aa39e" },
+    {
+      coordinate: [0, 0, 0],
+      blockId: "minecraft:stone_bricks",
+      stageId: 1,
+      color: "#9aa39e",
+      texturePath: "/tmp/stone_bricks.png",
+    },
     { coordinate: [1, 1, 0], blockId: "thermal:machine_frame", stageId: 2, color: "#d3a44e" },
     { coordinate: [4, 0, 1], blockId: "create:andesite_casing", stageId: null, color: "#6bb48f" },
+  ],
+  materials: [
+    {
+      blockId: "minecraft:stone_bricks",
+      displayName: "Stone Bricks",
+      count: 65,
+      itemId: "minecraft:stone_bricks",
+      maxStackSize: 64,
+      stackCount: 2,
+      texturePath: "/tmp/stone_bricks.png",
+    },
+    {
+      blockId: "create:andesite_casing",
+      displayName: "Andesite Casing",
+      count: 1,
+      itemId: "create:andesite_casing",
+      maxStackSize: null,
+      stackCount: null,
+      texturePath: null,
+    },
   ],
   chunks: [{ coordinate: [0, 0, 0], blockCount: 3, faceCount: 18 }],
   largeSchemeThreshold: 4096,
@@ -113,19 +139,15 @@ describe("phase 7 viewer workspace", () => {
     installLocalStorageMock();
     localStorage.setItem("mpb.onboardingComplete", "true");
     tauriMocks.discoverAppPaths.mockResolvedValue(null);
-    tauriMocks.getCurseForgeKeyStatus.mockResolvedValue({
-      state: "saved",
-      backend: "Test secure storage",
-      message: null,
-      apiKey: null,
-    });
+    tauriMocks.discoverPrismLauncherRoots.mockResolvedValue([]);
+    tauriMocks.listPrismRelinkCandidates.mockResolvedValue([]);
     tauriMocks.getAiIntegrationStatus.mockResolvedValue({
       serverRunning: true,
       transport: "streamable-http",
       endpoint: "http://127.0.0.1:7777/mcp",
       protocolVersion: "2025-06-18",
       activeClient: null,
-      toolCount: 19,
+      toolCount: 18,
     });
     tauriMocks.checkForUpdates.mockResolvedValue({
       status: "current",
@@ -135,19 +157,20 @@ describe("phase 7 viewer workspace", () => {
       date: null,
       errorMessage: null,
     });
-    tauriMocks.listenToModpackImportStatus.mockResolvedValue(() => {});
-    tauriMocks.listenToModpackImportProgress.mockResolvedValue(() => {});
+    tauriMocks.listenToLibraryChanged.mockResolvedValue(() => {});
     tauriMocks.listenToAgentEvents.mockResolvedValue(() => {});
     tauriMocks.listLibrary.mockResolvedValue([
       {
         id: 1,
-        localName: "AOC - 1.0.0",
-        sourceUrl: "https://www.curseforge.com/minecraft/modpacks/aoc",
-        versionName: "1.0.0",
+        instanceId: "aoc",
+        displayName: "AOC - 1.0.0",
+        instancePath: "/PrismLauncher/instances/aoc",
+        minecraftDir: "/PrismLauncher/instances/aoc/.minecraft",
         minecraftVersion: "1.20.1",
         loader: "Forge",
-        importStatus: "imported",
-        importMessage: null,
+        loaderVersion: "47.4.0",
+        status: "ready",
+        statusMessage: null,
         schemes: [
           {
             id: 10,
@@ -226,7 +249,13 @@ describe("phase 7 viewer workspace", () => {
       buttonByText(container, "Materials").click();
     });
 
+    expect(container.querySelector(".tool-tree")?.textContent).toContain("Stone Bricks");
     expect(container.querySelector(".tool-tree")?.textContent).toContain("minecraft:stone_bricks");
+    expect(container.querySelector(".tool-tree")?.textContent).toContain("2 stacks");
+    expect(container.querySelector(".material-preview")?.getAttribute("src")).toBe(
+      "asset:///tmp/stone_bricks.png",
+    );
+    expect(countText(container.querySelector(".materials-list") as HTMLElement, "stacks")).toBe(1);
   });
 
   it("does not expose the removed selected-area notes workflow", async () => {
@@ -243,6 +272,10 @@ describe("phase 7 viewer workspace", () => {
   it("shows the MCP endpoint once in AI settings", async () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>(".settings-link")?.click();
+    });
+
+    await act(async () => {
+      buttonByText(container, "AI integration").click();
     });
 
     expect(await screenText(container, "AI integration")).toBe(true);
@@ -301,6 +334,10 @@ describe("phase 7 viewer workspace", () => {
   it("renders a handoff prompt with endpoint and interface language guidance", async () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>(".settings-link")?.click();
+    });
+
+    await act(async () => {
+      buttonByText(container, "AI integration").click();
     });
 
     expect(await screenText(container, "AI integration")).toBe(true);

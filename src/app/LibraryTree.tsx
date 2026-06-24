@@ -28,13 +28,10 @@ export function LibraryTree(props: {
   expandedModpackIds: Set<number>;
   library: LibraryModpack[];
   onCreateScheme: (modpackId: number) => void;
-  onDeleteModpack: (modpack: LibraryModpack) => void;
   onDeleteScheme: (scheme: LibraryScheme) => void;
   onExportScheme: (scheme: LibraryScheme) => void;
-  onRenameModpack: (modpack: LibraryModpack) => void;
   onRenameScheme: (scheme: LibraryScheme) => void;
   onSelect: (selection: LibrarySelection) => void;
-  onShowImportJob: (modpack: LibraryModpack) => void;
   onShowModpackInfo: (modpack: LibraryModpack) => void;
   onToggleModpack: (modpackId: number) => void;
   selected: LibrarySelection | null;
@@ -82,19 +79,15 @@ export function LibraryTree(props: {
             <button
               className="tree-label modpack-label"
               onClick={() => {
-                if (modpack.importStatus === "imported") {
-                  props.onToggleModpack(modpack.id);
-                } else {
-                  props.onShowImportJob(modpack);
-                }
+                props.onToggleModpack(modpack.id);
               }}
               type="button"
             >
               <LoaderIcon kind={getLoaderIconKind(modpack.loader)} />
-              <span title={modpack.localName}>{modpack.localName}</span>
+              <span title={modpack.displayName}>{modpack.displayName}</span>
             </button>
-            {modpack.importStatus === "imported" ? (
-              <div className="tree-actions">
+            <div className="tree-actions">
+              {modpack.status === "ready" ? (
                 <button
                   aria-label={t("library.createScheme")}
                   className="icon-action small"
@@ -103,29 +96,29 @@ export function LibraryTree(props: {
                 >
                   <Plus size={14} />
                 </button>
-                <button
-                  aria-label={t("library.modpackActions")}
-                  className="icon-action small"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    const placement = getModpackMenuPlacement(event.currentTarget.getBoundingClientRect(), {
-                      width: window.innerWidth,
-                      height: window.innerHeight,
-                    });
-                    setOpenLibraryMenu((current) => {
-                      const openModpackId = current?.kind === "modpack" ? current.id : null;
-                      const nextId = getNextOpenModpackMenuId(openModpackId, modpack.id, "menuButton");
-                      return nextId === null ? null : { kind: "modpack", id: nextId, ...placement };
-                    });
-                  }}
-                  type="button"
-                >
-                  <MoreHorizontal size={15} />
-                </button>
-              </div>
-            ) : (
-              <ImportStatusIndicator status={modpack.importStatus} t={t} />
-            )}
+              ) : (
+                <InstanceStatusIndicator status={modpack.status} t={t} />
+              )}
+              <button
+                aria-label={t("library.modpackActions")}
+                className="icon-action small"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  const placement = getModpackMenuPlacement(event.currentTarget.getBoundingClientRect(), {
+                    width: window.innerWidth,
+                    height: window.innerHeight,
+                  });
+                  setOpenLibraryMenu((current) => {
+                    const openModpackId = current?.kind === "modpack" ? current.id : null;
+                    const nextId = getNextOpenModpackMenuId(openModpackId, modpack.id, "menuButton");
+                    return nextId === null ? null : { kind: "modpack", id: nextId, ...placement };
+                  });
+                }}
+                type="button"
+              >
+                <MoreHorizontal size={15} />
+              </button>
+            </div>
             {openLibraryMenu?.kind === "modpack" && openLibraryMenu.id === modpack.id && (
               <div
                 className="modpack-menu"
@@ -152,31 +145,18 @@ export function LibraryTree(props: {
                 <button
                   onClick={() => {
                     setOpenLibraryMenu(null);
-                    props.onRenameModpack(modpack);
+                    props.onToggleModpack(modpack.id);
                   }}
                   role="menuitem"
                   type="button"
                 >
-                  <Pencil size={14} />
-                  {t("library.menuRename")}
-                </button>
-                <button
-                  className="danger"
-                  onClick={() => {
-                    setOpenLibraryMenu(null);
-                    props.onDeleteModpack(modpack);
-                  }}
-                  role="menuitem"
-                  type="button"
-                >
-                  <Trash2 size={14} />
-                  {t("library.menuDelete")}
+                  <Layers3 size={14} />
+                  {props.expandedModpackIds.has(modpack.id) ? t("library.collapseModpack") : t("library.expandModpack")}
                 </button>
               </div>
             )}
           </div>
-          {modpack.importStatus === "imported" &&
-            props.expandedModpackIds.has(modpack.id) &&
+          {props.expandedModpackIds.has(modpack.id) &&
             (modpack.schemes.length === 0 ? (
               <div className="tree-item nested empty-scheme-row">{t("library.noSchemes")}</div>
             ) : (
@@ -191,7 +171,12 @@ export function LibraryTree(props: {
                 >
                   <button
                     className="tree-label scheme-label"
-                    onClick={() => props.onSelect({ modpackId: modpack.id, schemeId: scheme.id })}
+                    disabled={modpack.status !== "ready"}
+                    onClick={() => {
+                      if (modpack.status === "ready") {
+                        props.onSelect({ modpackId: modpack.id, schemeId: scheme.id });
+                      }
+                    }}
                     type="button"
                   >
                     <Layers3 size={15} />
@@ -275,23 +260,26 @@ export function LibraryTree(props: {
   );
 }
 
-function ImportStatusIndicator({
+function InstanceStatusIndicator({
   status,
   t,
 }: {
-  status: LibraryModpack["importStatus"];
+  status: LibraryModpack["status"];
   t: Translator;
 }) {
-  if (status === "importing") {
+  if (status === "pending" || status === "indexing") {
     return (
-      <span className="import-status-indicator importing" title={t("import.state.importing")}>
+      <span className="import-status-indicator importing" title={t("instance.state.indexing")}>
         <Loader2 className="status-spinner" size={15} />
       </span>
     );
   }
-  if (status === "failed") {
+  if (status === "failed" || status === "missing") {
     return (
-      <span className="import-status-indicator failed" title={t("import.state.failed")}>
+      <span
+        className="import-status-indicator failed"
+        title={status === "missing" ? t("instance.state.missing") : t("instance.state.failed")}
+      >
         <AlertTriangle size={15} />
       </span>
     );

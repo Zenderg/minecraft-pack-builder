@@ -12,6 +12,24 @@ export type RenderBlock = {
   stageId: number | null;
   color: string;
   alpha?: number;
+  texturePath?: string | null;
+  faceTexturePaths?: FaceTexturePaths | null;
+  modelElements?: RenderModelElement[] | null;
+};
+
+export type FaceTexturePaths = {
+  north?: string | null;
+  south?: string | null;
+  east?: string | null;
+  west?: string | null;
+  up?: string | null;
+  down?: string | null;
+};
+
+export type RenderModelElement = {
+  from: [number, number, number];
+  to: [number, number, number];
+  faceTexturePaths: FaceTexturePaths;
 };
 
 export type RenderChunkSummary = {
@@ -26,6 +44,7 @@ export type RenderScene = {
   dimensions: [number, number, number];
   stages: RenderStage[];
   blocks: RenderBlock[];
+  materials?: RenderMaterialLine[];
   chunks: RenderChunkSummary[];
   largeSchemeThreshold: number;
 };
@@ -47,6 +66,11 @@ export type RenderSceneMetrics = {
 
 export type RenderMaterialLine = {
   blockId: string;
+  displayName?: string;
+  itemId?: string | null;
+  maxStackSize?: number | null;
+  stackCount?: number | null;
+  texturePath?: string | null;
   count: number;
 };
 
@@ -102,6 +126,10 @@ export function getRenderSceneMetrics(
 }
 
 export function getRenderSceneMaterials(scene: RenderScene): RenderMaterialLine[] {
+  if (scene.materials) {
+    return scene.materials;
+  }
+
   const counts = new Map<string, number>();
   for (const block of scene.blocks) {
     counts.set(block.blockId, (counts.get(block.blockId) ?? 0) + 1);

@@ -1,17 +1,14 @@
 export type AppScreen = "onboarding" | "workspace" | "settings";
-export type OnboardingStep = "language" | "ai" | "curseforge";
-export type SettingsSection = "ai" | "curseforge" | "language" | "data" | "updates";
-export type CurseForgeKeyState = "missing" | "saved" | "unavailable";
-export type KeyNotice = "idle" | "missing" | "saved" | "replaced" | "unavailable";
+export type OnboardingStep = "language" | "ai" | "prism";
+export type SettingsSection = "ai" | "prism" | "language" | "data" | "updates";
+export type PrismRootState = "unknown" | "valid" | "invalid";
 
 export type AppFlowState = {
   screen: AppScreen;
   onboardingStep: OnboardingStep;
-  curseForgeKey: CurseForgeKeyState;
+  prismRoot: PrismRootState;
   settingsSection: SettingsSection;
-  keyNotice: KeyNotice;
   settingsModalOpen: boolean;
-  importModalOpen: boolean;
 };
 
 export type AppFlowAction =
@@ -20,52 +17,23 @@ export type AppFlowAction =
   | { type: "previousOnboardingStep" }
   | { type: "openSettings"; section: SettingsSection }
   | { type: "closeSettings" }
-  | { type: "closeImportWizard" }
   | { type: "restartOnboarding" }
   | { type: "skipOnboarding" }
   | { type: "finishOnboarding" }
-  | { type: "setCurseForgeKeyState"; state: CurseForgeKeyState }
-  | { type: "keySaved" }
-  | { type: "keyUnavailable" }
-  | { type: "startAddModpack" };
+  | { type: "setPrismRootState"; state: PrismRootState };
 
 export function createInitialAppFlow(options: { onboardingComplete: boolean }): AppFlowState {
   return {
     screen: options.onboardingComplete ? "workspace" : "onboarding",
     onboardingStep: "language",
-    curseForgeKey: "missing",
-    settingsSection: "curseforge",
-    keyNotice: "idle",
+    prismRoot: "unknown",
+    settingsSection: "prism",
     settingsModalOpen: false,
-    importModalOpen: false,
-  };
-}
-
-export function getAddModpackTarget(curseForgeKey: CurseForgeKeyState): {
-  screen: AppScreen;
-  settingsSection: SettingsSection;
-  settingsModalOpen: boolean;
-  importModalOpen: boolean;
-} {
-  if (curseForgeKey !== "saved") {
-    return {
-      screen: "workspace",
-      settingsSection: "curseforge",
-      settingsModalOpen: true,
-      importModalOpen: false,
-    };
-  }
-
-  return {
-    screen: "workspace",
-    settingsSection: "curseforge",
-    settingsModalOpen: false,
-    importModalOpen: true,
   };
 }
 
 export function getPreviousOnboardingStep(step: OnboardingStep): OnboardingStep {
-  if (step === "curseforge") {
+  if (step === "prism") {
     return "ai";
   }
   if (step === "ai") {
@@ -74,38 +42,8 @@ export function getPreviousOnboardingStep(step: OnboardingStep): OnboardingStep 
   return "language";
 }
 
-export type CurseForgeKeyInputCheckResult = "empty" | "ready";
-export type CurseForgeKeyCheckResult = "idle" | "empty" | "checking" | "valid" | "invalid";
-
-export function getCurseForgeKeyInputCheckResult(apiKey: string): CurseForgeKeyInputCheckResult {
-  return apiKey.trim().length === 0 ? "empty" : "ready";
-}
-
-export function isCurseForgeKeyCheckBusy(result: CurseForgeKeyCheckResult): boolean {
-  return result === "checking";
-}
-
-export function getCurseForgeKeyButtonState(
-  result: CurseForgeKeyCheckResult,
-  isSavingKey: boolean,
-): { disabled: boolean; loading: boolean } {
-  const loading = isCurseForgeKeyCheckBusy(result);
-  return {
-    disabled: isSavingKey || loading,
-    loading,
-  };
-}
-
-export function canFinishOnboardingWithKey(curseForgeKey: CurseForgeKeyState): boolean {
-  return curseForgeKey === "saved";
-}
-
-export function shouldShowExistingKeyNotice(
-  curseForgeKey: CurseForgeKeyState,
-  apiKeyInput: string,
-  keyCheckResult: CurseForgeKeyCheckResult,
-): boolean {
-  return curseForgeKey === "saved" && apiKeyInput.trim() === "" && keyCheckResult === "idle";
+export function canFinishOnboardingWithPrism(prismRoot: PrismRootState): boolean {
+  return prismRoot === "valid";
 }
 
 export function onboardingReducer(state: AppFlowState, action: AppFlowAction): AppFlowState {
@@ -121,63 +59,23 @@ export function onboardingReducer(state: AppFlowState, action: AppFlowAction): A
         ...state,
         screen: state.screen === "onboarding" ? "workspace" : state.screen,
         settingsModalOpen: true,
-        importModalOpen: false,
         settingsSection: action.section,
       };
     case "closeSettings":
       return { ...state, settingsModalOpen: false };
-    case "closeImportWizard":
-      return { ...state, screen: "workspace", importModalOpen: false };
     case "restartOnboarding":
       return {
         ...state,
         screen: "onboarding",
         onboardingStep: "language",
         settingsModalOpen: false,
-        importModalOpen: false,
       };
     case "skipOnboarding":
     case "finishOnboarding":
-      return { ...state, screen: "workspace", settingsModalOpen: false, importModalOpen: false };
-    case "setCurseForgeKeyState":
-      return {
-        ...state,
-        curseForgeKey: action.state,
-        keyNotice: noticeForKeyState(action.state, state.keyNotice),
-      };
-    case "keySaved":
-      return {
-        ...state,
-        curseForgeKey: "saved",
-        keyNotice: state.curseForgeKey === "saved" ? "replaced" : "saved",
-      };
-    case "keyUnavailable":
-      return { ...state, curseForgeKey: "unavailable", keyNotice: "unavailable" };
-    case "startAddModpack": {
-      const target = getAddModpackTarget(state.curseForgeKey);
-      return {
-        ...state,
-        screen: target.screen,
-        settingsSection: target.settingsSection,
-        settingsModalOpen: target.settingsModalOpen,
-        importModalOpen: target.importModalOpen,
-        keyNotice: target.settingsModalOpen ? "missing" : state.keyNotice,
-      };
-    }
+      return { ...state, screen: "workspace", settingsModalOpen: false };
+    case "setPrismRootState":
+      return { ...state, prismRoot: action.state };
     default:
       return state;
   }
-}
-
-function noticeForKeyState(state: CurseForgeKeyState, current: KeyNotice): KeyNotice {
-  if (current === "saved" || current === "replaced") {
-    return current;
-  }
-  if (state === "missing") {
-    return "missing";
-  }
-  if (state === "unavailable") {
-    return "unavailable";
-  }
-  return "idle";
 }

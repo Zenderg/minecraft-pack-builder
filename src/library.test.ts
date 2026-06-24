@@ -18,13 +18,15 @@ import {
 const library: LibraryModpack[] = [
   {
     id: 1,
-    localName: "All the Mods 10 - 2.14.1",
-    sourceUrl: "https://www.curseforge.com/minecraft/modpacks/all-the-mods-10",
-    versionName: "2.14.1",
+    instanceId: "all-the-mods-10",
+    displayName: "All the Mods 10",
+    instancePath: "/PrismLauncher/instances/all-the-mods-10",
+    minecraftDir: "/PrismLauncher/instances/all-the-mods-10/.minecraft",
     minecraftVersion: "1.20.1",
     loader: "Forge",
-    importStatus: "imported",
-    importMessage: null,
+    loaderVersion: "47.4.0",
+    status: "ready",
+    statusMessage: null,
     schemes: [
       { id: 10, modpackId: 1, name: "Starter Factory", dimensions: [64, 64, 64] },
       { id: 11, modpackId: 1, name: "Tower", dimensions: [32, 96, 32] },
@@ -32,13 +34,15 @@ const library: LibraryModpack[] = [
   },
   {
     id: 2,
-    localName: "AOC",
-    sourceUrl: "https://www.curseforge.com/minecraft/modpacks/aoc",
-    versionName: "1.0.0",
+    instanceId: "aoc",
+    displayName: "AOC",
+    instancePath: "/PrismLauncher/instances/aoc",
+    minecraftDir: "/PrismLauncher/instances/aoc/.minecraft",
     minecraftVersion: "1.19.2",
     loader: "Forge",
-    importStatus: "imported",
-    importMessage: null,
+    loaderVersion: "43.5.0",
+    status: "ready",
+    statusMessage: null,
     schemes: [],
   },
 ];
@@ -128,18 +132,13 @@ describe("phase 3 library ui state", () => {
   });
 
   it("keeps form dialog body separate from the name field label", () => {
-    expect(getLibraryDialogContent("renameModpack")).toEqual({
-      titleKey: "library.renameModpackTitle",
-      fieldKey: "library.nameLabel",
-      tone: "form",
-    });
     expect(getLibraryDialogContent("createScheme")).not.toHaveProperty("bodyKey");
   });
 
   it("renders delete dialogs as danger confirmations with body copy", () => {
-    expect(getLibraryDialogContent("deleteModpack")).toEqual({
-      titleKey: "library.deleteModpackTitle",
-      bodyKey: "library.confirmDeleteModpack",
+    expect(getLibraryDialogContent("deleteScheme")).toEqual({
+      titleKey: "library.deleteSchemeTitle",
+      bodyKey: "library.confirmDeleteScheme",
       tone: "danger",
     });
   });

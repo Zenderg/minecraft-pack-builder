@@ -31,6 +31,11 @@ pub enum StorageError {
     NotFound { entity: &'static str, id: i64 },
     #[error("stored scheme content is invalid: {0}")]
     InvalidSchemeContent(String),
+    #[error("Prism instance {id} is {status} and cannot be edited until it is ready")]
+    InstanceNotReady {
+        id: i64,
+        status: PrismInstanceStatus,
+    },
     #[error(
         "local data was created by a newer app version (schema {found}, supported {supported}); keep the data folder unchanged, check diagnostics, and open it with a compatible Minecraft Pack Builder build"
     )]
@@ -68,7 +73,7 @@ pub struct LibraryDatabase {
     connection: Connection,
 }
 
-const SUPPORTED_SCHEMA_VERSION: i64 = 4;
+const SUPPORTED_SCHEMA_VERSION: i64 = 5;
 
 impl LibraryDatabase {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StorageError> {
@@ -103,72 +108,75 @@ impl LibraryDatabase {
               applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );",
         )?;
-        self.validate_migration_version()?;
-        self.connection.execute_batch(PHASE_3_SCHEMA)?;
-        self.connection.execute_batch(PHASE_4_SCHEMA)?;
-        self.connection.execute(
-            "INSERT OR IGNORE INTO schema_migrations (version) VALUES (3)",
-            [],
-        )?;
-        self.connection.execute(
-            "INSERT OR IGNORE INTO schema_migrations (version) VALUES (4)",
-            [],
-        )?;
-        Ok(())
-    }
-
-    fn validate_migration_version(&self) -> Result<(), StorageError> {
-        let current_version = self
-            .connection
-            .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
-                row.get::<_, Option<i64>>(0)
-            })?
-            .unwrap_or(0);
+        let current_version = self.current_migration_version()?;
         if current_version > SUPPORTED_SCHEMA_VERSION {
             return Err(StorageError::UnsupportedMigrationVersion {
                 found: current_version,
                 supported: SUPPORTED_SCHEMA_VERSION,
             });
         }
+        if current_version < 5 {
+            self.connection
+                .execute_batch(DROP_UNRELEASED_IMPORT_SCHEMA)?;
+        }
+        self.connection.execute_batch(PRISM_SCHEMA)?;
+        self.connection.execute(
+            "INSERT OR IGNORE INTO schema_migrations (version) VALUES (5)",
+            [],
+        )?;
         Ok(())
+    }
+
+    fn current_migration_version(&self) -> Result<i64, StorageError> {
+        Ok(self
+            .connection
+            .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
+                row.get::<_, Option<i64>>(0)
+            })?
+            .unwrap_or(0))
     }
 }
 
-const PHASE_3_SCHEMA: &str = r#"
-CREATE TABLE IF NOT EXISTS schema_migrations (
-  version INTEGER PRIMARY KEY,
-  applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+const DROP_UNRELEASED_IMPORT_SCHEMA: &str = r#"
+DROP TABLE IF EXISTS import_status;
+DROP TABLE IF EXISTS scheme_documents;
+DROP TABLE IF EXISTS construction_stages;
+DROP TABLE IF EXISTS scheme_dimensions;
+DROP TABLE IF EXISTS schemes;
+DROP TABLE IF EXISTS imported_modpacks;
+"#;
+
+const PRISM_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS settings_metadata (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS imported_modpacks (
+CREATE TABLE IF NOT EXISTS prism_instances (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  local_name TEXT NOT NULL UNIQUE,
-  source_slug TEXT,
-  source_url TEXT,
-  version_name TEXT NOT NULL,
+  instance_id TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  instance_path TEXT NOT NULL,
+  minecraft_dir TEXT NOT NULL,
   minecraft_version TEXT,
   loader TEXT,
-  cache_dir TEXT,
-  import_status TEXT NOT NULL,
+  loader_version TEXT,
+  identity_fingerprint TEXT NOT NULL UNIQUE,
+  content_fingerprint TEXT NOT NULL,
+  status TEXT NOT NULL,
+  status_message TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS import_status (
-  imported_modpack_id INTEGER PRIMARY KEY,
-  status TEXT NOT NULL,
-  message TEXT,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (imported_modpack_id) REFERENCES imported_modpacks(id) ON DELETE CASCADE
-);
-
 CREATE TABLE IF NOT EXISTS schemes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  imported_modpack_id INTEGER NOT NULL,
+  prism_instance_id INTEGER NOT NULL,
   name TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (imported_modpack_id) REFERENCES imported_modpacks(id) ON DELETE CASCADE
+  FOREIGN KEY (prism_instance_id) REFERENCES prism_instances(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS scheme_dimensions (
@@ -190,79 +198,99 @@ CREATE TABLE IF NOT EXISTS construction_stages (
   UNIQUE (scheme_id, position)
 );
 
-CREATE TABLE IF NOT EXISTS settings_metadata (
-  key TEXT PRIMARY KEY,
-  value TEXT NOT NULL,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-"#;
-
-const PHASE_4_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS scheme_documents (
   scheme_id INTEGER PRIMARY KEY,
   content_json TEXT NOT NULL,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (scheme_id) REFERENCES schemes(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS asset_indexes (
+  prism_instance_id INTEGER PRIMARY KEY,
+  static_status TEXT NOT NULL,
+  runtime_status TEXT NOT NULL,
+  asset_report_path TEXT,
+  registry_report_path TEXT,
+  input_fingerprint TEXT,
+  message TEXT,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (prism_instance_id) REFERENCES prism_instances(id) ON DELETE CASCADE
+);
 "#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub enum ImportStatus {
-    Imported,
-    Importing,
+pub enum PrismInstanceStatus {
+    Pending,
+    Indexing,
+    Ready,
     Failed,
+    Missing,
 }
 
-impl ImportStatus {
-    fn as_str(self) -> &'static str {
+impl PrismInstanceStatus {
+    pub fn as_str(self) -> &'static str {
         match self {
-            Self::Imported => "imported",
-            Self::Importing => "importing",
+            Self::Pending => "pending",
+            Self::Indexing => "indexing",
+            Self::Ready => "ready",
             Self::Failed => "failed",
+            Self::Missing => "missing",
         }
     }
 
     fn from_str(value: &str) -> Self {
         match value {
-            "importing" => Self::Importing,
+            "indexing" => Self::Indexing,
+            "ready" => Self::Ready,
             "failed" => Self::Failed,
-            _ => Self::Imported,
+            "missing" => Self::Missing,
+            _ => Self::Pending,
         }
     }
 }
 
+impl std::fmt::Display for PrismInstanceStatus {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NewImportedModpack {
-    pub local_name: String,
-    pub source_slug: Option<String>,
-    pub source_url: Option<String>,
-    pub version_name: String,
+pub struct NewPrismInstance {
+    pub instance_id: String,
+    pub display_name: String,
+    pub instance_path: PathBuf,
+    pub minecraft_dir: PathBuf,
     pub minecraft_version: Option<String>,
     pub loader: Option<String>,
-    pub cache_dir: Option<PathBuf>,
-    pub import_status: ImportStatus,
+    pub loader_version: Option<String>,
+    pub identity_fingerprint: String,
+    pub content_fingerprint: String,
+    pub status: PrismInstanceStatus,
+    pub status_message: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ImportedModpack {
+pub struct PrismInstanceRecord {
     pub id: i64,
-    pub local_name: String,
-    pub source_slug: Option<String>,
-    pub source_url: Option<String>,
-    pub version_name: String,
+    pub instance_id: String,
+    pub display_name: String,
+    pub instance_path: PathBuf,
+    pub minecraft_dir: PathBuf,
     pub minecraft_version: Option<String>,
     pub loader: Option<String>,
-    pub cache_dir: Option<PathBuf>,
-    pub import_status: ImportStatus,
-    pub import_message: Option<String>,
-    pub scheme_count: i64,
+    pub loader_version: Option<String>,
+    pub identity_fingerprint: String,
+    pub content_fingerprint: String,
+    pub status: PrismInstanceStatus,
+    pub status_message: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewScheme {
-    pub modpack_id: i64,
+    pub prism_instance_id: i64,
     pub name: String,
     pub size_x: i64,
     pub size_y: i64,
@@ -273,7 +301,7 @@ pub struct NewScheme {
 #[serde(rename_all = "camelCase")]
 pub struct SchemeRecord {
     pub id: i64,
-    pub modpack_id: i64,
+    pub prism_instance_id: i64,
     pub name: String,
     pub dimensions: (i64, i64, i64),
 }
@@ -302,22 +330,18 @@ struct SchemeDocumentBlock {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct LibraryModpack {
+pub struct LibraryInstance {
     pub id: i64,
-    pub local_name: String,
-    pub source_url: Option<String>,
-    pub version_name: String,
+    pub instance_id: String,
+    pub display_name: String,
+    pub instance_path: PathBuf,
+    pub minecraft_dir: PathBuf,
     pub minecraft_version: Option<String>,
     pub loader: Option<String>,
-    pub import_status: ImportStatus,
-    pub import_message: Option<String>,
+    pub loader_version: Option<String>,
+    pub status: PrismInstanceStatus,
+    pub status_message: Option<String>,
     pub schemes: Vec<SchemeRecord>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DeletedImportedModpack {
-    pub cache_dir: Option<PathBuf>,
-    pub removed_scheme_count: i64,
 }
 
 pub struct LibraryRepository {
@@ -329,114 +353,115 @@ impl LibraryRepository {
         Self { database }
     }
 
-    pub fn create_imported_modpack(
-        &self,
-        new_modpack: NewImportedModpack,
-    ) -> Result<ImportedModpack, StorageError> {
-        let local_name = self.next_unique_modpack_name(&new_modpack.local_name)?;
-        self.database.connection.execute(
-            "INSERT INTO imported_modpacks (
-                local_name, source_slug, source_url, version_name, minecraft_version, loader, cache_dir, import_status
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![
-                local_name,
-                new_modpack.source_slug,
-                new_modpack.source_url,
-                new_modpack.version_name,
-                new_modpack.minecraft_version,
-                new_modpack.loader,
-                new_modpack.cache_dir.map(|path| path.to_string_lossy().to_string()),
-                new_modpack.import_status.as_str(),
-            ],
-        )?;
-        let id = self.database.connection.last_insert_rowid();
-        self.database.connection.execute(
-            "INSERT INTO import_status (imported_modpack_id, status) VALUES (?1, ?2)",
-            params![id, new_modpack.import_status.as_str()],
-        )?;
-        self.get_imported_modpack(id)
-    }
-
-    pub fn rename_imported_modpack(
-        &self,
-        id: i64,
-        requested_name: &str,
-    ) -> Result<ImportedModpack, StorageError> {
-        self.require_modpack(id)?;
-        let local_name = self.next_unique_modpack_name_excluding(requested_name, Some(id))?;
-        let affected = self.database.connection.execute(
-            "UPDATE imported_modpacks SET local_name = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
-            params![local_name, id],
-        )?;
-        if affected == 0 {
-            return Err(StorageError::NotFound {
-                entity: "imported_modpack",
-                id,
-            });
+    pub fn set_prism_root(&self, root: Option<PathBuf>) -> Result<(), StorageError> {
+        match root {
+            Some(root) => {
+                self.database.connection.execute(
+                    "INSERT INTO settings_metadata (key, value, updated_at)
+                     VALUES ('prism_root_path', ?1, CURRENT_TIMESTAMP)
+                     ON CONFLICT(key) DO UPDATE SET
+                       value = excluded.value,
+                       updated_at = CURRENT_TIMESTAMP",
+                    params![root.to_string_lossy().to_string()],
+                )?;
+            }
+            None => {
+                self.database.connection.execute(
+                    "DELETE FROM settings_metadata WHERE key = 'prism_root_path'",
+                    [],
+                )?;
+            }
         }
-        self.get_imported_modpack(id)
+        Ok(())
     }
 
-    pub fn delete_imported_modpack(&self, id: i64) -> Result<DeletedImportedModpack, StorageError> {
-        let cache_dir = self
+    pub fn get_prism_root(&self) -> Result<Option<PathBuf>, StorageError> {
+        Ok(self
             .database
             .connection
             .query_row(
-                "SELECT cache_dir FROM imported_modpacks WHERE id = ?1",
-                params![id],
-                |row| row.get::<_, Option<String>>(0),
+                "SELECT value FROM settings_metadata WHERE key = 'prism_root_path'",
+                [],
+                |row| row.get::<_, String>(0),
             )
             .optional()?
-            .ok_or(StorageError::NotFound {
-                entity: "imported_modpack",
-                id,
-            })?
-            .map(PathBuf::from);
-        let removed_scheme_count = self.database.connection.query_row(
-            "SELECT COUNT(*) FROM schemes WHERE imported_modpack_id = ?1",
-            params![id],
-            |row| row.get::<_, i64>(0),
-        )?;
-        self.database
-            .connection
-            .execute("DELETE FROM imported_modpacks WHERE id = ?1", params![id])?;
-
-        Ok(DeletedImportedModpack {
-            cache_dir,
-            removed_scheme_count,
-        })
+            .map(PathBuf::from))
     }
 
-    pub fn update_import_status(
+    pub fn upsert_prism_instance(
         &self,
-        id: i64,
-        status: ImportStatus,
-        message: Option<String>,
-    ) -> Result<ImportedModpack, StorageError> {
-        self.require_modpack(id)?;
+        instance: NewPrismInstance,
+    ) -> Result<PrismInstanceRecord, StorageError> {
         self.database.connection.execute(
-            "UPDATE imported_modpacks SET import_status = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
-            params![status.as_str(), id],
+            "INSERT INTO prism_instances (
+                instance_id, display_name, instance_path, minecraft_dir, minecraft_version,
+                loader, loader_version, identity_fingerprint, content_fingerprint, status, status_message
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             ON CONFLICT(identity_fingerprint) DO UPDATE SET
+                instance_id = excluded.instance_id,
+                display_name = excluded.display_name,
+                instance_path = excluded.instance_path,
+                minecraft_dir = excluded.minecraft_dir,
+                minecraft_version = excluded.minecraft_version,
+                loader = excluded.loader,
+                loader_version = excluded.loader_version,
+                content_fingerprint = excluded.content_fingerprint,
+                status = excluded.status,
+                status_message = excluded.status_message,
+                updated_at = CURRENT_TIMESTAMP",
+            params![
+                clean_display_name(&instance.instance_id, "instance"),
+                clean_display_name(&instance.display_name, "Prism instance"),
+                path_to_string(instance.instance_path),
+                path_to_string(instance.minecraft_dir),
+                instance.minecraft_version,
+                instance.loader,
+                instance.loader_version,
+                instance.identity_fingerprint,
+                instance.content_fingerprint,
+                instance.status.as_str(),
+                instance.status_message,
+            ],
         )?;
-        self.database.connection.execute(
-            "INSERT INTO import_status (imported_modpack_id, status, message, updated_at)
-             VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP)
-             ON CONFLICT(imported_modpack_id) DO UPDATE SET
-               status = excluded.status,
-               message = excluded.message,
-               updated_at = CURRENT_TIMESTAMP",
-            params![id, status.as_str(), message],
-        )?;
-        self.get_imported_modpack(id)
+        self.get_prism_instance_by_identity_fingerprint(&instance.identity_fingerprint)?
+            .ok_or(StorageError::NotFound {
+                entity: "prism_instance",
+                id: 0,
+            })
+    }
+
+    pub fn mark_prism_instances_missing_except(
+        &self,
+        active_identity_fingerprints: &[String],
+    ) -> Result<(), StorageError> {
+        let active = active_identity_fingerprints
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+        for instance in self.list_prism_instance_records()? {
+            if !active.contains(instance.identity_fingerprint.as_str())
+                && instance.status != PrismInstanceStatus::Missing
+            {
+                self.database.connection.execute(
+                    "UPDATE prism_instances
+                     SET status = 'missing',
+                         status_message = 'Prism instance was not found in the active Launcher Root.',
+                         updated_at = CURRENT_TIMESTAMP
+                     WHERE id = ?1",
+                    params![instance.id],
+                )?;
+            }
+        }
+        Ok(())
     }
 
     pub fn create_scheme(&self, new_scheme: NewScheme) -> Result<SchemeRecord, StorageError> {
         validate_dimensions(new_scheme.size_x, new_scheme.size_y, new_scheme.size_z)?;
-        self.require_modpack(new_scheme.modpack_id)?;
+        self.require_instance_ready(new_scheme.prism_instance_id)?;
         let transaction = self.database.connection.unchecked_transaction()?;
         transaction.execute(
-            "INSERT INTO schemes (imported_modpack_id, name) VALUES (?1, ?2)",
-            params![new_scheme.modpack_id, new_scheme.name.as_str()],
+            "INSERT INTO schemes (prism_instance_id, name) VALUES (?1, ?2)",
+            params![new_scheme.prism_instance_id, new_scheme.name.as_str()],
         )?;
         let id = transaction.last_insert_rowid();
         transaction.execute(
@@ -460,7 +485,7 @@ impl LibraryRepository {
             params![id, content_json],
         )?;
         let scheme = transaction.query_row(
-            "SELECT s.id, s.imported_modpack_id, s.name, d.size_x, d.size_y, d.size_z
+            "SELECT s.id, s.prism_instance_id, s.name, d.size_x, d.size_y, d.size_z
              FROM schemes s
              JOIN scheme_dimensions d ON d.scheme_id = s.id
              WHERE s.id = ?1",
@@ -545,76 +570,160 @@ impl LibraryRepository {
         Ok(())
     }
 
-    pub fn list_library(&self) -> Result<Vec<LibraryModpack>, StorageError> {
-        let mut statement = self.database.connection.prepare(
-            "SELECT m.id, m.local_name, m.source_url, m.version_name, m.minecraft_version, m.loader, m.import_status, s.message
-             FROM imported_modpacks m
-             LEFT JOIN import_status s ON s.imported_modpack_id = m.id
-             ORDER BY local_name COLLATE NOCASE, id",
-        )?;
-        let modpack_rows = statement.query_map([], |row| {
-            Ok(LibraryModpack {
-                id: row.get(0)?,
-                local_name: row.get(1)?,
-                source_url: row.get(2)?,
-                version_name: row.get(3)?,
-                minecraft_version: row.get(4)?,
-                loader: row.get(5)?,
-                import_status: ImportStatus::from_str(row.get::<_, String>(6)?.as_str()),
-                import_message: row.get(7)?,
+    pub fn list_library(&self) -> Result<Vec<LibraryInstance>, StorageError> {
+        let mut library = self
+            .list_prism_instance_records()?
+            .into_iter()
+            .map(|instance| LibraryInstance {
+                id: instance.id,
+                instance_id: instance.instance_id,
+                display_name: instance.display_name,
+                instance_path: instance.instance_path,
+                minecraft_dir: instance.minecraft_dir,
+                minecraft_version: instance.minecraft_version,
+                loader: instance.loader,
+                loader_version: instance.loader_version,
+                status: instance.status,
+                status_message: instance.status_message,
                 schemes: Vec::new(),
             })
-        })?;
-        let mut library = modpack_rows.collect::<Result<Vec<_>, _>>()?;
-        for modpack in &mut library {
-            modpack.schemes = self.list_schemes_for_modpack(modpack.id)?;
+            .collect::<Vec<_>>();
+        for instance in &mut library {
+            instance.schemes = self.list_schemes_for_instance(instance.id)?;
         }
         Ok(library)
     }
 
-    pub fn get_imported_modpack(&self, id: i64) -> Result<ImportedModpack, StorageError> {
+    pub fn get_prism_instance(&self, id: i64) -> Result<PrismInstanceRecord, StorageError> {
         self.database
             .connection
             .query_row(
                 "SELECT
-                    m.id, m.local_name, m.source_slug, m.source_url, m.version_name,
-                    m.minecraft_version, m.loader, m.cache_dir, m.import_status, ist.message,
-                    COUNT(s.id) AS scheme_count
-                 FROM imported_modpacks m
-                 LEFT JOIN schemes s ON s.imported_modpack_id = m.id
-                 LEFT JOIN import_status ist ON ist.imported_modpack_id = m.id
-                 WHERE m.id = ?1
-                 GROUP BY m.id",
+                    id, instance_id, display_name, instance_path, minecraft_dir,
+                    minecraft_version, loader, loader_version, identity_fingerprint,
+                    content_fingerprint, status, status_message
+                 FROM prism_instances
+                 WHERE id = ?1",
                 params![id],
-                |row| {
-                    let cache_dir: Option<String> = row.get(7)?;
-                    Ok(ImportedModpack {
-                        id: row.get(0)?,
-                        local_name: row.get(1)?,
-                        source_slug: row.get(2)?,
-                        source_url: row.get(3)?,
-                        version_name: row.get(4)?,
-                        minecraft_version: row.get(5)?,
-                        loader: row.get(6)?,
-                        cache_dir: cache_dir.map(PathBuf::from),
-                        import_status: ImportStatus::from_str(row.get::<_, String>(8)?.as_str()),
-                        import_message: row.get(9)?,
-                        scheme_count: row.get(10)?,
-                    })
-                },
+                row_to_prism_instance,
             )
             .optional()?
             .ok_or(StorageError::NotFound {
-                entity: "imported_modpack",
+                entity: "prism_instance",
                 id,
             })
+    }
+
+    pub fn list_prism_instances(&self) -> Result<Vec<PrismInstanceRecord>, StorageError> {
+        self.list_prism_instance_records()
+    }
+
+    pub fn get_prism_instance_by_identity_fingerprint(
+        &self,
+        identity_fingerprint: &str,
+    ) -> Result<Option<PrismInstanceRecord>, StorageError> {
+        self.database
+            .connection
+            .query_row(
+                "SELECT
+                    id, instance_id, display_name, instance_path, minecraft_dir,
+                    minecraft_version, loader, loader_version, identity_fingerprint,
+                    content_fingerprint, status, status_message
+                 FROM prism_instances
+                 WHERE identity_fingerprint = ?1",
+                params![identity_fingerprint],
+                row_to_prism_instance,
+            )
+            .optional()
+            .map_err(StorageError::from)
+    }
+
+    pub fn update_prism_instance_status(
+        &self,
+        id: i64,
+        status: PrismInstanceStatus,
+        status_message: Option<&str>,
+    ) -> Result<(), StorageError> {
+        let affected = self.database.connection.execute(
+            "UPDATE prism_instances
+             SET status = ?1,
+                 status_message = ?2,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?3",
+            params![status.as_str(), status_message, id],
+        )?;
+        if affected == 0 {
+            return Err(StorageError::NotFound {
+                entity: "prism_instance",
+                id,
+            });
+        }
+        Ok(())
+    }
+
+    pub fn relink_prism_instance(
+        &self,
+        existing_id: i64,
+        instance: NewPrismInstance,
+    ) -> Result<PrismInstanceRecord, StorageError> {
+        let affected = self.database.connection.execute(
+            "UPDATE prism_instances
+             SET instance_id = ?1,
+                 display_name = ?2,
+                 instance_path = ?3,
+                 minecraft_dir = ?4,
+                 minecraft_version = ?5,
+                 loader = ?6,
+                 loader_version = ?7,
+                 identity_fingerprint = ?8,
+                 content_fingerprint = ?9,
+                 status = ?10,
+                 status_message = ?11,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?12",
+            params![
+                clean_display_name(&instance.instance_id, "instance"),
+                clean_display_name(&instance.display_name, "Prism instance"),
+                path_to_string(instance.instance_path),
+                path_to_string(instance.minecraft_dir),
+                instance.minecraft_version,
+                instance.loader,
+                instance.loader_version,
+                instance.identity_fingerprint,
+                instance.content_fingerprint,
+                instance.status.as_str(),
+                instance.status_message,
+                existing_id,
+            ],
+        )?;
+        if affected == 0 {
+            return Err(StorageError::NotFound {
+                entity: "prism_instance",
+                id: existing_id,
+            });
+        }
+        self.get_prism_instance(existing_id)
+    }
+
+    fn list_prism_instance_records(&self) -> Result<Vec<PrismInstanceRecord>, StorageError> {
+        let mut statement = self.database.connection.prepare(
+            "SELECT
+                id, instance_id, display_name, instance_path, minecraft_dir,
+                minecraft_version, loader, loader_version, identity_fingerprint,
+                content_fingerprint, status, status_message
+             FROM prism_instances
+             ORDER BY display_name COLLATE NOCASE, id",
+        )?;
+        let rows = statement.query_map([], row_to_prism_instance)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
     }
 
     fn get_scheme(&self, id: i64) -> Result<SchemeRecord, StorageError> {
         self.database
             .connection
             .query_row(
-                "SELECT s.id, s.imported_modpack_id, s.name, d.size_x, d.size_y, d.size_z
+                "SELECT s.id, s.prism_instance_id, s.name, d.size_x, d.size_y, d.size_z
                  FROM schemes s
                  JOIN scheme_dimensions d ON d.scheme_id = s.id
                  WHERE s.id = ?1",
@@ -644,79 +753,59 @@ impl LibraryRepository {
         }
     }
 
-    fn list_schemes_for_modpack(&self, modpack_id: i64) -> Result<Vec<SchemeRecord>, StorageError> {
-        let mut statement = self.database.connection.prepare(
-            "SELECT s.id, s.imported_modpack_id, s.name, d.size_x, d.size_y, d.size_z
-             FROM schemes s
-             JOIN scheme_dimensions d ON d.scheme_id = s.id
-             WHERE s.imported_modpack_id = ?1
-             ORDER BY s.name COLLATE NOCASE, s.id",
-        )?;
-        let rows = statement.query_map(params![modpack_id], row_to_scheme)?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(StorageError::from)
-    }
-
-    fn require_modpack(&self, id: i64) -> Result<(), StorageError> {
-        let exists = self.database.connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM imported_modpacks WHERE id = ?1)",
-            params![id],
-            |row| row.get::<_, bool>(0),
-        )?;
-        if exists {
+    fn require_instance_ready(&self, id: i64) -> Result<(), StorageError> {
+        let instance = self.get_prism_instance(id)?;
+        if instance.status == PrismInstanceStatus::Ready {
             Ok(())
         } else {
-            Err(StorageError::NotFound {
-                entity: "imported_modpack",
+            Err(StorageError::InstanceNotReady {
                 id,
+                status: instance.status,
             })
         }
     }
 
-    fn next_unique_modpack_name(&self, requested_name: &str) -> Result<String, StorageError> {
-        self.next_unique_modpack_name_excluding(requested_name, None)
-    }
-
-    fn next_unique_modpack_name_excluding(
+    fn list_schemes_for_instance(
         &self,
-        requested_name: &str,
-        excluding_id: Option<i64>,
-    ) -> Result<String, StorageError> {
-        let base_name = clean_display_name(requested_name, "Imported modpack");
-        let mut candidate = base_name.clone();
-        let mut suffix = 2;
-        while self.modpack_name_exists(&candidate, excluding_id)? {
-            candidate = format!("{base_name} ({suffix})");
-            suffix += 1;
-        }
-        Ok(candidate)
+        prism_instance_id: i64,
+    ) -> Result<Vec<SchemeRecord>, StorageError> {
+        let mut statement = self.database.connection.prepare(
+            "SELECT s.id, s.prism_instance_id, s.name, d.size_x, d.size_y, d.size_z
+             FROM schemes s
+             JOIN scheme_dimensions d ON d.scheme_id = s.id
+             WHERE s.prism_instance_id = ?1
+             ORDER BY s.name COLLATE NOCASE, s.id",
+        )?;
+        let rows = statement.query_map(params![prism_instance_id], row_to_scheme)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
     }
+}
 
-    fn modpack_name_exists(
-        &self,
-        local_name: &str,
-        excluding_id: Option<i64>,
-    ) -> Result<bool, StorageError> {
-        let count = match excluding_id {
-            Some(id) => self.database.connection.query_row(
-                "SELECT COUNT(*) FROM imported_modpacks WHERE local_name = ?1 AND id != ?2",
-                params![local_name, id],
-                |row| row.get::<_, i64>(0),
-            )?,
-            None => self.database.connection.query_row(
-                "SELECT COUNT(*) FROM imported_modpacks WHERE local_name = ?1",
-                params![local_name],
-                |row| row.get::<_, i64>(0),
-            )?,
-        };
-        Ok(count > 0)
-    }
+fn row_to_prism_instance(row: &rusqlite::Row<'_>) -> rusqlite::Result<PrismInstanceRecord> {
+    let instance_path: String = row.get(3)?;
+    let minecraft_dir: String = row.get(4)?;
+    let status: String = row.get(10)?;
+    Ok(PrismInstanceRecord {
+        id: row.get(0)?,
+        instance_id: row.get(1)?,
+        display_name: row.get(2)?,
+        instance_path: PathBuf::from(instance_path),
+        minecraft_dir: PathBuf::from(minecraft_dir),
+        minecraft_version: row.get(5)?,
+        loader: row.get(6)?,
+        loader_version: row.get(7)?,
+        identity_fingerprint: row.get(8)?,
+        content_fingerprint: row.get(9)?,
+        status: PrismInstanceStatus::from_str(&status),
+        status_message: row.get(11)?,
+    })
 }
 
 fn row_to_scheme(row: &rusqlite::Row<'_>) -> rusqlite::Result<SchemeRecord> {
     Ok(SchemeRecord {
         id: row.get(0)?,
-        modpack_id: row.get(1)?,
+        prism_instance_id: row.get(1)?,
         name: row.get(2)?,
         dimensions: (row.get(3)?, row.get(4)?, row.get(5)?),
     })
@@ -790,4 +879,8 @@ fn clean_display_name(value: &str, fallback: &str) -> String {
     } else {
         trimmed.to_string()
     }
+}
+
+fn path_to_string(path: PathBuf) -> String {
+    path.to_string_lossy().to_string()
 }

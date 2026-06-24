@@ -25,8 +25,8 @@ describe("i18n", () => {
     expect(translate("ru", "onboarding.aiPromptTitle")).toBe("Промпт для агента");
   });
 
-  it("does not describe the implemented import wizard as a future phase", () => {
-    expect(translate("en", "import.readyBody")).not.toMatch(/phase 5/i);
-    expect(translate("ru", "import.readyBody")).not.toMatch(/фаз[аеуы]? 5|phase 5/i);
+  it("explains where to find the PrismLauncher Launcher Root", () => {
+    expect(translate("en", "settings.prismFolderHint")).toContain("Folders > Launcher Root");
+    expect(translate("ru", "settings.prismFolderHint")).toContain("Folders > Launcher Root");
   });
 });

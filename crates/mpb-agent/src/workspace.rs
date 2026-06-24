@@ -9,7 +9,7 @@ use serde::Serialize;
 #[derive(Debug, Clone)]
 pub struct AgentWorkspace {
     pub(crate) registry: BlockRegistry,
-    pub(crate) modpacks: Vec<AgentModpack>,
+    pub(crate) instances: Vec<AgentInstance>,
     pub(crate) schemes: BTreeMap<i64, AgentScheme>,
     pub(crate) next_scheme_id: i64,
     pub(crate) current_selection: Option<Selection>,
@@ -66,7 +66,7 @@ impl AgentWorkspace {
             10,
             AgentScheme {
                 id: 10,
-                modpack_id: 1,
+                instance_id: 1,
                 name: "Protocol Fixture Scheme".to_string(),
                 scheme,
             },
@@ -74,16 +74,15 @@ impl AgentWorkspace {
 
         Self {
             registry,
-            modpacks: vec![AgentModpack {
+            instances: vec![AgentInstance {
                 id: 1,
-                local_name: "Protocol Fixture Pack - 1.0.0".to_string(),
-                source_url: Some(
-                    "https://www.curseforge.com/minecraft/modpacks/protocol-fixture-pack"
-                        .to_string(),
-                ),
-                version_name: "1.0.0".to_string(),
+                instance_id: "protocol-fixture-pack".to_string(),
+                display_name: "Protocol Fixture Pack".to_string(),
+                instance_path: None,
                 minecraft_version: Some("1.20.1".to_string()),
                 loader: Some("Forge".to_string()),
+                loader_version: Some("47.4.0".to_string()),
+                status: "ready".to_string(),
             }],
             schemes,
             next_scheme_id: 11,
@@ -94,7 +93,7 @@ impl AgentWorkspace {
     pub fn empty() -> Self {
         Self {
             registry: BlockRegistry::from_block_ids(Vec::<String>::new()),
-            modpacks: Vec::new(),
+            instances: Vec::new(),
             schemes: BTreeMap::new(),
             next_scheme_id: 1,
             current_selection: None,
@@ -104,19 +103,21 @@ impl AgentWorkspace {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct AgentModpack {
+pub(crate) struct AgentInstance {
     pub(crate) id: i64,
-    pub(crate) local_name: String,
-    pub(crate) source_url: Option<String>,
-    pub(crate) version_name: String,
+    pub(crate) instance_id: String,
+    pub(crate) display_name: String,
+    pub(crate) instance_path: Option<String>,
     pub(crate) minecraft_version: Option<String>,
     pub(crate) loader: Option<String>,
+    pub(crate) loader_version: Option<String>,
+    pub(crate) status: String,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct AgentScheme {
     pub(crate) id: i64,
-    pub(crate) modpack_id: i64,
+    pub(crate) instance_id: i64,
     pub(crate) name: String,
     pub(crate) scheme: Scheme,
 }
