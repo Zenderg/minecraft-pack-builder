@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 
 use crate::{
     default_mcp_endpoint, json_rpc_error, AgentError, AgentEvent, AgentServer, ClientIdentity,
-    JsonRpcOutcome, MCP_ENDPOINT_PATH, MCP_PROTOCOL_VERSION, DEFAULT_MCP_PORT,
+    JsonRpcOutcome, DEFAULT_MCP_PORT, MCP_ENDPOINT_PATH, MCP_PROTOCOL_VERSION,
 };
 
 pub struct McpHttpServerHandle {
@@ -28,7 +28,11 @@ impl McpHttpServerHandle {
 
     pub fn stop(mut self) {
         self.shutdown.store(true, Ordering::SeqCst);
-        let _ = TcpStream::connect(self.endpoint.replace("http://", "").replace(MCP_ENDPOINT_PATH, ""));
+        let _ = TcpStream::connect(
+            self.endpoint
+                .replace("http://", "")
+                .replace(MCP_ENDPOINT_PATH, ""),
+        );
         if let Some(join) = self.join.take() {
             let _ = join.join();
         }
@@ -45,8 +49,8 @@ pub fn start_streamable_http_server(
     server: AgentServer,
     on_events: impl Fn(Vec<AgentEvent>) + Send + Sync + 'static,
 ) -> Result<McpHttpServerHandle, AgentError> {
-    let listener = TcpListener::bind((IpAddr::from([127, 0, 0, 1]), DEFAULT_MCP_PORT))
-        .map_err(|error| {
+    let listener =
+        TcpListener::bind((IpAddr::from([127, 0, 0, 1]), DEFAULT_MCP_PORT)).map_err(|error| {
             AgentError::Http(format!(
                 "Could not bind MCP server at {}: {error}",
                 default_mcp_endpoint()
@@ -55,9 +59,9 @@ pub fn start_streamable_http_server(
     listener
         .set_nonblocking(true)
         .map_err(|error| AgentError::Http(format!("Could not configure MCP listener: {error}")))?;
-    let local_addr = listener
-        .local_addr()
-        .map_err(|error| AgentError::Http(format!("Could not read MCP listener address: {error}")))?;
+    let local_addr = listener.local_addr().map_err(|error| {
+        AgentError::Http(format!("Could not read MCP listener address: {error}"))
+    })?;
     let endpoint = format!("http://{local_addr}{MCP_ENDPOINT_PATH}");
     let shutdown = Arc::new(AtomicBool::new(false));
     let thread_shutdown = shutdown.clone();
@@ -105,9 +109,10 @@ fn handle_http_stream(
     addr: SocketAddr,
     server: &AgentServer,
 ) -> Result<(), AgentError> {
-    let mut reader = BufReader::new(stream.try_clone().map_err(|error| {
-        AgentError::Http(format!("Could not clone MCP HTTP stream: {error}"))
-    })?);
+    let mut reader =
+        BufReader::new(stream.try_clone().map_err(|error| {
+            AgentError::Http(format!("Could not clone MCP HTTP stream: {error}"))
+        })?);
     let mut request_line = String::new();
     reader
         .read_line(&mut request_line)
@@ -117,7 +122,13 @@ fn handle_http_stream(
         write_http_json(
             &mut stream,
             400,
-            json_rpc_error(Value::Null, -32600, "Invalid HTTP request", "invalid_http_request", json!({})),
+            json_rpc_error(
+                Value::Null,
+                -32600,
+                "Invalid HTTP request",
+                "invalid_http_request",
+                json!({}),
+            ),
         )?;
         return Ok(());
     }
@@ -151,7 +162,13 @@ fn handle_http_stream(
         write_http_json(
             &mut stream,
             404,
-            json_rpc_error(Value::Null, -32601, "MCP endpoint not found", "endpoint_not_found", json!({})),
+            json_rpc_error(
+                Value::Null,
+                -32601,
+                "MCP endpoint not found",
+                "endpoint_not_found",
+                json!({}),
+            ),
         )?;
         return Ok(());
     }
@@ -160,7 +177,13 @@ fn handle_http_stream(
         write_http_json(
             &mut stream,
             403,
-            json_rpc_error(Value::Null, -32010, "Origin is not allowed", "origin_not_allowed", json!({ "origin": origin })),
+            json_rpc_error(
+                Value::Null,
+                -32010,
+                "Origin is not allowed",
+                "origin_not_allowed",
+                json!({ "origin": origin }),
+            ),
         )?;
         return Ok(());
     }
@@ -220,7 +243,13 @@ fn handle_http_stream(
         write_http_json(
             &mut stream,
             400,
-            json_rpc_error(Value::Null, -32600, "Invalid MCP request body", "invalid_body", json!({ "contentLength": content_length })),
+            json_rpc_error(
+                Value::Null,
+                -32600,
+                "Invalid MCP request body",
+                "invalid_body",
+                json!({ "contentLength": content_length }),
+            ),
         )?;
         return Ok(());
     }
@@ -232,15 +261,17 @@ fn handle_http_stream(
     let body = String::from_utf8(body)
         .map_err(|error| AgentError::Http(format!("MCP body must be UTF-8: {error}")))?;
     let identity = ClientIdentity::new(addr.ip().to_string(), None);
-    let outcome = server.handle_json_message(&body, identity).unwrap_or_else(|error| {
-        JsonRpcOutcome::Response(json_rpc_error(
-            Value::Null,
-            -32603,
-            "Internal MCP server error",
-            "internal_error",
-            json!({ "message": error.to_string() }),
-        ))
-    });
+    let outcome = server
+        .handle_json_message(&body, identity)
+        .unwrap_or_else(|error| {
+            JsonRpcOutcome::Response(json_rpc_error(
+                Value::Null,
+                -32603,
+                "Internal MCP server error",
+                "internal_error",
+                json!({ "message": error.to_string() }),
+            ))
+        });
     match outcome {
         JsonRpcOutcome::Accepted => write_http_empty(&mut stream, 202, &[]),
         JsonRpcOutcome::Response(response) => write_http_json(&mut stream, 200, response),

@@ -34,6 +34,7 @@ import {
   deleteImportedModpack,
   deleteScheme,
   discoverAppPaths,
+  exportScheme,
   getCurseForgeKeyStatus,
   getAiIntegrationStatus,
   listLibrary,
@@ -51,16 +52,18 @@ import {
   type CurseForgeCredentialStatus,
   type ImportProgress,
 } from "./tauri";
+import { chooseExportDestination, type ExportFormat } from "./exportDialog";
 import { type StageOptionId } from "./renderViewer";
 import { RightToolPanel } from "./RightToolPanel";
 import { ViewerWorkspace, type ViewerToolContext } from "./ViewerWorkspace";
 import { ImportJobDialog, importJobStageFromMessage } from "./app/ImportJobDialog";
+import { ExportSchemeDialog } from "./app/ExportSchemeDialog";
 import { LibraryActionDialog } from "./app/LibraryActionDialog";
 import { LibraryTree } from "./app/LibraryTree";
 import { OnboardingScreen } from "./app/OnboardingScreen";
 import { SettingsModal } from "./app/SettingsModal";
 import { getAgentDisplay } from "./app/settingsControls";
-import type { LibraryDialog } from "./app/types";
+import type { ExportDialog, LibraryDialog } from "./app/types";
 import "./styles.css";
 import "./styles/appShell.css";
 import "./styles/library.css";
@@ -93,6 +96,7 @@ export function App() {
   const [librarySelection, setLibrarySelection] = useState<LibrarySelection | null>(null);
   const [libraryMessage, setLibraryMessage] = useState("");
   const [libraryDialog, setLibraryDialog] = useState<LibraryDialog | null>(null);
+  const [exportDialog, setExportDialog] = useState<ExportDialog | null>(null);
   const [importJobModpackId, setImportJobModpackId] = useState<number | null>(null);
   const [importProgressByModpack, setImportProgressByModpack] = useState<Record<number, ImportProgress>>({});
   const [importLogsByModpack, setImportLogsByModpack] = useState<Record<number, string[]>>({});
@@ -512,6 +516,58 @@ export function App() {
     }
   }
 
+  function handleOpenExportDialog(scheme: LibraryScheme) {
+    setExportDialog({
+      scheme,
+      format: "schem",
+      destinationPath: "",
+      isExporting: false,
+    });
+  }
+
+  function handleExportFormatChange(format: ExportFormat) {
+    setExportDialog((dialog) =>
+      dialog ? { ...dialog, format, destinationPath: "" } : dialog,
+    );
+  }
+
+  async function handleChooseExportDestination() {
+    if (!exportDialog) {
+      return;
+    }
+
+    const defaultFileName = `${exportDialog.scheme.name}.${exportDialog.format}`;
+    try {
+      const destinationPath = await chooseExportDestination({
+        defaultFileName,
+        format: exportDialog.format,
+      });
+      if (!destinationPath) {
+        return;
+      }
+      setExportDialog((dialog) => (dialog ? { ...dialog, destinationPath } : dialog));
+    } catch (error) {
+      setLibraryMessage(`${t("export.failed")}: ${String(error)}`);
+    }
+  }
+
+  async function handleConfirmExport() {
+    if (!exportDialog || !exportDialog.destinationPath || exportDialog.isExporting) {
+      return;
+    }
+
+    const { scheme, format, destinationPath } = exportDialog;
+    setExportDialog({ ...exportDialog, isExporting: true });
+    try {
+      const artifact = await exportScheme(scheme.id, format, destinationPath);
+      setLibraryMessage(t("export.success").replace("{path}", artifact.path));
+      setExportDialog(null);
+    } catch (error) {
+      setLibraryMessage(`${t("export.failed")}: ${String(error)}`);
+      setExportDialog((dialog) => (dialog ? { ...dialog, isExporting: false } : dialog));
+    }
+  }
+
   if (flow.screen === "onboarding") {
     return (
       <OnboardingScreen
@@ -549,7 +605,7 @@ export function App() {
           </div>
           <div>
             <h1>{t("app.title")}</h1>
-            <span className="brand-status">
+            <span className={`brand-status ${agentDisplay.tone}`}>
               <Bot size={12} />
               {agentDisplay.compact}
             </span>
@@ -572,6 +628,7 @@ export function App() {
             onCreateScheme={handleCreateScheme}
             onDeleteModpack={handleDeleteModpack}
             onDeleteScheme={handleDeleteScheme}
+            onExportScheme={handleOpenExportDialog}
             onRenameModpack={handleRenameModpack}
             onRenameScheme={handleRenameScheme}
             onSelect={setLibrarySelection}
@@ -665,6 +722,16 @@ export function App() {
           onCancel={() => setLibraryDialog(null)}
           onConfirm={handleConfirmLibraryDialog}
           onNameChange={handleLibraryDialogNameChange}
+          t={t}
+        />
+      )}
+      {exportDialog && (
+        <ExportSchemeDialog
+          dialog={exportDialog}
+          onCancel={() => setExportDialog(null)}
+          onChoosePath={handleChooseExportDestination}
+          onConfirm={handleConfirmExport}
+          onFormatChange={handleExportFormatChange}
           t={t}
         />
       )}

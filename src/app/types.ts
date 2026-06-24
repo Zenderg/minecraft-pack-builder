@@ -1,4 +1,5 @@
 import type { translate } from "../i18n";
+import type { ExportFormat } from "../exportDialog";
 import type { LibraryModpack, LibraryScheme } from "../library";
 
 export type Translator = (key: Parameters<typeof translate>[1]) => string;
@@ -10,3 +11,10 @@ export type LibraryDialog =
   | { kind: "infoModpack"; modpack: LibraryModpack }
   | { kind: "deleteScheme"; scheme: LibraryScheme }
   | { kind: "deleteModpack"; modpack: LibraryModpack };
+
+export type ExportDialog = {
+  scheme: LibraryScheme;
+  format: ExportFormat;
+  destinationPath: string;
+  isExporting: boolean;
+};

@@ -5,16 +5,15 @@ use std::sync::Mutex;
 use credentials::{
     curseforge_key_status, read_curseforge_key, save_curseforge_key, CurseForgeCredentialStatus,
 };
+use mpb_agent::{start_streamable_http_server, AgentServer, AgentStatus, McpHttpServerHandle};
 use mpb_assets::{
     build_modpack_asset_index_with_events, discover_modpack_releases, download_release_archive,
     parse_modpack_page_url, search_modpack_projects, AssetImportReport, CancellationToken,
     CurseForgeGateway, CurseForgeHttpGateway, CurseForgeProject, DiscoveredReleases,
     DownloadProgress, ModpackAssetImportRequest,
 };
-use mpb_agent::{
-    start_streamable_http_server, AgentServer, AgentStatus, McpHttpServerHandle,
-};
 use mpb_core::DomainDemoReport;
+use mpb_export::{write_scheme_export, ExportArtifact, ExportFormat};
 use mpb_storage::{
     ensure_app_data_dirs, AppDataPaths, LibraryModpack, LibraryRepository, NewScheme,
 };
@@ -26,7 +25,8 @@ mod credentials;
 mod render_demo;
 
 pub use render_demo::{
-    demo_render_scene, RenderBlockDto, RenderChunkSummaryDto, RenderSceneDto, RenderStageDto,
+    demo_export_scheme, demo_render_scene, RenderBlockDto, RenderChunkSummaryDto, RenderSceneDto,
+    RenderStageDto,
 };
 
 #[derive(Default)]
@@ -130,6 +130,26 @@ fn generate_domain_demo_report(app: tauri::AppHandle) -> Result<DomainDemoReport
 #[tauri::command]
 fn get_scheme_render_scene(scheme_id: i64) -> RenderSceneDto {
     demo_render_scene(scheme_id)
+}
+
+pub fn write_demo_scheme_export(
+    scheme_id: i64,
+    format: ExportFormat,
+    destination_path: impl AsRef<Path>,
+) -> Result<ExportArtifact, String> {
+    let scheme = demo_export_scheme(scheme_id);
+    write_scheme_export(&scheme, format, destination_path).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn export_scheme(
+    scheme_id: i64,
+    format: String,
+    destination_path: PathBuf,
+) -> Result<ExportArtifact, String> {
+    let format = ExportFormat::from_extension(&format)
+        .ok_or_else(|| "Export format must be schem or litematic".to_string())?;
+    write_demo_scheme_export(scheme_id, format, destination_path)
 }
 
 #[tauri::command]
@@ -825,6 +845,7 @@ pub fn run() {
         load_modpack_asset_report,
         generate_domain_demo_report,
         get_scheme_render_scene,
+        export_scheme,
         get_ai_integration_status,
         list_library,
         seed_local_library_fixture,
@@ -850,6 +871,7 @@ pub fn run() {
         load_modpack_asset_report,
         generate_domain_demo_report,
         get_scheme_render_scene,
+        export_scheme,
         get_ai_integration_status,
         list_library,
         create_scheme,
@@ -860,6 +882,7 @@ pub fn run() {
     ]);
 
     builder
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let server = AgentServer::new_demo();
             let app_handle = app.handle().clone();

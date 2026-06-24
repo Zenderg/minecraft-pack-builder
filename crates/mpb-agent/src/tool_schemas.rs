@@ -153,26 +153,22 @@ pub(crate) fn tool_definitions() -> Vec<Value> {
         ),
         tool_schema(
             "export_scheme",
-            "Export a scheme through the configured desktop export path.",
+            "Export a scheme to a selected desktop file path.",
             json!({
                 "schemeId": integer_schema("Scheme id."),
                 "format": {
                     "type": "string",
                     "enum": ["schem", "litematic"],
                     "description": "Export format."
-                }
+                },
+                "destinationPath": string_schema("Absolute destination file path chosen by the user.")
             }),
-            vec!["schemeId", "format"],
+            vec!["schemeId", "format", "destinationPath"],
         ),
     ]
 }
 
-fn tool_schema(
-    name: &str,
-    description: &str,
-    properties: Value,
-    required: Vec<&str>,
-) -> Value {
+fn tool_schema(name: &str, description: &str, properties: Value, required: Vec<&str>) -> Value {
     json!({
         "name": name,
         "description": description,
@@ -230,4 +226,3 @@ fn block_schema() -> Value {
         "additionalProperties": false
     })
 }
-

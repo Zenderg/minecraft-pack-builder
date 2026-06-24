@@ -12,6 +12,16 @@ fn demo_scheme() -> (BlockRegistry, Scheme, u32, u32) {
 }
 
 #[test]
+fn scheme_exposes_user_facing_name_for_export_metadata() {
+    let scheme = Scheme::new(
+        "Exportable Factory",
+        Dimensions::new(4, 3, 4).expect("dimensions"),
+    );
+
+    assert_eq!(scheme.name(), "Exportable Factory");
+}
+
+#[test]
 fn operations_generate_materials_for_all_blocks_including_unassigned() {
     let (registry, mut scheme, foundation, machinery) = demo_scheme();
 

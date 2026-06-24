@@ -11,6 +11,7 @@ const tauriMocks = vi.hoisted(() => ({
   deleteImportedModpack: vi.fn(),
   deleteScheme: vi.fn(),
   discoverAppPaths: vi.fn(),
+  exportScheme: vi.fn(),
   getAiIntegrationStatus: vi.fn(),
   getCurseForgeKeyStatus: vi.fn(),
   getSchemeRenderScene: vi.fn(),
@@ -26,6 +27,10 @@ const tauriMocks = vi.hoisted(() => ({
   seedLocalLibraryFixture: vi.fn(),
 }));
 
+const exportDialogMocks = vi.hoisted(() => ({
+  chooseExportDestination: vi.fn(),
+}));
+
 vi.mock("./tauri", () => ({
   cancelCurseForgeImport: tauriMocks.cancelCurseForgeImport,
   checkCurseForgeApiKey: tauriMocks.checkCurseForgeApiKey,
@@ -33,6 +38,7 @@ vi.mock("./tauri", () => ({
   deleteImportedModpack: tauriMocks.deleteImportedModpack,
   deleteScheme: tauriMocks.deleteScheme,
   discoverAppPaths: tauriMocks.discoverAppPaths,
+  exportScheme: tauriMocks.exportScheme,
   getAiIntegrationStatus: tauriMocks.getAiIntegrationStatus,
   getCurseForgeKeyStatus: tauriMocks.getCurseForgeKeyStatus,
   getSchemeRenderScene: tauriMocks.getSchemeRenderScene,
@@ -46,6 +52,10 @@ vi.mock("./tauri", () => ({
   retryModpackImport: tauriMocks.retryModpackImport,
   saveCurseForgeApiKey: tauriMocks.saveCurseForgeApiKey,
   seedLocalLibraryFixture: tauriMocks.seedLocalLibraryFixture,
+}));
+
+vi.mock("./exportDialog", () => ({
+  chooseExportDestination: exportDialogMocks.chooseExportDestination,
 }));
 
 import { App } from "./App";
@@ -124,6 +134,14 @@ describe("phase 7 viewer workspace", () => {
       },
     ]);
     tauriMocks.getSchemeRenderScene.mockResolvedValue(browserRenderSceneFixture);
+    exportDialogMocks.chooseExportDestination.mockResolvedValue("/tmp/starter-factory.litematic");
+    tauriMocks.exportScheme.mockResolvedValue({
+      schemeId: 10,
+      format: "litematic",
+      path: "/tmp/starter-factory.litematic",
+      byteLen: 128,
+      blockCount: 9,
+    });
 
     container = document.createElement("div");
     document.body.append(container);
@@ -206,6 +224,55 @@ describe("phase 7 viewer workspace", () => {
     expect(countText(container, "http://127.0.0.1:7777/mcp")).toBe(1);
   });
 
+  it("exports the opened scheme through its scheme actions menu and modal", async () => {
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".scheme-label")?.click();
+    });
+
+    expect(container.querySelector(".viewer-footer")?.textContent).not.toContain("Export");
+
+    await act(async () => {
+      buttonByLabel(container, "Scheme actions").click();
+    });
+
+    expect(await screenText(container, "Rename")).toBe(true);
+    expect(await screenText(container, "Export")).toBe(true);
+    expect(await screenText(container, "Delete")).toBe(true);
+    expect(container.querySelector(".modpack-menu")?.textContent).not.toContain("Scheme");
+
+    await act(async () => {
+      buttonByText(container, "Export").click();
+    });
+
+    expect(await screenText(container, "Export scheme")).toBe(true);
+
+    await act(async () => {
+      buttonByText(container, "Litematica .litematic").click();
+    });
+
+    await act(async () => {
+      buttonByText(container, "Choose path").click();
+    });
+
+    expect(exportDialogMocks.chooseExportDestination).toHaveBeenCalledWith({
+      defaultFileName: "Starter Factory.litematic",
+      format: "litematic",
+    });
+
+    await act(async () => {
+      buttonByText(container, "Export").click();
+    });
+
+    expect(tauriMocks.exportScheme).toHaveBeenCalledWith(
+      10,
+      "litematic",
+      "/tmp/starter-factory.litematic",
+    );
+    expect(container.querySelector(".library-message")?.textContent).toContain(
+      "/tmp/starter-factory.litematic",
+    );
+  });
+
   it("renders a handoff prompt with endpoint and interface language guidance", async () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>(".settings-link")?.click();
@@ -226,6 +293,16 @@ function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
   );
   if (!(button instanceof HTMLButtonElement)) {
     throw new Error(`Button with text "${text}" was not found`);
+  }
+  return button;
+}
+
+function buttonByLabel(container: HTMLElement, label: string): HTMLButtonElement {
+  const button = [...container.querySelectorAll("button")].find(
+    (item) => item.getAttribute("aria-label") === label,
+  );
+  if (!(button instanceof HTMLButtonElement)) {
+    throw new Error(`Button with label "${label}" was not found`);
   }
   return button;
 }

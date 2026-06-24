@@ -9,3 +9,4 @@
 - Node.js may be changed with the `n` CLI outside the sandbox if a project toolchain requires a different version; otherwise keep the current version.
 - Do not start or rely on the web/Vite dev server for user-facing validation by default. This is a Tauri desktop app, so prefer testing the full desktop application; if desktop launch must be done manually by the user, say that clearly instead of substituting browser-only validation.
 - Do not create tests just to satisfy a process. Tests must verify meaningful product or code behavior. Do not test documentation wording or specs with automated tests unless the user explicitly asks for that exact kind of guard.
+- Before adding or changing user-facing UI behavior that is not explicitly specified in the product specs, stop and ask the user to confirm the intended flow. Examples include where an action lives, whether it opens a menu or modal, which fields are shown, and the order of user decisions.

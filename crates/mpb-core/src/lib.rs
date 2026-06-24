@@ -384,6 +384,10 @@ impl Scheme {
         self.dimensions
     }
 
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     pub fn stages(&self) -> &[ConstructionStage] {
         &self.stages
     }

@@ -106,6 +106,10 @@ pub fn demo_render_scene(scheme_id: i64) -> RenderSceneDto {
     }
 }
 
+pub fn demo_export_scheme(_scheme_id: i64) -> Scheme {
+    build_phase_7_demo_scheme().0
+}
+
 fn build_phase_7_demo_scheme() -> (Scheme, u32, u32) {
     let registry = BlockRegistry::synthetic_fixture();
     let mut scheme = Scheme::new(

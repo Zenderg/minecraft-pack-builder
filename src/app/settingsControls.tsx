@@ -114,19 +114,22 @@ export function getAgentDisplay(agentStatus: AgentStatus | null, t: Translator) 
     return {
       compact: t("status.aiDisconnected"),
       status: t("status.aiDisconnected"),
+      tone: "warning",
     };
   }
 
   if (agentStatus.activeClient) {
     return {
-      compact: `${t("status.aiConnected")}: ${agentStatus.activeClient}`,
+      compact: t("status.aiConnected"),
       status: t("status.aiConnected"),
+      tone: "connected",
     };
   }
 
   return {
     compact: t("status.aiServerRunning"),
     status: t("status.aiServerRunning"),
+    tone: "warning",
   };
 }
 

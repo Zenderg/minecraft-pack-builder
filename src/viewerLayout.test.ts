@@ -23,8 +23,34 @@ describe("desktop viewer layout CSS", () => {
     expect(viewerRegionBlock).not.toMatch(/border\s*:/);
     expect(css).not.toMatch(/\.viewer-footer span,\n\.viewer-footer strong/);
     expect(css).toMatch(/\.viewer-footer > span,\n\.viewer-footer > strong/);
+    expect(css).not.toMatch(/\.viewer-footer-actions/);
+    expect(css).not.toMatch(/\.viewer-footer-action/);
     expect(css).toMatch(/\.app-shell\s*\{[^}]*width:\s*100dvw/);
     expect(css).toMatch(/\.viewer-three-canvas\s*\{[^}]*position:\s*absolute/);
+  });
+
+  it("keeps the dark theme tokens after CSS file decomposition", () => {
+    const rootBlock = css.match(/:root\s*\{[^}]*\}/)?.[0] ?? "";
+    const bodyBlock = css.match(/body\s*\{[^}]*\}/)?.[0] ?? "";
+    const htmlRootBlock = css.match(/html,\n#root\s*\{[^}]*\}/)?.[0] ?? "";
+
+    expect(rootBlock).toMatch(/color-scheme:\s*dark/);
+    expect(rootBlock).toMatch(/--bg:\s*#0b0f10/);
+    expect(rootBlock).toMatch(/--text:\s*#e8f0ec/);
+    expect(rootBlock).toMatch(/--muted:\s*#93a19c/);
+    expect(rootBlock).toMatch(/--accent:\s*#42d392/);
+    expect(rootBlock).toMatch(/--accent-strong:\s*#71e7aa/);
+    expect(bodyBlock).toMatch(/background:\s*var\(--bg\)/);
+    expect(htmlRootBlock).toMatch(/height:\s*100%/);
+    expect(htmlRootBlock).toMatch(/overflow:\s*hidden/);
+  });
+
+  it("uses a green sidebar status only for connected AI state", () => {
+    const brandStatusBlock = css.match(/\.brand \.brand-status\s*\{[^}]*\}/)?.[0] ?? "";
+    const connectedStatusBlock = css.match(/\.brand \.brand-status\.connected\s*\{[^}]*\}/)?.[0] ?? "";
+
+    expect(brandStatusBlock).toMatch(/color:\s*var\(--warning\)/);
+    expect(connectedStatusBlock).toMatch(/color:\s*var\(--accent-strong\)/);
   });
 
   it("bounds the right tools rail so expanded sections scroll inside the sidebar", () => {

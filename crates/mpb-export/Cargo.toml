@@ -5,3 +5,11 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+flate2 = "1"
+fastnbt = "2"
+mpb-core = { path = "../mpb-core" }
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

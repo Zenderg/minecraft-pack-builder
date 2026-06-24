@@ -105,6 +105,10 @@ button.loading:disabled {
   line-height: 1.2;
 }
 
+.brand .brand-status.connected {
+  color: var(--accent-strong);
+}
+
 .brand .brand-status svg {
   flex: 0 0 auto;
 }
@@ -172,4 +176,3 @@ button.loading:disabled {
 .settings-link {
   margin-top: auto;
 }
-

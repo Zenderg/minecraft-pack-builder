@@ -1,4 +1,15 @@
-import { AlertTriangle, Database, Info, Layers3, Loader2, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  Database,
+  Download,
+  Info,
+  Layers3,
+  Loader2,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import type React from "react";
 
@@ -21,6 +32,7 @@ export function LibraryTree(props: {
   onCreateScheme: (modpackId: number) => void;
   onDeleteModpack: (modpack: LibraryModpack) => void;
   onDeleteScheme: (scheme: LibraryScheme) => void;
+  onExportScheme: (scheme: LibraryScheme) => void;
   onRenameModpack: (modpack: LibraryModpack) => void;
   onRenameScheme: (scheme: LibraryScheme) => void;
   onSelect: (selection: LibrarySelection) => void;
@@ -32,23 +44,24 @@ export function LibraryTree(props: {
   t: Translator;
 }) {
   const { t } = props;
-  const [openModpackMenu, setOpenModpackMenu] = useState<{
+  const [openLibraryMenu, setOpenLibraryMenu] = useState<{
+    kind: "modpack" | "scheme";
     id: number;
     left: number;
     top: number;
   } | null>(null);
   useEffect(() => {
-    if (openModpackMenu === null) {
+    if (openLibraryMenu === null) {
       return;
     }
 
     const closeMenu = () => {
-      setOpenModpackMenu(null);
+      setOpenLibraryMenu(null);
     };
 
     window.addEventListener("pointerdown", closeMenu);
     return () => window.removeEventListener("pointerdown", closeMenu);
-  }, [openModpackMenu]);
+  }, [openLibraryMenu]);
 
   if (props.library.length === 0) {
     return (
@@ -108,9 +121,10 @@ export function LibraryTree(props: {
                       width: window.innerWidth,
                       height: window.innerHeight,
                     });
-                    setOpenModpackMenu((current) => {
-                      const nextId = getNextOpenModpackMenuId(current?.id ?? null, modpack.id, "menuButton");
-                      return nextId === null ? null : { id: nextId, ...placement };
+                    setOpenLibraryMenu((current) => {
+                      const openModpackId = current?.kind === "modpack" ? current.id : null;
+                      const nextId = getNextOpenModpackMenuId(openModpackId, modpack.id, "menuButton");
+                      return nextId === null ? null : { kind: "modpack", id: nextId, ...placement };
                     });
                   }}
                   type="button"
@@ -121,21 +135,21 @@ export function LibraryTree(props: {
             ) : (
               <ImportStatusIndicator status={modpack.importStatus} t={t} />
             )}
-            {openModpackMenu?.id === modpack.id && (
+            {openLibraryMenu?.kind === "modpack" && openLibraryMenu.id === modpack.id && (
               <div
                 className="modpack-menu"
                 onPointerDown={(event) => event.stopPropagation()}
                 role="menu"
                 style={
                   {
-                    "--modpack-menu-left": `${openModpackMenu.left}px`,
-                    "--modpack-menu-top": `${openModpackMenu.top}px`,
+                    "--modpack-menu-left": `${openLibraryMenu.left}px`,
+                    "--modpack-menu-top": `${openLibraryMenu.top}px`,
                   } as React.CSSProperties
                 }
               >
                 <button
                   onClick={() => {
-                    setOpenModpackMenu(null);
+                    setOpenLibraryMenu(null);
                     props.onShowModpackInfo(modpack);
                   }}
                   role="menuitem"
@@ -146,26 +160,26 @@ export function LibraryTree(props: {
                 </button>
                 <button
                   onClick={() => {
-                    setOpenModpackMenu(null);
+                    setOpenLibraryMenu(null);
                     props.onRenameModpack(modpack);
                   }}
                   role="menuitem"
                   type="button"
                 >
                   <Pencil size={14} />
-                  {t("library.renameModpack")}
+                  {t("library.menuRename")}
                 </button>
                 <button
                   className="danger"
                   onClick={() => {
-                    setOpenModpackMenu(null);
+                    setOpenLibraryMenu(null);
                     props.onDeleteModpack(modpack);
                   }}
                   role="menuitem"
                   type="button"
                 >
                   <Trash2 size={14} />
-                  {t("library.deleteModpack")}
+                  {t("library.menuDelete")}
                 </button>
               </div>
             )}
@@ -176,41 +190,92 @@ export function LibraryTree(props: {
               <div className="tree-item nested empty-scheme-row">{t("library.noSchemes")}</div>
             ) : (
               modpack.schemes.map((scheme) => (
-              <div
-                className={
-                  props.selected?.schemeId === scheme.id
-                    ? "tree-item nested selected scheme-row"
-                    : "tree-item nested scheme-row"
-                }
-                key={scheme.id}
-              >
-                <button
-                  className="tree-label scheme-label"
-                  onClick={() => props.onSelect({ modpackId: modpack.id, schemeId: scheme.id })}
-                  type="button"
+                <div
+                  className={
+                    props.selected?.schemeId === scheme.id
+                      ? "tree-item nested selected scheme-row"
+                      : "tree-item nested scheme-row"
+                  }
+                  key={scheme.id}
                 >
-                  <Layers3 size={15} />
-                  <span title={scheme.name}>{scheme.name}</span>
-                </button>
-                <div className="tree-actions">
                   <button
-                    aria-label={t("library.renameScheme")}
-                    className="icon-action small"
-                    onClick={() => props.onRenameScheme(scheme)}
+                    className="tree-label scheme-label"
+                    onClick={() => props.onSelect({ modpackId: modpack.id, schemeId: scheme.id })}
                     type="button"
                   >
-                    <Pencil size={14} />
+                    <Layers3 size={15} />
+                    <span title={scheme.name}>{scheme.name}</span>
                   </button>
-                  <button
-                    aria-label={t("library.deleteScheme")}
-                    className="icon-action small danger"
-                    onClick={() => props.onDeleteScheme(scheme)}
-                    type="button"
-                  >
-                    <Trash2 size={14} />
-                  </button>
+                  <div className="tree-actions">
+                    <button
+                      aria-label={t("library.schemeActions")}
+                      className="icon-action small"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        const placement = getModpackMenuPlacement(event.currentTarget.getBoundingClientRect(), {
+                          width: window.innerWidth,
+                          height: window.innerHeight,
+                        });
+                        setOpenLibraryMenu((current) =>
+                          current?.kind === "scheme" && current.id === scheme.id
+                            ? null
+                            : { kind: "scheme", id: scheme.id, ...placement },
+                        );
+                      }}
+                      type="button"
+                    >
+                      <MoreHorizontal size={15} />
+                    </button>
+                  </div>
+                  {openLibraryMenu?.kind === "scheme" && openLibraryMenu.id === scheme.id && (
+                    <div
+                      className="modpack-menu"
+                      onPointerDown={(event) => event.stopPropagation()}
+                      role="menu"
+                      style={
+                        {
+                          "--modpack-menu-left": `${openLibraryMenu.left}px`,
+                          "--modpack-menu-top": `${openLibraryMenu.top}px`,
+                        } as React.CSSProperties
+                      }
+                    >
+                      <button
+                        onClick={() => {
+                          setOpenLibraryMenu(null);
+                          props.onRenameScheme(scheme);
+                        }}
+                        role="menuitem"
+                        type="button"
+                      >
+                        <Pencil size={14} />
+                        {t("library.menuRename")}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setOpenLibraryMenu(null);
+                          props.onExportScheme(scheme);
+                        }}
+                        role="menuitem"
+                        type="button"
+                      >
+                        <Download size={14} />
+                        {t("library.menuExport")}
+                      </button>
+                      <button
+                        className="danger"
+                        onClick={() => {
+                          setOpenLibraryMenu(null);
+                          props.onDeleteScheme(scheme);
+                        }}
+                        role="menuitem"
+                        type="button"
+                      >
+                        <Trash2 size={14} />
+                        {t("library.menuDelete")}
+                      </button>
+                    </div>
+                  )}
                 </div>
-              </div>
               ))
             ))}
         </div>

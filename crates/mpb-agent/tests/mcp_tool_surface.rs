@@ -2,6 +2,7 @@ use mpb_agent::{
     default_mcp_endpoint, AgentServer, ClientIdentity, JsonRpcOutcome, JsonRpcRequest,
 };
 use serde_json::json;
+use std::path::PathBuf;
 
 #[test]
 fn default_mcp_endpoint_is_stable_across_app_restarts() {
@@ -26,7 +27,10 @@ fn initializes_mcp_server_and_lists_full_phase_9_tool_surface() {
 
     assert_eq!(initialize["jsonrpc"], "2.0");
     assert_eq!(initialize["result"]["protocolVersion"], "2025-06-18");
-    assert_eq!(initialize["result"]["serverInfo"]["name"], "minecraft-pack-builder");
+    assert_eq!(
+        initialize["result"]["serverInfo"]["name"],
+        "minecraft-pack-builder"
+    );
     assert_eq!(
         initialize["result"]["capabilities"]["tools"]["listChanged"],
         true
@@ -183,7 +187,10 @@ fn active_client_can_be_released_without_restarting_the_app() {
             ClientIdentity::new("127.0.0.1", None),
         ))
         .expect("second client initializes after release");
-    assert_eq!(server.status().active_client.as_deref(), Some("Claude Code"));
+    assert_eq!(
+        server.status().active_client.as_deref(),
+        Some("Claude Code")
+    );
 }
 
 #[test]
@@ -220,10 +227,7 @@ fn allows_only_one_active_external_client() {
         rejected["error"]["data"]["code"],
         "active_client_already_connected"
     );
-    assert_eq!(
-        server.status().active_client.as_deref(),
-        Some("Codex")
-    );
+    assert_eq!(server.status().active_client.as_deref(), Some("Codex"));
 }
 
 #[test]
@@ -242,12 +246,7 @@ fn rejects_invalid_bulk_mutation_atomically_with_structured_error() {
         ))
         .expect("initialize");
 
-    let before = call_tool(
-        &server,
-        2,
-        "read_scheme_content",
-        json!({ "schemeId": 10 }),
-    );
+    let before = call_tool(&server, 2, "read_scheme_content", json!({ "schemeId": 10 }));
     let before_block_count = before["structuredContent"]["blockCount"]
         .as_u64()
         .expect("before block count");
@@ -274,16 +273,40 @@ fn rejects_invalid_bulk_mutation_atomically_with_structured_error() {
         "coordinate_out_of_bounds"
     );
 
-    let after = call_tool(
-        &server,
-        4,
-        "read_scheme_content",
-        json!({ "schemeId": 10 }),
-    );
+    let after = call_tool(&server, 4, "read_scheme_content", json!({ "schemeId": 10 }));
     assert_eq!(
         after["structuredContent"]["blockCount"].as_u64(),
         Some(before_block_count)
     );
+}
+
+#[test]
+fn export_scheme_writes_selected_format_to_destination_path() {
+    let server = AgentServer::new_demo();
+    let destination = unique_temp_export_path("mcp-export-smoke.schem");
+    let _ = std::fs::remove_file(&destination);
+
+    let exported = call_tool(
+        &server,
+        1,
+        "export_scheme",
+        json!({
+            "schemeId": 10,
+            "format": "schem",
+            "destinationPath": destination
+        }),
+    );
+
+    assert_eq!(exported["isError"], false);
+    assert_eq!(exported["structuredContent"]["format"], "schem");
+    assert_eq!(
+        exported["structuredContent"]["path"].as_str(),
+        destination.to_str()
+    );
+    let bytes = std::fs::read(&destination).expect("exported file exists");
+    assert_eq!(&bytes[..2], &[0x1f, 0x8b]);
+
+    std::fs::remove_file(destination).expect("clean export smoke file");
 }
 
 fn list_tools() -> Vec<serde_json::Value> {
@@ -300,6 +323,14 @@ fn list_tools() -> Vec<serde_json::Value> {
         .as_array()
         .expect("tools")
         .clone()
+}
+
+fn unique_temp_export_path(file_name: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "{}-{}-{file_name}",
+        std::process::id(),
+        std::thread::current().name().unwrap_or("test")
+    ))
 }
 
 fn assert_schema_has_no_type_arrays(value: &serde_json::Value) {

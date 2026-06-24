@@ -19,11 +19,13 @@ tauri-build = { version = "2", features = [] }
 mpb-assets = { path = "../crates/mpb-assets" }
 mpb-agent = { path = "../crates/mpb-agent" }
 mpb-core = { path = "../crates/mpb-core" }
+mpb-export = { path = "../crates/mpb-export" }
 mpb-render = { path = "../crates/mpb-render" }
 mpb-storage = { path = "../crates/mpb-storage" }
 serde.workspace = true
 serde_json.workspace = true
 tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security_Credentials"] }

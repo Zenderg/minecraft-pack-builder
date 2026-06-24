@@ -116,7 +116,7 @@ export function ViewerWorkspace({
 
   return (
     <section className="viewer-region" aria-label={t("workspace.viewer")}>
-      {viewerState.kind === "ready" ? (
+      {viewerState.kind === "ready" && scheme ? (
         <ReadyViewer
           modpack={modpack}
           scene={viewerState.scene}

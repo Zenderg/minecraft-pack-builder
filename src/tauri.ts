@@ -78,6 +78,16 @@ export type AgentEvent =
   | { libraryChanged: Record<string, never> }
   | { schemeChanged: { schemeId: number } };
 
+export type ExportFormat = "schem" | "litematic";
+
+export type ExportArtifact = {
+  path: string;
+  format: ExportFormat;
+  byteLen: number;
+  blockCount: number;
+  schemeId?: number;
+};
+
 function getProjectSourceUrl(project: CurseForgeProject): string {
   return `https://www.curseforge.com/minecraft/modpacks/${project.slug}`;
 }
@@ -301,6 +311,28 @@ export async function getSchemeRenderScene(schemeId: number): Promise<RenderScen
   }
 
   return invoke<RenderScene>("get_scheme_render_scene", { schemeId });
+}
+
+export async function exportScheme(
+  schemeId: number,
+  format: ExportFormat,
+  destinationPath: string,
+): Promise<ExportArtifact> {
+  if (!isTauriRuntime()) {
+    return {
+      schemeId,
+      format,
+      path: destinationPath,
+      byteLen: 128,
+      blockCount: browserRenderSceneFixture.blocks.length,
+    };
+  }
+
+  return invoke<ExportArtifact>("export_scheme", {
+    schemeId,
+    format,
+    destinationPath,
+  });
 }
 
 export async function getAiIntegrationStatus(): Promise<AgentStatus> {
