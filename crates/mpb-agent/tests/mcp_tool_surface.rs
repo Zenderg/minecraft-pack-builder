@@ -11,7 +11,7 @@ fn default_mcp_endpoint_is_stable_across_app_restarts() {
 
 #[test]
 fn initializes_mcp_server_and_lists_full_phase_9_tool_surface() {
-    let server = AgentServer::new_demo();
+    let server = AgentServer::new_test_fixture();
     let initialize = server
         .handle(JsonRpcRequest::new(
             1,
@@ -132,7 +132,7 @@ fn tool_input_schemas_use_any_of_for_nullable_fields() {
 
 #[test]
 fn accepts_json_rpc_notifications_without_returning_a_response() {
-    let server = AgentServer::new_demo();
+    let server = AgentServer::new_test_fixture();
     let outcome = server
         .handle_json_message(
             r#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}"#,
@@ -145,7 +145,7 @@ fn accepts_json_rpc_notifications_without_returning_a_response() {
 
 #[test]
 fn accepts_json_rpc_responses_without_returning_a_response() {
-    let server = AgentServer::new_demo();
+    let server = AgentServer::new_test_fixture();
     let outcome = server
         .handle_json_message(
             r#"{"jsonrpc":"2.0","id":7,"result":{"ok":true}}"#,
@@ -158,7 +158,7 @@ fn accepts_json_rpc_responses_without_returning_a_response() {
 
 #[test]
 fn active_client_can_be_released_without_restarting_the_app() {
-    let server = AgentServer::new_demo();
+    let server = AgentServer::new_test_fixture();
     server
         .handle(JsonRpcRequest::new(
             1,
@@ -195,7 +195,7 @@ fn active_client_can_be_released_without_restarting_the_app() {
 
 #[test]
 fn allows_only_one_active_external_client() {
-    let server = AgentServer::new_demo();
+    let server = AgentServer::new_test_fixture();
     server
         .handle(JsonRpcRequest::new(
             1,
@@ -232,7 +232,7 @@ fn allows_only_one_active_external_client() {
 
 #[test]
 fn rejects_invalid_bulk_mutation_atomically_with_structured_error() {
-    let server = AgentServer::new_demo();
+    let server = AgentServer::new_test_fixture();
     server
         .handle(JsonRpcRequest::new(
             1,
@@ -300,7 +300,7 @@ fn rejects_invalid_bulk_mutation_atomically_with_structured_error() {
 
 #[test]
 fn validate_scheme_returns_structured_validation_diagnostic() {
-    let server = AgentServer::new_demo();
+    let server = AgentServer::new_test_fixture();
 
     let response = call_tool(&server, 1, "validate_scheme", json!({ "schemeId": 10 }));
 
@@ -319,7 +319,7 @@ fn validate_scheme_returns_structured_validation_diagnostic() {
 
 #[test]
 fn export_scheme_writes_selected_format_to_destination_path() {
-    let server = AgentServer::new_demo();
+    let server = AgentServer::new_test_fixture();
     let destination = unique_temp_export_path("mcp-export-smoke.schem");
     let _ = std::fs::remove_file(&destination);
 
@@ -347,7 +347,7 @@ fn export_scheme_writes_selected_format_to_destination_path() {
 }
 
 fn list_tools() -> Vec<serde_json::Value> {
-    let server = AgentServer::new_demo();
+    let server = AgentServer::new_test_fixture();
     let response = server
         .handle(JsonRpcRequest::new(
             1,

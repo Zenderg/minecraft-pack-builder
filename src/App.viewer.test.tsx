@@ -25,7 +25,6 @@ const tauriMocks = vi.hoisted(() => ({
   renameScheme: vi.fn(),
   retryModpackImport: vi.fn(),
   saveCurseForgeApiKey: vi.fn(),
-  seedLocalLibraryFixture: vi.fn(),
 }));
 
 const exportDialogMocks = vi.hoisted(() => ({
@@ -53,7 +52,6 @@ vi.mock("./tauri", () => ({
   renameScheme: tauriMocks.renameScheme,
   retryModpackImport: tauriMocks.retryModpackImport,
   saveCurseForgeApiKey: tauriMocks.saveCurseForgeApiKey,
-  seedLocalLibraryFixture: tauriMocks.seedLocalLibraryFixture,
 }));
 
 vi.mock("./exportDialog", () => ({
@@ -61,7 +59,24 @@ vi.mock("./exportDialog", () => ({
 }));
 
 import { App } from "./App";
-import { browserRenderSceneFixture } from "./renderViewer";
+import type { RenderScene } from "./renderViewer";
+
+const renderSceneFixture: RenderScene = {
+  schemeId: 10,
+  schemeName: "Starter Factory",
+  dimensions: [8, 5, 8],
+  stages: [
+    { id: 1, name: "Stage 1", order: 1 },
+    { id: 2, name: "Stage 2", order: 2 },
+  ],
+  blocks: [
+    { coordinate: [0, 0, 0], blockId: "minecraft:stone_bricks", stageId: 1, color: "#9aa39e" },
+    { coordinate: [1, 1, 0], blockId: "thermal:machine_frame", stageId: 2, color: "#d3a44e" },
+    { coordinate: [4, 0, 1], blockId: "create:andesite_casing", stageId: null, color: "#6bb48f" },
+  ],
+  chunks: [{ coordinate: [0, 0, 0], blockCount: 3, faceCount: 18 }],
+  largeSchemeThreshold: 4096,
+};
 
 function installLocalStorageMock() {
   const values = new Map<string, string>();
@@ -143,7 +158,7 @@ describe("phase 7 viewer workspace", () => {
         ],
       },
     ]);
-    tauriMocks.getSchemeRenderScene.mockResolvedValue(browserRenderSceneFixture);
+    tauriMocks.getSchemeRenderScene.mockResolvedValue(renderSceneFixture);
     exportDialogMocks.chooseExportDestination.mockResolvedValue("/tmp/starter-factory.litematic");
     tauriMocks.exportScheme.mockResolvedValue({
       schemeId: 10,

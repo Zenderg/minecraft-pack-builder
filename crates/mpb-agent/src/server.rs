@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -9,7 +10,10 @@ use crate::protocol::{
     ClientIdentity, JsonRpcOutcome, JsonRpcRequest,
 };
 use crate::tool_schemas::tool_definitions;
-use crate::tools::{dispatch_tool, tool_error, tool_success};
+use crate::tools::{
+    dispatch_storage_tool, dispatch_tool, tool_error, tool_success, StorageWorkspaceConfig,
+    StoredSelection,
+};
 use crate::workspace::AgentWorkspace;
 use crate::{MCP_PROTOCOL_VERSION, MCP_TRANSPORT};
 
@@ -22,8 +26,17 @@ pub struct AgentServer {
 
 struct AgentServerInner {
     status: Mutex<AgentStatusInner>,
-    workspace: Mutex<AgentWorkspace>,
+    workspace: AgentWorkspaceBackend,
     events: Mutex<VecDeque<AgentEvent>>,
+}
+
+enum AgentWorkspaceBackend {
+    Memory(Mutex<AgentWorkspace>),
+    Storage {
+        database_path: PathBuf,
+        diagnostics_dir: PathBuf,
+        selection: Mutex<StoredSelection>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -45,8 +58,27 @@ fn clear_expired_active_client(status: &mut AgentStatusInner) {
 }
 
 impl AgentServer {
-    pub fn new_demo() -> Self {
-        Self::new(AgentWorkspace::demo())
+    pub fn new_test_fixture() -> Self {
+        Self::new(AgentWorkspace::test_fixture())
+    }
+
+    pub fn new_storage(database_path: PathBuf, diagnostics_dir: PathBuf) -> Self {
+        Self {
+            inner: Arc::new(AgentServerInner {
+                status: Mutex::new(AgentStatusInner {
+                    server_running: false,
+                    endpoint: None,
+                    active_client: None,
+                    active_client_last_seen: None,
+                }),
+                workspace: AgentWorkspaceBackend::Storage {
+                    database_path,
+                    diagnostics_dir,
+                    selection: Mutex::new(None),
+                },
+                events: Mutex::new(VecDeque::new()),
+            }),
+        }
     }
 
     pub fn new(workspace: AgentWorkspace) -> Self {
@@ -58,7 +90,7 @@ impl AgentServer {
                     active_client: None,
                     active_client_last_seen: None,
                 }),
-                workspace: Mutex::new(workspace),
+                workspace: AgentWorkspaceBackend::Memory(Mutex::new(workspace)),
                 events: Mutex::new(VecDeque::new()),
             }),
         }
@@ -210,9 +242,27 @@ impl AgentServer {
             .cloned()
             .unwrap_or_else(|| json!({}));
 
-        let result = {
-            let mut workspace = self.inner.workspace.lock().expect("agent workspace lock");
-            dispatch_tool(&mut workspace, name, arguments)
+        let result = match &self.inner.workspace {
+            AgentWorkspaceBackend::Memory(workspace) => {
+                let mut workspace = workspace.lock().expect("agent workspace lock");
+                dispatch_tool(&mut workspace, name, arguments)
+            }
+            AgentWorkspaceBackend::Storage {
+                database_path,
+                diagnostics_dir,
+                selection,
+            } => {
+                let mut selection = selection.lock().expect("agent selection lock");
+                dispatch_storage_tool(
+                    StorageWorkspaceConfig {
+                        database_path,
+                        diagnostics_dir,
+                    },
+                    &mut selection,
+                    name,
+                    arguments,
+                )
+            }
         };
 
         match result {

@@ -11,7 +11,6 @@ import {
   getModpackMenuPlacement,
   getNextSelectionAfterSchemeDelete,
   getNextOpenModpackMenuId,
-  shouldShowSeedFixtureAction,
   toggleExpandedModpack,
   type LibraryModpack,
 } from "./library";
@@ -82,12 +81,6 @@ describe("phase 3 library ui state", () => {
     const collapsed = toggleExpandedModpack(new Set([1, 2]), 1);
     expect(collapsed).toEqual(new Set([2]));
     expect(toggleExpandedModpack(collapsed, 1)).toEqual(new Set([1, 2]));
-  });
-
-  it("shows the seeded fixture action only for empty development libraries", () => {
-    expect(shouldShowSeedFixtureAction([], true)).toBe(true);
-    expect(shouldShowSeedFixtureAction(library, true)).toBe(false);
-    expect(shouldShowSeedFixtureAction([], false)).toBe(false);
   });
 
   it("clamps the resizable sidebar to fixed min and max widths", () => {

@@ -3,8 +3,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use mpb_core::{ConstructionStage, Coordinate, Dimensions, Scheme, SchemeBlock};
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -28,6 +29,8 @@ pub enum StorageError {
     },
     #[error("record not found: {entity} {id}")]
     NotFound { entity: &'static str, id: i64 },
+    #[error("stored scheme content is invalid: {0}")]
+    InvalidSchemeContent(String),
     #[error(
         "local data was created by a newer app version (schema {found}, supported {supported}); keep the data folder unchanged, check diagnostics, and open it with a compatible Minecraft Pack Builder build"
     )]
@@ -65,7 +68,7 @@ pub struct LibraryDatabase {
     connection: Connection,
 }
 
-const SUPPORTED_SCHEMA_VERSION: i64 = 3;
+const SUPPORTED_SCHEMA_VERSION: i64 = 4;
 
 impl LibraryDatabase {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StorageError> {
@@ -102,8 +105,13 @@ impl LibraryDatabase {
         )?;
         self.validate_migration_version()?;
         self.connection.execute_batch(PHASE_3_SCHEMA)?;
+        self.connection.execute_batch(PHASE_4_SCHEMA)?;
         self.connection.execute(
             "INSERT OR IGNORE INTO schema_migrations (version) VALUES (3)",
+            [],
+        )?;
+        self.connection.execute(
+            "INSERT OR IGNORE INTO schema_migrations (version) VALUES (4)",
             [],
         )?;
         Ok(())
@@ -189,6 +197,15 @@ CREATE TABLE IF NOT EXISTS settings_metadata (
 );
 "#;
 
+const PHASE_4_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS scheme_documents (
+  scheme_id INTEGER PRIMARY KEY,
+  content_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (scheme_id) REFERENCES schemes(id) ON DELETE CASCADE
+);
+"#;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ImportStatus {
@@ -259,6 +276,28 @@ pub struct SchemeRecord {
     pub modpack_id: i64,
     pub name: String,
     pub dimensions: (i64, i64, i64),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredScheme {
+    pub record: SchemeRecord,
+    pub scheme: Scheme,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SchemeDocument {
+    name: String,
+    dimensions: [i32; 3],
+    stages: Vec<ConstructionStage>,
+    blocks: Vec<SchemeDocumentBlock>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SchemeDocumentBlock {
+    coordinate: Coordinate,
+    block: SchemeBlock,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -408,6 +447,18 @@ impl LibraryRepository {
             "INSERT INTO construction_stages (scheme_id, name, position) VALUES (?1, ?2, 0)",
             params![id, "Unassigned"],
         )?;
+        let dimensions = Dimensions::new(
+            new_scheme.size_x as i32,
+            new_scheme.size_y as i32,
+            new_scheme.size_z as i32,
+        )
+        .map_err(|error| StorageError::InvalidSchemeContent(error.to_string()))?;
+        let scheme = Scheme::new(&new_scheme.name, dimensions);
+        let content_json = serialize_scheme_document(&scheme)?;
+        transaction.execute(
+            "INSERT INTO scheme_documents (scheme_id, content_json) VALUES (?1, ?2)",
+            params![id, content_json],
+        )?;
         let scheme = transaction.query_row(
             "SELECT s.id, s.imported_modpack_id, s.name, d.size_x, d.size_y, d.size_z
              FROM schemes s
@@ -431,6 +482,9 @@ impl LibraryRepository {
                 id,
             });
         }
+        let mut stored = self.load_scheme(id)?;
+        stored.scheme.set_name(name);
+        self.save_scheme(id, &stored.scheme)?;
         self.get_scheme(id)
     }
 
@@ -445,6 +499,49 @@ impl LibraryRepository {
                 id,
             });
         }
+        Ok(())
+    }
+
+    pub fn load_scheme(&self, id: i64) -> Result<StoredScheme, StorageError> {
+        let record = self.get_scheme(id)?;
+        let content_json = self
+            .database
+            .connection
+            .query_row(
+                "SELECT content_json FROM scheme_documents WHERE scheme_id = ?1",
+                params![id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        let scheme = match content_json {
+            Some(json) => deserialize_scheme_document(&json)?,
+            None => empty_scheme_from_record(&record)?,
+        };
+        Ok(StoredScheme { record, scheme })
+    }
+
+    pub fn save_scheme(&self, id: i64, scheme: &Scheme) -> Result<(), StorageError> {
+        self.require_scheme(id)?;
+        let dimensions = scheme.dimensions();
+        let content_json = serialize_scheme_document(scheme)?;
+        let transaction = self.database.connection.unchecked_transaction()?;
+        transaction.execute(
+            "UPDATE schemes SET name = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
+            params![scheme.name(), id],
+        )?;
+        transaction.execute(
+            "UPDATE scheme_dimensions SET size_x = ?1, size_y = ?2, size_z = ?3 WHERE scheme_id = ?4",
+            params![dimensions.x, dimensions.y, dimensions.z, id],
+        )?;
+        transaction.execute(
+            "INSERT INTO scheme_documents (scheme_id, content_json, updated_at)
+             VALUES (?1, ?2, CURRENT_TIMESTAMP)
+             ON CONFLICT(scheme_id) DO UPDATE SET
+               content_json = excluded.content_json,
+               updated_at = CURRENT_TIMESTAMP",
+            params![id, content_json],
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -529,6 +626,22 @@ impl LibraryRepository {
                 entity: "scheme",
                 id,
             })
+    }
+
+    fn require_scheme(&self, id: i64) -> Result<(), StorageError> {
+        let exists: bool = self.database.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM schemes WHERE id = ?1)",
+            params![id],
+            |row| row.get(0),
+        )?;
+        if exists {
+            Ok(())
+        } else {
+            Err(StorageError::NotFound {
+                entity: "scheme",
+                id,
+            })
+        }
     }
 
     fn list_schemes_for_modpack(&self, modpack_id: i64) -> Result<Vec<SchemeRecord>, StorageError> {
@@ -618,6 +731,56 @@ fn validate_dimensions(size_x: i64, size_y: i64, size_z: i64) -> Result<(), Stor
         });
     }
     Ok(())
+}
+
+fn serialize_scheme_document(scheme: &Scheme) -> Result<String, StorageError> {
+    let dimensions = scheme.dimensions();
+    let document = SchemeDocument {
+        name: scheme.name().to_string(),
+        dimensions: [dimensions.x, dimensions.y, dimensions.z],
+        stages: scheme.stages().to_vec(),
+        blocks: scheme
+            .blocks()
+            .map(|(coordinate, block)| SchemeDocumentBlock {
+                coordinate: *coordinate,
+                block: block.clone(),
+            })
+            .collect(),
+    };
+    serde_json::to_string(&document)
+        .map_err(|error| StorageError::InvalidSchemeContent(error.to_string()))
+}
+
+fn deserialize_scheme_document(json: &str) -> Result<Scheme, StorageError> {
+    let document: SchemeDocument = serde_json::from_str(json)
+        .map_err(|error| StorageError::InvalidSchemeContent(error.to_string()))?;
+    let dimensions = Dimensions::new(
+        document.dimensions[0],
+        document.dimensions[1],
+        document.dimensions[2],
+    )
+    .map_err(|error| StorageError::InvalidSchemeContent(error.to_string()))?;
+    Scheme::from_persisted(
+        &document.name,
+        dimensions,
+        document.stages,
+        document
+            .blocks
+            .into_iter()
+            .map(|block| (block.coordinate, block.block))
+            .collect(),
+    )
+    .map_err(|error| StorageError::InvalidSchemeContent(error.to_string()))
+}
+
+fn empty_scheme_from_record(record: &SchemeRecord) -> Result<Scheme, StorageError> {
+    let dimensions = Dimensions::new(
+        record.dimensions.0 as i32,
+        record.dimensions.1 as i32,
+        record.dimensions.2 as i32,
+    )
+    .map_err(|error| StorageError::InvalidSchemeContent(error.to_string()))?;
+    Ok(Scheme::new(&record.name, dimensions))
 }
 
 fn clean_display_name(value: &str, fallback: &str) -> String {

@@ -16,10 +16,10 @@ pub struct AgentWorkspace {
 }
 
 impl AgentWorkspace {
-    pub fn demo() -> Self {
+    pub fn test_fixture() -> Self {
         let registry = BlockRegistry::synthetic_fixture();
         let mut scheme = Scheme::new(
-            "Starter Factory",
+            "Protocol Fixture Scheme",
             Dimensions::new(8, 5, 8).expect("valid dimensions"),
         );
         let foundation = scheme.add_stage("Stage 1").expect("stage 1");
@@ -58,7 +58,7 @@ impl AgentWorkspace {
         ] {
             scheme
                 .apply(&registry, SchemeOperation::Place(placement))
-                .expect("valid demo placement");
+                .expect("valid fixture placement");
         }
 
         let mut schemes = BTreeMap::new();
@@ -67,7 +67,7 @@ impl AgentWorkspace {
             AgentScheme {
                 id: 10,
                 modpack_id: 1,
-                name: "Starter Factory".to_string(),
+                name: "Protocol Fixture Scheme".to_string(),
                 scheme,
             },
         );
@@ -76,14 +76,27 @@ impl AgentWorkspace {
             registry,
             modpacks: vec![AgentModpack {
                 id: 1,
-                local_name: "AOC - 1.0.0".to_string(),
-                source_url: Some("https://www.curseforge.com/minecraft/modpacks/aoc".to_string()),
+                local_name: "Protocol Fixture Pack - 1.0.0".to_string(),
+                source_url: Some(
+                    "https://www.curseforge.com/minecraft/modpacks/protocol-fixture-pack"
+                        .to_string(),
+                ),
                 version_name: "1.0.0".to_string(),
                 minecraft_version: Some("1.20.1".to_string()),
                 loader: Some("Forge".to_string()),
             }],
             schemes,
             next_scheme_id: 11,
+            current_selection: None,
+        }
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            registry: BlockRegistry::from_block_ids(Vec::<String>::new()),
+            modpacks: Vec::new(),
+            schemes: BTreeMap::new(),
+            next_scheme_id: 1,
             current_selection: None,
         }
     }

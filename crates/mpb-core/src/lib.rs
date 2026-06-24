@@ -2,10 +2,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Dimensions {
     pub x: i32,
     pub y: i32,
@@ -33,7 +33,7 @@ impl std::fmt::Display for Dimensions {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Coordinate {
     pub x: i32,
     pub y: i32,
@@ -86,13 +86,13 @@ impl Selection {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum StageRef {
     Unassigned,
     Stage(u32),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConstructionStage {
     pub id: u32,
     pub name: String,
@@ -102,6 +102,7 @@ pub struct ConstructionStage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockDefinition {
     allowed_states: BTreeMap<String, BTreeSet<String>>,
+    allow_any_states: bool,
 }
 
 impl BlockDefinition {
@@ -116,6 +117,14 @@ impl BlockDefinition {
                     )
                 })
                 .collect(),
+            allow_any_states: false,
+        }
+    }
+
+    fn permissive() -> Self {
+        Self {
+            allowed_states: BTreeMap::new(),
+            allow_any_states: true,
         }
     }
 }
@@ -147,6 +156,15 @@ impl BlockRegistry {
         Self { blocks }
     }
 
+    pub fn from_block_ids(block_ids: impl IntoIterator<Item = String>) -> Self {
+        Self {
+            blocks: block_ids
+                .into_iter()
+                .map(|block_id| (block_id, BlockDefinition::permissive()))
+                .collect(),
+        }
+    }
+
     fn validate_block(&self, block: &SchemeBlock) -> Result<(), SchemeError> {
         let definition =
             self.blocks
@@ -154,6 +172,10 @@ impl BlockRegistry {
                 .ok_or_else(|| SchemeError::UnknownBlock {
                     block_id: block.block_id.clone(),
                 })?;
+
+        if definition.allow_any_states {
+            return Ok(());
+        }
 
         for (state, allowed_values) in &definition.allowed_states {
             let value = block
@@ -185,7 +207,7 @@ impl BlockRegistry {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SchemeBlock {
     pub block_id: String,
@@ -273,6 +295,36 @@ impl Scheme {
             blocks: BTreeMap::new(),
             next_stage_id: 1,
         }
+    }
+
+    pub fn from_persisted(
+        name: &str,
+        dimensions: Dimensions,
+        stages: Vec<ConstructionStage>,
+        blocks: Vec<(Coordinate, SchemeBlock)>,
+    ) -> Result<Self, SchemeError> {
+        let next_stage_id = stages
+            .iter()
+            .map(|stage| stage.id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+        let scheme = Self {
+            name: name.to_string(),
+            dimensions,
+            stages,
+            blocks: blocks.into_iter().collect(),
+            next_stage_id,
+        };
+        for (coordinate, block) in &scheme.blocks {
+            scheme.ensure_coordinate_in_bounds(*coordinate)?;
+            scheme.ensure_stage_exists(block.stage)?;
+        }
+        Ok(scheme)
+    }
+
+    pub fn set_name(&mut self, name: &str) {
+        self.name = name.trim().to_string();
     }
 
     pub fn add_stage(&mut self, name: &str) -> Result<u32, SchemeError> {
@@ -533,159 +585,5 @@ impl SchemeError {
             Self::UnknownStage { .. } => "unknown_stage",
             Self::EmptyStageName => "empty_stage_name",
         }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DomainDemoReport {
-    pub scheme_name: String,
-    pub summary: DomainDemoSummary,
-    pub stages: Vec<StageLine>,
-    pub materials: Vec<MaterialLine>,
-    pub rejected_actions: Vec<RejectedAction>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DomainDemoSummary {
-    pub dimensions: Dimensions,
-    pub stage_count: usize,
-    pub block_count: usize,
-    pub material_count: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StageLine {
-    pub id: Option<u32>,
-    pub name: String,
-    pub order: Option<u32>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RejectedAction {
-    pub action: String,
-    pub code: String,
-    pub message: String,
-}
-
-pub fn domain_demo_report() -> DomainDemoReport {
-    let registry = BlockRegistry::synthetic_fixture();
-    let mut scheme = Scheme::new(
-        "Domain Demo Scheme",
-        Dimensions::new(4, 3, 4).expect("valid demo dimensions"),
-    );
-    let foundation = scheme.add_stage("Foundation").expect("foundation stage");
-    let machines = scheme.add_stage("Machines").expect("machines stage");
-
-    for operation in [
-        SchemeOperation::Place(BlockPlacement::new(
-            Coordinate::new(0, 0, 0),
-            "minecraft:stone_bricks",
-            [("cracked", "false")],
-            StageRef::Stage(foundation),
-        )),
-        SchemeOperation::Place(BlockPlacement::new(
-            Coordinate::new(1, 0, 0),
-            "minecraft:stone_bricks",
-            [("cracked", "false")],
-            StageRef::Stage(foundation),
-        )),
-        SchemeOperation::Place(BlockPlacement::new(
-            Coordinate::new(0, 1, 0),
-            "thermal:machine_frame",
-            [("tier", "basic")],
-            StageRef::Stage(machines),
-        )),
-        SchemeOperation::Place(BlockPlacement::new(
-            Coordinate::new(2, 0, 0),
-            "create:andesite_casing",
-            [],
-            StageRef::Unassigned,
-        )),
-        SchemeOperation::BulkSet {
-            selection: Coordinate::new(0, 2, 0).to_selection(Coordinate::new(1, 2, 0)),
-            block: BlockPlacement::new(
-                Coordinate::new(0, 2, 0),
-                "minecraft:glass",
-                [("color", "clear")],
-                StageRef::Stage(machines),
-            )
-            .block,
-        },
-    ] {
-        scheme
-            .apply(&registry, operation)
-            .expect("demo operation should be valid");
-    }
-
-    let rejected_actions = [
-        (
-            "place missing block",
-            SchemeOperation::Place(BlockPlacement::new(
-                Coordinate::new(0, 0, 1),
-                "minecraft:missing_block",
-                [],
-                StageRef::Unassigned,
-            )),
-        ),
-        (
-            "bulk set out of bounds",
-            SchemeOperation::BulkSet {
-                selection: Coordinate::new(4, 0, 0).to_selection(Coordinate::new(4, 0, 0)),
-                block: BlockPlacement::new(
-                    Coordinate::new(4, 0, 0),
-                    "minecraft:stone_bricks",
-                    [("cracked", "false")],
-                    StageRef::Unassigned,
-                )
-                .block,
-            },
-        ),
-    ]
-    .into_iter()
-    .filter_map(
-        |(action, operation)| match scheme.apply(&registry, operation) {
-            Ok(()) => None,
-            Err(error) => Some(RejectedAction {
-                action: action.to_string(),
-                code: error.code().to_string(),
-                message: error.to_string(),
-            }),
-        },
-    )
-    .collect::<Vec<_>>();
-
-    let mut stages = scheme
-        .stages()
-        .iter()
-        .map(|stage| StageLine {
-            id: Some(stage.id),
-            name: stage.name.clone(),
-            order: Some(stage.order),
-        })
-        .collect::<Vec<_>>();
-    stages.push(StageLine {
-        id: None,
-        name: "Unassigned".to_string(),
-        order: None,
-    });
-
-    let materials = scheme.materials();
-    let dimensions = scheme.dimensions();
-    let block_count = scheme.block_count();
-    DomainDemoReport {
-        scheme_name: scheme.name,
-        summary: DomainDemoSummary {
-            dimensions,
-            stage_count: stages.len(),
-            block_count,
-            material_count: materials.len(),
-        },
-        stages,
-        materials,
-        rejected_actions,
     }
 }

@@ -16,7 +16,6 @@ import {
   getInitialExpandedModpackIds,
   getNextSelectionAfterSchemeDelete,
   sidebarWidthLimits,
-  shouldShowSeedFixtureAction,
   toggleExpandedModpack,
   type LibraryModpack,
   type LibraryScheme,
@@ -48,7 +47,6 @@ import {
   renameScheme,
   retryModpackImport,
   saveCurseForgeApiKey,
-  seedLocalLibraryFixture,
   type AppDataPaths,
   type AgentStatus,
   type CurseForgeCredentialStatus,
@@ -130,6 +128,14 @@ export function App() {
   const importJobModpack =
     library.find((modpack) => modpack.id === importJobModpackId) ?? null;
   const agentDisplay = getAgentDisplay(agentStatus, t);
+
+  useEffect(() => {
+    if (selectedScheme) {
+      return;
+    }
+    setViewerStageId(null);
+    setViewerToolContext(null);
+  }, [selectedScheme]);
 
   useEffect(() => {
     discoverAppPaths()
@@ -330,16 +336,6 @@ export function App() {
       const nextLibrary = await listLibrary();
       applyLibrary(nextLibrary, librarySelection);
       setLibraryMessage("");
-    } catch (error) {
-      setLibraryMessage(formatBackendError(error));
-    }
-  }
-
-  async function handleSeedLibraryFixture() {
-    try {
-      const nextLibrary = await seedLocalLibraryFixture();
-      applyLibrary(nextLibrary, null);
-      setLibraryMessage(t("library.fixtureLoaded"));
     } catch (error) {
       setLibraryMessage(formatBackendError(error));
     }
@@ -665,7 +661,6 @@ export function App() {
             <span>{t("workspace.library")}</span>
           </div>
           <LibraryTree
-            canSeedFixture={shouldShowSeedFixtureAction(library, import.meta.env.DEV)}
             expandedModpackIds={expandedModpackIds}
             library={library}
             onCreateScheme={handleCreateScheme}
@@ -675,7 +670,6 @@ export function App() {
             onRenameModpack={handleRenameModpack}
             onRenameScheme={handleRenameScheme}
             onSelect={setLibrarySelection}
-            onSeed={handleSeedLibraryFixture}
             onShowImportJob={(modpack) => setImportJobModpackId(modpack.id)}
             onShowModpackInfo={handleShowModpackInfo}
             onToggleModpack={handleToggleModpack}
@@ -702,23 +696,25 @@ export function App() {
       />
 
       <section className="workspace">
-        <div className="content-grid">
-          <ViewerWorkspace
-            modpack={selectedModpack}
-            onStageChange={handleViewerStageChange}
-            onToolContextChange={handleViewerToolContextChange}
-            revision={viewerRevision}
-            scheme={selectedScheme}
-            selectedStageId={viewerStageId}
-            t={t}
-          />
+        {selectedScheme && (
+          <div className="content-grid">
+            <ViewerWorkspace
+              modpack={selectedModpack}
+              onStageChange={handleViewerStageChange}
+              onToolContextChange={handleViewerToolContextChange}
+              revision={viewerRevision}
+              scheme={selectedScheme}
+              selectedStageId={viewerStageId}
+              t={t}
+            />
 
-          <RightToolPanel
-            onStageChange={setViewerStageId}
-            t={t}
-            toolContext={viewerToolContext}
-          />
-        </div>
+            <RightToolPanel
+              onStageChange={setViewerStageId}
+              t={t}
+              toolContext={viewerToolContext}
+            />
+          </div>
+        )}
       </section>
       {flow.settingsModalOpen && (
         <SettingsModal

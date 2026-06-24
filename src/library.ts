@@ -183,13 +183,6 @@ export function toggleExpandedModpack(current: Set<number>, modpackId: number): 
   return next;
 }
 
-export function shouldShowSeedFixtureAction(
-  library: LibraryModpack[],
-  isDevelopment: boolean,
-): boolean {
-  return isDevelopment && library.length === 0;
-}
-
 export function getActiveLibrarySelection(
   library: LibraryModpack[],
   requested: LibrarySelection | null,

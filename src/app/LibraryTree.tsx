@@ -1,6 +1,5 @@
 import {
   AlertTriangle,
-  Database,
   Download,
   Info,
   Layers3,
@@ -26,7 +25,6 @@ import {
 import type { Translator } from "./types";
 
 export function LibraryTree(props: {
-  canSeedFixture: boolean;
   expandedModpackIds: Set<number>;
   library: LibraryModpack[];
   onCreateScheme: (modpackId: number) => void;
@@ -36,7 +34,6 @@ export function LibraryTree(props: {
   onRenameModpack: (modpack: LibraryModpack) => void;
   onRenameScheme: (scheme: LibraryScheme) => void;
   onSelect: (selection: LibrarySelection) => void;
-  onSeed: () => void;
   onShowImportJob: (modpack: LibraryModpack) => void;
   onShowModpackInfo: (modpack: LibraryModpack) => void;
   onToggleModpack: (modpackId: number) => void;
@@ -67,12 +64,6 @@ export function LibraryTree(props: {
     return (
       <div className="library-empty-state">
         <p>{t("library.empty")}</p>
-        {props.canSeedFixture && (
-          <button className="secondary-action compact" onClick={props.onSeed} type="button">
-            <Database size={15} />
-            {t("library.loadFixture")}
-          </button>
-        )}
       </div>
     );
   }

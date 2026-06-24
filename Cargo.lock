@@ -1927,6 +1927,7 @@ version = "0.1.0"
 dependencies = [
  "mpb-core",
  "mpb-export",
+ "mpb-storage",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -1977,6 +1978,7 @@ dependencies = [
 name = "mpb-storage"
 version = "0.1.0"
 dependencies = [
+ "mpb-core",
  "rusqlite",
  "serde",
  "serde_json",

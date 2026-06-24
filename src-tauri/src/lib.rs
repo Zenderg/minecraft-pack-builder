@@ -12,7 +12,6 @@ use mpb_assets::{
     CurseForgeGateway, CurseForgeHttpGateway, CurseForgeProject, DiscoveredReleases,
     DownloadProgress, ModpackAssetImportRequest,
 };
-use mpb_core::DomainDemoReport;
 use mpb_export::{write_scheme_export, ExportArtifact, ExportFormat};
 use mpb_storage::{
     ensure_app_data_dirs, AppDataPaths, LibraryModpack, LibraryRepository, NewScheme,
@@ -23,11 +22,10 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_updater::UpdaterExt;
 
 mod credentials;
-mod render_demo;
+mod render_scene;
 
-pub use render_demo::{
-    demo_export_scheme, demo_render_scene, RenderBlockDto, RenderChunkSummaryDto, RenderSceneDto,
-    RenderStageDto,
+pub use render_scene::{
+    render_scene_from_scheme, RenderBlockDto, RenderChunkSummaryDto, RenderSceneDto, RenderStageDto,
 };
 
 #[derive(Default)]
@@ -104,13 +102,6 @@ fn open_app_data_folder(app: tauri::AppHandle) -> Result<AppDataPaths, String> {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DomainDemoReportArtifact {
-    pub path: PathBuf,
-    pub report: DomainDemoReport,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ExportDiagnosticReport {
     pub operation: String,
     pub status: String,
@@ -156,40 +147,35 @@ pub struct ExportDiagnosticError {
     pub diagnostic_path: PathBuf,
 }
 
-pub fn write_domain_demo_report(
-    diagnostics_dir: impl AsRef<Path>,
-) -> Result<DomainDemoReportArtifact, String> {
-    std::fs::create_dir_all(diagnostics_dir.as_ref()).map_err(|error| error.to_string())?;
-    let report = mpb_core::domain_demo_report();
-    let path = diagnostics_dir
-        .as_ref()
-        .join("phase-4-domain-demo-report.json");
-    let json = serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?;
-    std::fs::write(&path, json).map_err(|error| error.to_string())?;
-    Ok(DomainDemoReportArtifact { path, report })
-}
-
 #[tauri::command]
-fn generate_domain_demo_report(app: tauri::AppHandle) -> Result<DomainDemoReportArtifact, String> {
-    let paths = discover_app_paths(app)?;
-    write_domain_demo_report(paths.diagnostics_dir)
+fn get_scheme_render_scene(
+    app: tauri::AppHandle,
+    scheme_id: i64,
+) -> Result<RenderSceneDto, String> {
+    let (_, repository) = library_repository(&app)?;
+    let stored = repository
+        .load_scheme(scheme_id)
+        .map_err(|error| error.to_string())?;
+    Ok(render_scene_from_scheme(scheme_id, &stored.scheme))
 }
 
-#[tauri::command]
-fn get_scheme_render_scene(scheme_id: i64) -> RenderSceneDto {
-    demo_render_scene(scheme_id)
-}
-
-pub fn write_demo_scheme_export(
+pub fn write_stored_scheme_export(
+    database_path: impl AsRef<Path>,
     scheme_id: i64,
     format: ExportFormat,
     destination_path: impl AsRef<Path>,
 ) -> Result<ExportArtifact, String> {
-    let scheme = demo_export_scheme(scheme_id);
-    write_scheme_export(&scheme, format, destination_path).map_err(|error| error.to_string())
+    let database =
+        mpb_storage::LibraryDatabase::open(database_path).map_err(|error| error.to_string())?;
+    let repository = LibraryRepository::new(database);
+    let stored = repository
+        .load_scheme(scheme_id)
+        .map_err(|error| error.to_string())?;
+    write_scheme_export(&stored.scheme, format, destination_path).map_err(|error| error.to_string())
 }
 
-pub fn write_demo_scheme_export_with_diagnostics(
+pub fn write_stored_scheme_export_with_diagnostics(
+    database_path: impl AsRef<Path>,
     scheme_id: i64,
     format: ExportFormat,
     destination_path: impl AsRef<Path>,
@@ -197,7 +183,21 @@ pub fn write_demo_scheme_export_with_diagnostics(
 ) -> Result<ExportWithDiagnostics, ExportDiagnosticError> {
     let destination_path = destination_path.as_ref().to_path_buf();
     let diagnostics_dir = diagnostics_dir.as_ref();
-    let scheme = demo_export_scheme(scheme_id);
+    let diagnostic_path = diagnostics_dir.join(export_diagnostic_file_name(scheme_id, format));
+    let database = mpb_storage::LibraryDatabase::open(database_path).map_err(|error| {
+        ExportDiagnosticError {
+            message: error.to_string(),
+            diagnostic_path: diagnostic_path.clone(),
+        }
+    })?;
+    let repository = LibraryRepository::new(database);
+    let stored = repository
+        .load_scheme(scheme_id)
+        .map_err(|error| ExportDiagnosticError {
+            message: error.to_string(),
+            diagnostic_path: diagnostic_path.clone(),
+        })?;
+    let scheme = stored.scheme;
     let result = write_scheme_export(&scheme, format, &destination_path);
     match result {
         Ok(artifact) => {
@@ -298,7 +298,9 @@ fn export_scheme(
     let format = ExportFormat::from_extension(&format)
         .ok_or_else(|| "Export format must be schem or litematic".to_string())?;
     let paths = discover_app_paths(app)?;
-    write_demo_scheme_export_with_diagnostics(
+    let database_path = paths.app_data_dir.join("library.sqlite3");
+    write_stored_scheme_export_with_diagnostics(
+        database_path,
         scheme_id,
         format,
         destination_path,
@@ -870,59 +872,6 @@ fn list_library(app: tauri::AppHandle) -> Result<Vec<LibraryModpack>, String> {
 }
 
 #[tauri::command]
-#[cfg(debug_assertions)]
-fn seed_local_library_fixture(app: tauri::AppHandle) -> Result<Vec<LibraryModpack>, String> {
-    let (paths, repository) = library_repository(&app)?;
-    let existing = repository
-        .list_library()
-        .map_err(|error| error.to_string())?;
-    if !existing.is_empty() {
-        return Ok(existing);
-    }
-
-    let first_cache = paths.app_data_dir.join("modpacks").join("aoc");
-    let second_cache = paths.app_data_dir.join("modpacks").join("aoc-duplicate");
-    std::fs::create_dir_all(&first_cache).map_err(|error| error.to_string())?;
-    std::fs::create_dir_all(&second_cache).map_err(|error| error.to_string())?;
-
-    let first = repository
-        .create_imported_modpack(NewImportedModpack {
-            local_name: "AOC - 1.0.0".to_string(),
-            source_slug: Some("aoc".to_string()),
-            source_url: Some("https://www.curseforge.com/minecraft/modpacks/aoc".to_string()),
-            version_name: "1.0.0".to_string(),
-            minecraft_version: Some("1.20.1".to_string()),
-            loader: Some("Forge".to_string()),
-            cache_dir: Some(first_cache),
-            import_status: ImportStatus::Imported,
-        })
-        .map_err(|error| error.to_string())?;
-    repository
-        .create_scheme(NewScheme {
-            modpack_id: first.id,
-            name: "Starter Factory".to_string(),
-            size_x: 64,
-            size_y: 64,
-            size_z: 64,
-        })
-        .map_err(|error| error.to_string())?;
-    repository
-        .create_imported_modpack(NewImportedModpack {
-            local_name: "AOC - 1.0.0".to_string(),
-            source_slug: Some("aoc".to_string()),
-            source_url: Some("https://www.curseforge.com/minecraft/modpacks/aoc".to_string()),
-            version_name: "1.0.0".to_string(),
-            minecraft_version: Some("1.20.1".to_string()),
-            loader: Some("Forge".to_string()),
-            cache_dir: Some(second_cache),
-            import_status: ImportStatus::Imported,
-        })
-        .map_err(|error| error.to_string())?;
-
-    repository.list_library().map_err(|error| error.to_string())
-}
-
-#[tauri::command]
 fn create_scheme(
     app: tauri::AppHandle,
     modpack_id: i64,
@@ -1040,13 +989,11 @@ pub fn run() {
         retry_modpack_import,
         cancel_curseforge_import,
         load_modpack_asset_report,
-        generate_domain_demo_report,
         get_scheme_render_scene,
         export_scheme,
         check_for_updates,
         get_ai_integration_status,
         list_library,
-        seed_local_library_fixture,
         create_scheme,
         rename_scheme,
         delete_scheme,
@@ -1067,7 +1014,6 @@ pub fn run() {
         retry_modpack_import,
         cancel_curseforge_import,
         load_modpack_asset_report,
-        generate_domain_demo_report,
         get_scheme_render_scene,
         export_scheme,
         check_for_updates,
@@ -1084,7 +1030,12 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
-            let server = AgentServer::new_demo();
+            let paths = discover_app_paths(app.handle().clone())
+                .map_err(|error| Box::<dyn std::error::Error>::from(error))?;
+            let server = AgentServer::new_storage(
+                paths.app_data_dir.join("library.sqlite3"),
+                paths.diagnostics_dir,
+            );
             let app_handle = app.handle().clone();
             let http = start_streamable_http_server(server.clone(), move |events| {
                 for event in events {

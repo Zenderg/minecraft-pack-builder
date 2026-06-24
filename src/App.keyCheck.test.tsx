@@ -25,7 +25,6 @@ const tauriMocks = vi.hoisted(() => ({
   retryModpackImport: vi.fn(),
   saveCurseForgeApiKey: vi.fn(),
   searchCurseForgeModpacks: vi.fn(),
-  seedLocalLibraryFixture: vi.fn(),
 }));
 
 vi.mock("./tauri", () => ({
@@ -48,7 +47,6 @@ vi.mock("./tauri", () => ({
   retryModpackImport: tauriMocks.retryModpackImport,
   saveCurseForgeApiKey: tauriMocks.saveCurseForgeApiKey,
   searchCurseForgeModpacks: tauriMocks.searchCurseForgeModpacks,
-  seedLocalLibraryFixture: tauriMocks.seedLocalLibraryFixture,
 }));
 
 import { App } from "./App";

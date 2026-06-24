@@ -37,6 +37,7 @@ fn migrations_create_phase_3_tables() {
         "schemes",
         "scheme_dimensions",
         "construction_stages",
+        "scheme_documents",
         "settings_metadata",
         "import_status",
     ] {
