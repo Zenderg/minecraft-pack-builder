@@ -11,6 +11,8 @@ const messages = {
     "workspace.settings": "Settings",
     "workspace.addModpack": "Add modpack",
     "status.aiDisconnected": "AI disconnected",
+    "status.aiServerRunning": "AI server running",
+    "status.aiConnected": "AI connected",
     "library.empty": "No imported modpacks yet",
     "library.modpack": "All the Mods 10",
     "library.scheme": "Starter Factory",
@@ -77,8 +79,6 @@ const messages = {
     "onboarding.aiBody":
       "The app will expose local tools for Codex, Claude Code, opencode, or a similar client. You can continue now and connect the agent later.",
     "onboarding.aiPromptTitle": "Prompt for your agent",
-    "onboarding.aiPrompt":
-      "You are helping me use Minecraft Pack Builder. When the app exposes its local MCP-compatible tools, connect to them and use only those tools for modpack imports, scheme edits, validation, and export. Do not read or write project files directly unless I explicitly ask. If the tool server is not available yet, tell me what is missing and wait.",
     "onboarding.keyTitle": "Add your CurseForge API key",
     "onboarding.keyBody":
       "The key is used only by the desktop backend to discover and download modpack releases. It is stored in the operating system secure credential store.",
@@ -93,8 +93,10 @@ const messages = {
     "settings.status": "Status",
     "settings.activeClient": "Active client",
     "settings.connection": "Connection",
+    "settings.protocol": "Protocol",
+    "settings.tools": "Tools",
     "settings.aiInstructions":
-      "Use an external AI client and connect it to the local tool server once the MCP surface lands in a later phase.",
+      "Copy the prompt into one MCP-compatible agent. The endpoint is stable across app restarts, so the client should not need to be reconfigured every time.",
     "settings.noActiveClient": "No active client",
     "settings.keyMissing": "No key saved",
     "settings.keySaved": "Key saved securely",
@@ -168,6 +170,8 @@ const messages = {
     "workspace.settings": "Настройки",
     "workspace.addModpack": "Добавить модпак",
     "status.aiDisconnected": "AI не подключен",
+    "status.aiServerRunning": "AI-сервер запущен",
+    "status.aiConnected": "AI подключен",
     "library.empty": "Импортированных модпаков пока нет",
     "library.modpack": "All the Mods 10",
     "library.scheme": "Стартовая фабрика",
@@ -233,9 +237,7 @@ const messages = {
     "onboarding.aiTitle": "Подключите внешний AI-инструмент",
     "onboarding.aiBody":
       "Приложение будет отдавать локальные инструменты Codex, Claude Code, opencode или похожему клиенту. Можно продолжить сейчас и подключить агента позже.",
-    "onboarding.aiPromptTitle": "Промпт для вашего агента",
-    "onboarding.aiPrompt":
-      "You are helping me use Minecraft Pack Builder. When the app exposes its local MCP-compatible tools, connect to them and use only those tools for modpack imports, scheme edits, validation, and export. Do not read or write project files directly unless I explicitly ask. If the tool server is not available yet, tell me what is missing and wait.",
+    "onboarding.aiPromptTitle": "Промпт для агента",
     "onboarding.keyTitle": "Добавьте CurseForge API key",
     "onboarding.keyBody":
       "Ключ нужен только desktop-backend для поиска и скачивания релизов модпаков. Он хранится в системном защищенном хранилище.",
@@ -250,8 +252,10 @@ const messages = {
     "settings.status": "Статус",
     "settings.activeClient": "Активный клиент",
     "settings.connection": "Подключение",
+    "settings.protocol": "Протокол",
+    "settings.tools": "Инструменты",
     "settings.aiInstructions":
-      "Используйте внешний AI-клиент и подключите его к локальному серверу инструментов, когда MCP-поверхность появится в следующей фазе.",
+      "Скопируйте промпт в одного MCP-compatible агента. Endpoint стабилен между перезапусками приложения, поэтому клиент не должен требовать перенастройку каждый раз.",
     "settings.noActiveClient": "Активного клиента нет",
     "settings.keyMissing": "Ключ не сохранен",
     "settings.keySaved": "Ключ сохранен безопасно",

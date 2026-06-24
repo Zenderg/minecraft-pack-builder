@@ -65,6 +65,19 @@ export type ModpackImportStatusChanged = {
   library: LibraryModpack[];
 };
 
+export type AgentStatus = {
+  serverRunning: boolean;
+  transport: string;
+  endpoint: string | null;
+  protocolVersion: string;
+  activeClient: string | null;
+  toolCount: number;
+};
+
+export type AgentEvent =
+  | { libraryChanged: Record<string, never> }
+  | { schemeChanged: { schemeId: number } };
+
 function getProjectSourceUrl(project: CurseForgeProject): string {
   return `https://www.curseforge.com/minecraft/modpacks/${project.slug}`;
 }
@@ -288,6 +301,33 @@ export async function getSchemeRenderScene(schemeId: number): Promise<RenderScen
   }
 
   return invoke<RenderScene>("get_scheme_render_scene", { schemeId });
+}
+
+export async function getAiIntegrationStatus(): Promise<AgentStatus> {
+  if (!isTauriRuntime()) {
+    return {
+      serverRunning: true,
+      transport: "streamable-http",
+      endpoint: "http://127.0.0.1:47392/mcp",
+      protocolVersion: "2025-06-18",
+      activeClient: null,
+      toolCount: 19,
+    };
+  }
+
+  return invoke<AgentStatus>("get_ai_integration_status");
+}
+
+export async function listenToAgentEvents(
+  onEvent: (event: AgentEvent) => void,
+): Promise<() => void> {
+  if (!isTauriRuntime()) {
+    return () => {};
+  }
+
+  return listen<AgentEvent>("ai_agent_event", (event) => {
+    onEvent(event.payload);
+  });
 }
 
 export async function searchCurseForgeModpacks(query: string): Promise<CurseForgeProject[]> {

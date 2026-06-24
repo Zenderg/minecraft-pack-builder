@@ -63,6 +63,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 name = "app-tauri"
 version = "0.1.0"
 dependencies = [
+ "mpb-agent",
  "mpb-assets",
  "mpb-core",
  "mpb-render",
@@ -1862,6 +1863,12 @@ dependencies = [
 [[package]]
 name = "mpb-agent"
 version = "0.1.0"
+dependencies = [
+ "mpb-core",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "mpb-assets"

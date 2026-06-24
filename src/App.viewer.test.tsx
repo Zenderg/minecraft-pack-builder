@@ -11,9 +11,11 @@ const tauriMocks = vi.hoisted(() => ({
   deleteImportedModpack: vi.fn(),
   deleteScheme: vi.fn(),
   discoverAppPaths: vi.fn(),
+  getAiIntegrationStatus: vi.fn(),
   getCurseForgeKeyStatus: vi.fn(),
   getSchemeRenderScene: vi.fn(),
   listLibrary: vi.fn(),
+  listenToAgentEvents: vi.fn(),
   listenToModpackImportProgress: vi.fn(),
   listenToModpackImportStatus: vi.fn(),
   openAppDataFolder: vi.fn(),
@@ -31,9 +33,11 @@ vi.mock("./tauri", () => ({
   deleteImportedModpack: tauriMocks.deleteImportedModpack,
   deleteScheme: tauriMocks.deleteScheme,
   discoverAppPaths: tauriMocks.discoverAppPaths,
+  getAiIntegrationStatus: tauriMocks.getAiIntegrationStatus,
   getCurseForgeKeyStatus: tauriMocks.getCurseForgeKeyStatus,
   getSchemeRenderScene: tauriMocks.getSchemeRenderScene,
   listLibrary: tauriMocks.listLibrary,
+  listenToAgentEvents: tauriMocks.listenToAgentEvents,
   listenToModpackImportProgress: tauriMocks.listenToModpackImportProgress,
   listenToModpackImportStatus: tauriMocks.listenToModpackImportStatus,
   openAppDataFolder: tauriMocks.openAppDataFolder,
@@ -88,8 +92,17 @@ describe("phase 7 viewer workspace", () => {
       message: null,
       apiKey: null,
     });
+    tauriMocks.getAiIntegrationStatus.mockResolvedValue({
+      serverRunning: true,
+      transport: "streamable-http",
+      endpoint: "http://127.0.0.1:7777/mcp",
+      protocolVersion: "2025-06-18",
+      activeClient: null,
+      toolCount: 19,
+    });
     tauriMocks.listenToModpackImportStatus.mockResolvedValue(() => {});
     tauriMocks.listenToModpackImportProgress.mockResolvedValue(() => {});
+    tauriMocks.listenToAgentEvents.mockResolvedValue(() => {});
     tauriMocks.listLibrary.mockResolvedValue([
       {
         id: 1,
@@ -157,7 +170,7 @@ describe("phase 7 viewer workspace", () => {
     expect(container.querySelector(".viewer-region")?.textContent).not.toContain("Viewer");
     expect(container.querySelector(".status-strip")).toBeNull();
     expect(container.querySelector(".language-switch")).toBeNull();
-    expect(container.querySelector(".brand-status")?.textContent).toContain("AI disconnected");
+    expect(container.querySelector(".brand-status")?.textContent).toContain("AI server running");
 
     await act(async () => {
       buttonByText(container, "Stage 1").click();
@@ -183,6 +196,28 @@ describe("phase 7 viewer workspace", () => {
     expect(container.textContent).not.toContain("Selected-area notes");
     expect(container.textContent).not.toContain("Move the machine wall two blocks east");
   });
+
+  it("shows the MCP endpoint once in AI settings", async () => {
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".settings-link")?.click();
+    });
+
+    expect(await screenText(container, "AI integration")).toBe(true);
+    expect(countText(container, "http://127.0.0.1:7777/mcp")).toBe(1);
+  });
+
+  it("renders a handoff prompt with endpoint and interface language guidance", async () => {
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".settings-link")?.click();
+    });
+
+    expect(await screenText(container, "AI integration")).toBe(true);
+    const prompt = container.querySelector(".prompt-block code")?.textContent ?? "";
+    expect(prompt).toContain("http://127.0.0.1:7777/mcp");
+    expect(prompt).toContain("minecraft-pack-builder");
+    expect(prompt).toContain("Respond to me in the same language as the Minecraft Pack Builder interface: English.");
+    expect(prompt).toContain("If the client must be restarted or MCP config must be reloaded");
+  });
 });
 
 function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
@@ -200,4 +235,8 @@ async function screenText(container: HTMLElement, text: string): Promise<boolean
     await Promise.resolve();
   });
   return container.textContent?.includes(text) ?? false;
+}
+
+function countText(container: HTMLElement, text: string): number {
+  return (container.textContent?.split(text).length ?? 1) - 1;
 }

@@ -232,6 +232,10 @@ pub enum SchemeOperation {
         selection: Selection,
         block: SchemeBlock,
     },
+    AssignStage {
+        selection: Selection,
+        stage: StageRef,
+    },
     Resize(Dimensions),
 }
 
@@ -286,6 +290,20 @@ impl Scheme {
         Ok(id)
     }
 
+    pub fn rename_stage(&mut self, id: u32, name: &str) -> Result<(), SchemeError> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err(SchemeError::EmptyStageName);
+        }
+        let stage = self
+            .stages
+            .iter_mut()
+            .find(|stage| stage.id == id)
+            .ok_or(SchemeError::UnknownStage { id })?;
+        stage.name = trimmed.to_string();
+        Ok(())
+    }
+
     pub fn apply(
         &mut self,
         registry: &BlockRegistry,
@@ -310,6 +328,13 @@ impl Scheme {
             SchemeOperation::BulkSet { selection, block } => {
                 for coordinate in selection.coordinates() {
                     self.blocks.insert(coordinate, block.clone());
+                }
+            }
+            SchemeOperation::AssignStage { selection, stage } => {
+                for coordinate in selection.coordinates() {
+                    if let Some(block) = self.blocks.get_mut(&coordinate) {
+                        block.stage = stage;
+                    }
                 }
             }
             SchemeOperation::Resize(dimensions) => {
@@ -396,6 +421,10 @@ impl Scheme {
                 self.ensure_selection_in_bounds(*selection)?;
                 self.ensure_stage_exists(block.stage)?;
                 registry.validate_block(block)
+            }
+            SchemeOperation::AssignStage { selection, stage } => {
+                self.ensure_selection_in_bounds(*selection)?;
+                self.ensure_stage_exists(*stage)
             }
             SchemeOperation::Resize(dimensions) => {
                 for coordinate in self.blocks.keys() {

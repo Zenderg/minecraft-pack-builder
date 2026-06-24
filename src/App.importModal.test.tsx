@@ -11,8 +11,10 @@ const tauriMocks = vi.hoisted(() => ({
   deleteImportedModpack: vi.fn(),
   deleteScheme: vi.fn(),
   discoverAppPaths: vi.fn(),
+  getAiIntegrationStatus: vi.fn(),
   getCurseForgeKeyStatus: vi.fn(),
   listLibrary: vi.fn(),
+  listenToAgentEvents: vi.fn(),
   listenToModpackImportStatus: vi.fn(),
   listenToModpackImportProgress: vi.fn(),
   openAppDataFolder: vi.fn(),
@@ -31,8 +33,10 @@ vi.mock("./tauri", () => ({
   deleteImportedModpack: tauriMocks.deleteImportedModpack,
   deleteScheme: tauriMocks.deleteScheme,
   discoverAppPaths: tauriMocks.discoverAppPaths,
+  getAiIntegrationStatus: tauriMocks.getAiIntegrationStatus,
   getCurseForgeKeyStatus: tauriMocks.getCurseForgeKeyStatus,
   listLibrary: tauriMocks.listLibrary,
+  listenToAgentEvents: tauriMocks.listenToAgentEvents,
   listenToModpackImportStatus: tauriMocks.listenToModpackImportStatus,
   listenToModpackImportProgress: tauriMocks.listenToModpackImportProgress,
   openAppDataFolder: tauriMocks.openAppDataFolder,
@@ -97,7 +101,16 @@ describe("modpack import modal", () => {
       message: null,
       apiKey: null,
     });
+    tauriMocks.getAiIntegrationStatus.mockResolvedValue({
+      serverRunning: true,
+      transport: "streamable-http",
+      endpoint: "http://127.0.0.1:7777/mcp",
+      protocolVersion: "2025-06-18",
+      activeClient: null,
+      toolCount: 19,
+    });
     tauriMocks.listLibrary.mockResolvedValue([]);
+    tauriMocks.listenToAgentEvents.mockResolvedValue(() => {});
     tauriMocks.listenToModpackImportStatus.mockResolvedValue(() => {});
     tauriMocks.listenToModpackImportProgress.mockResolvedValue(() => {});
     tauriMocks.searchCurseForgeModpacks.mockResolvedValue([

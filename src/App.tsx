@@ -66,7 +66,9 @@ import {
   deleteScheme,
   discoverAppPaths,
   getCurseForgeKeyStatus,
+  getAiIntegrationStatus,
   listLibrary,
+  listenToAgentEvents,
   listenToModpackImportProgress,
   listenToModpackImportStatus,
   openAppDataFolder,
@@ -76,6 +78,7 @@ import {
   saveCurseForgeApiKey,
   seedLocalLibraryFixture,
   type AppDataPaths,
+  type AgentStatus,
   type CurseForgeCredentialStatus,
   type ImportProgress,
 } from "./tauri";
@@ -106,6 +109,7 @@ export function App() {
   );
   const [paths, setPaths] = useState<AppDataPaths | null>(null);
   const [keyStatus, setKeyStatus] = useState<CurseForgeCredentialStatus | null>(null);
+  const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [keyCheckResult, setKeyCheckResult] = useState<CurseForgeKeyCheckResult>("idle");
   const [keyCheckMessage, setKeyCheckMessage] = useState("");
@@ -122,6 +126,7 @@ export function App() {
   const [expandedModpackIds, setExpandedModpackIds] = useState<Set<number>>(new Set());
   const [sidebarWidth, setSidebarWidth] = useState<number>(sidebarWidthLimits.default);
   const [viewerStageId, setViewerStageId] = useState<StageOptionId | null>(null);
+  const [viewerRevision, setViewerRevision] = useState(0);
   const [viewerToolContext, setViewerToolContext] = useState<ViewerToolContext | null>(null);
   const handleViewerStageChange = useCallback((stageId: StageOptionId | null) => {
     setViewerStageId(stageId);
@@ -137,6 +142,7 @@ export function App() {
     selectedModpack?.schemes.find((scheme) => scheme.id === librarySelection?.schemeId) ?? null;
   const importJobModpack =
     library.find((modpack) => modpack.id === importJobModpackId) ?? null;
+  const agentDisplay = getAgentDisplay(agentStatus, t);
 
   useEffect(() => {
     discoverAppPaths()
@@ -164,6 +170,55 @@ export function App() {
   useEffect(() => {
     refreshLibrary();
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    let intervalId: number | null = null;
+    const refreshAgentStatus = () => {
+      getAiIntegrationStatus()
+        .then((status) => {
+          if (active) {
+            setAgentStatus(status);
+          }
+        })
+        .catch(() => {
+          if (active) {
+            setAgentStatus(null);
+          }
+        });
+    };
+
+    refreshAgentStatus();
+    intervalId = window.setInterval(refreshAgentStatus, 2500);
+    return () => {
+      active = false;
+      if (intervalId !== null) {
+        window.clearInterval(intervalId);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    listenToAgentEvents((event) => {
+      void getAiIntegrationStatus().then(setAgentStatus).catch(() => setAgentStatus(null));
+      if ("libraryChanged" in event) {
+        void refreshLibrary();
+      }
+      if ("schemeChanged" in event) {
+        setViewerRevision((revision) => revision + 1);
+        setLibraryMessage(t("library.autosaved"));
+      }
+    })
+      .then((nextUnlisten) => {
+        unlisten = nextUnlisten;
+      })
+      .catch((error: unknown) => setLibraryMessage(String(error)));
+
+    return () => {
+      unlisten?.();
+    };
+  }, [language]);
 
   function appendImportLog(modpackId: number, message: string) {
     const trimmed = message.trim();
@@ -522,7 +577,7 @@ export function App() {
             <h1>{t("app.title")}</h1>
             <span className="brand-status">
               <Bot size={12} />
-              {t("status.aiDisconnected")}
+              {agentDisplay.compact}
             </span>
           </div>
         </div>
@@ -578,6 +633,7 @@ export function App() {
             modpack={selectedModpack}
             onStageChange={handleViewerStageChange}
             onToolContextChange={handleViewerToolContextChange}
+            revision={viewerRevision}
             scheme={selectedScheme}
             selectedStageId={viewerStageId}
             t={t}
@@ -601,6 +657,7 @@ export function App() {
           keyState={flow.curseForgeKey}
           keyStatus={keyStatus}
           language={language}
+          agentStatus={agentStatus}
           onCheckKey={handleCheckKey}
           onClose={() => dispatch({ type: "closeSettings" })}
           onLanguageChange={setLanguage}
@@ -753,7 +810,7 @@ function OnboardingScreen(props: {
             </StepIcon>
             <h2>{t("onboarding.aiTitle")}</h2>
             <p>{t("onboarding.aiBody")}</p>
-            <PromptBlock t={t} />
+            <PromptBlock endpoint={null} language={props.language} t={t} />
             <StatusRows
               rows={[
                 [t("settings.status"), t("status.aiDisconnected")],
@@ -1348,6 +1405,7 @@ function ModpackInfoRows({ modpack, t }: { modpack: LibraryModpack; t: Translato
 }
 
 function SettingsModal(props: {
+  agentStatus: AgentStatus | null;
   apiKeyInput: string;
   diagnosticsMessage: string;
   isSavingKey: boolean;
@@ -1369,6 +1427,7 @@ function SettingsModal(props: {
   t: Translator;
 }) {
   const { t } = props;
+  const agentDisplay = getAgentDisplay(props.agentStatus, t);
   const sections: Array<[SettingsSection, string]> = [
     ["ai", t("settings.aiIntegration")],
     ["curseforge", t("settings.curseforgeKey")],
@@ -1411,12 +1470,13 @@ function SettingsModal(props: {
           {props.section === "ai" && (
             <SettingsPane icon={<PlugZap size={23} />} title={t("settings.aiIntegration")}>
               <p>{t("settings.aiInstructions")}</p>
-              <PromptBlock t={t} />
+              <PromptBlock endpoint={props.agentStatus?.endpoint ?? null} language={props.language} t={t} />
               <StatusRows
                 rows={[
-                  [t("settings.status"), t("status.aiDisconnected")],
-                  [t("settings.activeClient"), t("settings.noActiveClient")],
-                  [t("settings.connection"), t("settings.desktopOnly")],
+                  [t("settings.status"), agentDisplay.status],
+                  [t("settings.activeClient"), props.agentStatus?.activeClient ?? t("settings.noActiveClient")],
+                  [t("settings.protocol"), props.agentStatus?.protocolVersion ?? "MCP"],
+                  [t("settings.tools"), props.agentStatus ? String(props.agentStatus.toolCount) : "0"],
                 ]}
               />
               <button className="secondary-action compact" onClick={props.onRestartOnboarding} type="button">
@@ -1553,13 +1613,60 @@ function KeyForm(props: {
   );
 }
 
-function PromptBlock({ t }: { t: Translator }) {
+function PromptBlock({
+  endpoint,
+  language,
+  t,
+}: {
+  endpoint: string | null;
+  language: Language;
+  t: Translator;
+}) {
   return (
     <div className="prompt-block">
       <span>{t("onboarding.aiPromptTitle")}</span>
-      <code>{t("onboarding.aiPrompt")}</code>
+      <code>{buildAgentHandoffPrompt(endpoint, language, t)}</code>
     </div>
   );
+}
+
+function buildAgentHandoffPrompt(endpoint: string | null, language: Language, t: Translator): string {
+  const interfaceLanguage = language === "ru" ? "Russian" : "English";
+  const endpointLine = endpoint ?? "[paste the Minecraft Pack Builder MCP endpoint from Settings]";
+  return [
+    "You are helping me use Minecraft Pack Builder.",
+    "",
+    "The app is running a local MCP server at:",
+    endpointLine,
+    "",
+    'If you can configure MCP servers for this client, add this endpoint as "minecraft-pack-builder".',
+    "If the client must be restarted or MCP config must be reloaded, tell me exactly what to do.",
+    "After the MCP server is connected, verify that the Minecraft Pack Builder tools are available.",
+    "Use those tools for modpack imports, scheme edits, validation, selections, materials, and export.",
+    "Do not read or write the app data files directly unless I explicitly ask.",
+    `Respond to me in the same language as the Minecraft Pack Builder interface: ${interfaceLanguage}.`,
+  ].join("\n");
+}
+
+function getAgentDisplay(agentStatus: AgentStatus | null, t: Translator) {
+  if (!agentStatus?.serverRunning) {
+    return {
+      compact: t("status.aiDisconnected"),
+      status: t("status.aiDisconnected"),
+    };
+  }
+
+  if (agentStatus.activeClient) {
+    return {
+      compact: `${t("status.aiConnected")}: ${agentStatus.activeClient}`,
+      status: t("status.aiConnected"),
+    };
+  }
+
+  return {
+    compact: t("status.aiServerRunning"),
+    status: t("status.aiServerRunning"),
+  };
 }
 
 function SettingsPane(props: { children: React.ReactNode; icon: React.ReactNode; title: string }) {

@@ -11,6 +11,9 @@ use mpb_assets::{
     CurseForgeGateway, CurseForgeHttpGateway, CurseForgeProject, DiscoveredReleases,
     DownloadProgress, ModpackAssetImportRequest,
 };
+use mpb_agent::{
+    start_streamable_http_server, AgentServer, AgentStatus, McpHttpServerHandle,
+};
 use mpb_core::DomainDemoReport;
 use mpb_core::{
     BlockPlacement, BlockRegistry, Coordinate, Dimensions, Scheme, SchemeOperation, StageRef,
@@ -28,6 +31,11 @@ mod credentials;
 #[derive(Default)]
 struct ImportController {
     current: Mutex<Option<CancellationToken>>,
+}
+
+struct AgentController {
+    server: AgentServer,
+    _http: Mutex<Option<McpHttpServerHandle>>,
 }
 
 impl ImportController {
@@ -317,6 +325,11 @@ fn generate_domain_demo_report(app: tauri::AppHandle) -> Result<DomainDemoReport
 #[tauri::command]
 fn get_scheme_render_scene(scheme_id: i64) -> RenderSceneDto {
     demo_render_scene(scheme_id)
+}
+
+#[tauri::command]
+fn get_ai_integration_status(controller: tauri::State<AgentController>) -> AgentStatus {
+    controller.server.status()
 }
 
 #[tauri::command]
@@ -1007,6 +1020,7 @@ pub fn run() {
         load_modpack_asset_report,
         generate_domain_demo_report,
         get_scheme_render_scene,
+        get_ai_integration_status,
         list_library,
         seed_local_library_fixture,
         create_scheme,
@@ -1031,6 +1045,7 @@ pub fn run() {
         load_modpack_asset_report,
         generate_domain_demo_report,
         get_scheme_render_scene,
+        get_ai_integration_status,
         list_library,
         create_scheme,
         rename_scheme,
@@ -1040,6 +1055,21 @@ pub fn run() {
     ]);
 
     builder
+        .setup(|app| {
+            let server = AgentServer::new_demo();
+            let app_handle = app.handle().clone();
+            let http = start_streamable_http_server(server.clone(), move |events| {
+                for event in events {
+                    let _ = app_handle.emit("ai_agent_event", event);
+                }
+            })
+            .map_err(|error| Box::<dyn std::error::Error>::from(error.to_string()))?;
+            app.manage(AgentController {
+                server,
+                _http: Mutex::new(Some(http)),
+            });
+            Ok(())
+        })
         .manage(ImportController::default())
         .run(tauri::generate_context!())
         .expect("failed to run Minecraft Pack Builder desktop app");

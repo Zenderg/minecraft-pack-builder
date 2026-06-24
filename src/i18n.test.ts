@@ -20,8 +20,9 @@ describe("i18n", () => {
     expect(getInitialLanguage(["en-US", "ru-RU"])).toBe("en");
   });
 
-  it("keeps the agent connection prompt in English for every UI language", () => {
-    expect(translate("ru", "onboarding.aiPrompt")).toBe(translate("en", "onboarding.aiPrompt"));
+  it("uses a localized title for the agent handoff prompt", () => {
+    expect(translate("en", "onboarding.aiPromptTitle")).toBe("Prompt for your agent");
+    expect(translate("ru", "onboarding.aiPromptTitle")).toBe("Промпт для агента");
   });
 
   it("does not describe the implemented import wizard as a future phase", () => {

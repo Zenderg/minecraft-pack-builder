@@ -17,6 +17,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 mpb-assets = { path = "../crates/mpb-assets" }
+mpb-agent = { path = "../crates/mpb-agent" }
 mpb-core = { path = "../crates/mpb-core" }
 mpb-render = { path = "../crates/mpb-render" }
 mpb-storage = { path = "../crates/mpb-storage" }

@@ -48,6 +48,7 @@ export function ViewerWorkspace({
   modpack,
   onStageChange,
   onToolContextChange,
+  revision,
   scheme,
   selectedStageId,
   t,
@@ -55,6 +56,7 @@ export function ViewerWorkspace({
   modpack: LibraryModpack | null;
   onStageChange: (stageId: StageOptionId | null) => void;
   onToolContextChange: (context: ViewerToolContext | null) => void;
+  revision: number;
   scheme: LibraryScheme | null;
   selectedStageId: StageOptionId | null;
   t: Translator;
@@ -91,7 +93,7 @@ export function ViewerWorkspace({
     return () => {
       active = false;
     };
-  }, [onStageChange, onToolContextChange, scheme]);
+  }, [onStageChange, onToolContextChange, revision, scheme]);
 
   const effectiveStageId =
     viewerState.kind === "ready"

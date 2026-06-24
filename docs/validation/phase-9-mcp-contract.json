@@ -1,0 +1,49 @@
+{
+  "phase": 9,
+  "artifact": "MCP-compatible AI integration and tool surface",
+  "protocolVersion": "2025-06-18",
+  "transport": {
+    "kind": "Streamable HTTP",
+    "bind": "127.0.0.1",
+    "port": 47392,
+    "stableEndpoint": "http://127.0.0.1:47392/mcp",
+    "endpointPath": "/mcp",
+    "originPolicy": "Allow no Origin header, tauri://localhost, localhost, and 127.0.0.1 origins"
+  },
+  "server": {
+    "name": "minecraft-pack-builder",
+    "activeClientLimit": 1,
+    "statusCommand": "get_ai_integration_status",
+    "uiEvent": "ai_agent_event"
+  },
+  "tools": [
+    "list_imported_modpacks",
+    "add_modpack",
+    "list_schemes",
+    "create_scheme",
+    "rename_scheme",
+    "delete_scheme",
+    "read_scheme_content",
+    "read_current_selection",
+    "place_block",
+    "delete_block",
+    "replace_blocks",
+    "bulk_set_area",
+    "resize_scheme",
+    "create_stage",
+    "rename_stage",
+    "assign_blocks_to_stage",
+    "validate_scheme",
+    "get_materials",
+    "export_scheme"
+  ],
+  "validation": {
+    "contractTests": "crates/mpb-agent/tests/mcp_tool_surface.rs",
+    "atomicInvalidOperation": "bulk_set_area outside scheme bounds returns coordinate_out_of_bounds and leaves block count unchanged",
+    "singleClient": "second initialize request from a different client returns active_client_already_connected",
+    "mutations": "Block, area, resize, stage, and assignment mutations route through mpb-core validation"
+  },
+  "phaseBoundary": {
+    "exportTool": "Tool name is reserved in the MCP surface; actual .schem and .litematic file writing is implemented in phase 10."
+  }
+}
