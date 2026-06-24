@@ -42,6 +42,11 @@ jobs:
         with:
           targets: ${{ matrix.platform == 'macos' && 'x86_64-apple-darwin,aarch64-apple-darwin' || '' }}
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-${{ matrix.platform }}
+          cache-on-failure: true
+
       - name: Install Linux packaging dependencies
         if: matrix.platform == 'linux'
         run: |

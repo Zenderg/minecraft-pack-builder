@@ -26,6 +26,7 @@ describe("phase 12 packaging and updater configuration", () => {
     expect(releaseWorkflow).toContain("windows-latest");
     expect(releaseWorkflow).toContain("ubuntu-22.04");
     expect(releaseWorkflow).toContain("latest.json");
+    expect(releaseWorkflow).toContain("Swatinem/rust-cache@v2");
     expect(releaseWorkflow).toContain("branches:");
     expect(releaseWorkflow).toContain("- main");
     expect(releaseWorkflow).toContain("Upload push build artifacts");
