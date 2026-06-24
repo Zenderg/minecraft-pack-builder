@@ -20,6 +20,7 @@ import {
   type LibraryModpack,
   type LibraryScheme,
   type LibrarySelection,
+  type SchemeDimensions,
 } from "./library";
 import {
   createInitialAppFlow,
@@ -377,6 +378,15 @@ export function App() {
         return dialog;
       }
       return { ...dialog, name };
+    });
+  }
+
+  function handleLibraryDialogDimensionsChange(dimensions: SchemeDimensions) {
+    setLibraryDialog((dialog) => {
+      if (!dialog || dialog.kind !== "createScheme") {
+        return dialog;
+      }
+      return { ...dialog, dimensions };
     });
   }
 
@@ -765,6 +775,7 @@ export function App() {
           dialog={libraryDialog}
           onCancel={() => setLibraryDialog(null)}
           onConfirm={handleConfirmLibraryDialog}
+          onDimensionsChange={handleLibraryDialogDimensionsChange}
           onNameChange={handleLibraryDialogNameChange}
           t={t}
         />

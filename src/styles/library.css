@@ -248,3 +248,58 @@
   padding-left: 28px;
 }
 
+.library-dialog-dimensions {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.library-dialog-dimensions legend {
+  margin-bottom: 10px;
+  padding: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.dimension-input-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.dimension-field {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dimension-field-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dimension-field span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.dimension-field input[type="number"] {
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  padding: 0 10px;
+  font-size: 14px;
+}
+
+.dimension-field input[type="range"] {
+  width: 100%;
+  min-width: 0;
+  accent-color: var(--accent);
+}

@@ -65,4 +65,10 @@ describe("desktop viewer layout CSS", () => {
     expect(toolsSidebarBlock).toMatch(/overflow:\s*hidden/);
     expect(toolTreeBlock).toMatch(/overflow-y:\s*auto/);
   });
+
+  it("stacks create-scheme dimension controls vertically", () => {
+    const dimensionGridBlock = css.match(/\.dimension-input-grid\s*\{[^}]*\}/)?.[0] ?? "";
+
+    expect(dimensionGridBlock).toMatch(/grid-template-columns:\s*1fr/);
+  });
 });

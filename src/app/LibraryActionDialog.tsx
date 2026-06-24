@@ -1,16 +1,20 @@
 import { X } from "lucide-react";
 
-import { getLibraryDialogContent, type LibraryModpack } from "../library";
+import { getLibraryDialogContent, type LibraryModpack, type SchemeDimensions } from "../library";
 import type { LibraryDialog, Translator } from "./types";
+
+const dimensionSliderMax = 2000;
 
 export function LibraryActionDialog(props: {
   dialog: LibraryDialog;
   onCancel: () => void;
   onConfirm: () => void;
+  onDimensionsChange: (dimensions: SchemeDimensions) => void;
   onNameChange: (name: string) => void;
   t: Translator;
 }) {
   const { dialog, t } = props;
+  const isCreate = dialog.kind === "createScheme";
   const isDelete = dialog.kind === "deleteScheme" || dialog.kind === "deleteModpack";
   const isInfo = dialog.kind === "infoModpack";
   const content = getLibraryDialogContent(dialog.kind);
@@ -46,9 +50,54 @@ export function LibraryActionDialog(props: {
             <input
               autoFocus
               onChange={(event) => props.onNameChange(event.currentTarget.value)}
+              type="text"
               value={dialog.name}
             />
           </label>
+        )}
+        {isCreate && (
+          <fieldset className="library-dialog-dimensions">
+            <legend>{t("library.dimensionsLabel")}</legend>
+            <div className="dimension-input-grid">
+              {(["X", "Y", "Z"] as const).map((axis, index) => {
+                const dimension = dialog.dimensions[index];
+                const sliderValue = Math.min(dimensionSliderMax, dimension);
+
+                return (
+                  <div className="dimension-field" key={axis}>
+                    <div className="dimension-field-header">
+                      <span>{axis}</span>
+                      <input
+                        inputMode="numeric"
+                        min={1}
+                        onChange={(event) => {
+                          props.onDimensionsChange(
+                            updateDimension(dialog.dimensions, index, event.currentTarget.value),
+                          );
+                        }}
+                        step={1}
+                        type="number"
+                        value={dimension}
+                      />
+                    </div>
+                    <input
+                      aria-label={`${axis} ${t("library.dimensionsLabel")}`}
+                      max={dimensionSliderMax}
+                      min={1}
+                      onChange={(event) => {
+                        props.onDimensionsChange(
+                          updateDimension(dialog.dimensions, index, event.currentTarget.value),
+                        );
+                      }}
+                      step={1}
+                      type="range"
+                      value={sliderValue}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </fieldset>
         )}
         <div className="dialog-actions">
           <button className="secondary-action compact" onClick={props.onCancel} type="button">
@@ -67,6 +116,24 @@ export function LibraryActionDialog(props: {
       </section>
     </div>
   );
+}
+
+function updateDimension(
+  currentDimensions: SchemeDimensions,
+  index: number,
+  value: string,
+): SchemeDimensions {
+  const nextDimensions = [...currentDimensions] as SchemeDimensions;
+  nextDimensions[index] = normalizeDimensionInput(value);
+  return nextDimensions;
+}
+
+function normalizeDimensionInput(value: string): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return 1;
+  }
+  return Math.max(1, Math.trunc(parsed));
 }
 
 function ModpackInfoRows({ modpack, t }: { modpack: LibraryModpack; t: Translator }) {
@@ -92,4 +159,3 @@ function ModpackInfoRows({ modpack, t }: { modpack: LibraryModpack; t: Translato
     </dl>
   );
 }
-

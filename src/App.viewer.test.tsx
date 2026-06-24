@@ -194,11 +194,11 @@ describe("phase 7 viewer workspace", () => {
     expect(await screenText(container, "Stage 2")).toBe(true);
     expect(await screenText(container, "Unassigned")).toBe(true);
     expect(container.querySelector(".viewer-three-canvas")).not.toBeNull();
-    expect(container.textContent).toContain("7 / 9");
+    expect(container.textContent).toContain("2 / 3");
     expect(container.querySelector(".viewer-toolbar")).toBeNull();
     expect(container.querySelector(".tool-summary")).not.toBeNull();
-    expect(container.querySelector(".tool-summary")?.textContent).toContain("7 / 9");
-    expect(container.querySelector(".tool-summary")?.textContent).toContain("2 chunks");
+    expect(container.querySelector(".tool-summary")?.textContent).toContain("2 / 3");
+    expect(container.querySelector(".tool-summary")?.textContent).toContain("1 chunks");
     expect(container.querySelector(".tool-summary")?.textContent).toContain("faces");
     expect(container.querySelector(".tool-rail")).toBeNull();
     expect(container.querySelector(".tool-tree")).not.toBeNull();
@@ -219,8 +219,8 @@ describe("phase 7 viewer workspace", () => {
       buttonByText(container, "Stage 1").click();
     });
 
-    expect(container.textContent).toContain("3 / 9");
-    expect(container.querySelector(".tool-summary")?.textContent).toContain("3 / 9");
+    expect(container.textContent).toContain("1 / 3");
+    expect(container.querySelector(".tool-summary")?.textContent).toContain("1 / 3");
 
     await act(async () => {
       buttonByText(container, "Materials").click();

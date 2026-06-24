@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const tauriMocks = vi.hoisted(() => ({
   cancelCurseForgeImport: vi.fn(),
   checkCurseForgeApiKey: vi.fn(),
+  checkForUpdates: vi.fn(),
   createScheme: vi.fn(),
   deleteImportedModpack: vi.fn(),
   deleteScheme: vi.fn(),
@@ -14,21 +15,22 @@ const tauriMocks = vi.hoisted(() => ({
   exportScheme: vi.fn(),
   getAiIntegrationStatus: vi.fn(),
   getCurseForgeKeyStatus: vi.fn(),
+  getSchemeRenderScene: vi.fn(),
   listLibrary: vi.fn(),
   listenToAgentEvents: vi.fn(),
-  listenToModpackImportStatus: vi.fn(),
   listenToModpackImportProgress: vi.fn(),
+  listenToModpackImportStatus: vi.fn(),
   openAppDataFolder: vi.fn(),
   renameImportedModpack: vi.fn(),
   renameScheme: vi.fn(),
   retryModpackImport: vi.fn(),
   saveCurseForgeApiKey: vi.fn(),
-  searchCurseForgeModpacks: vi.fn(),
 }));
 
 vi.mock("./tauri", () => ({
   cancelCurseForgeImport: tauriMocks.cancelCurseForgeImport,
   checkCurseForgeApiKey: tauriMocks.checkCurseForgeApiKey,
+  checkForUpdates: tauriMocks.checkForUpdates,
   createScheme: tauriMocks.createScheme,
   deleteImportedModpack: tauriMocks.deleteImportedModpack,
   deleteScheme: tauriMocks.deleteScheme,
@@ -36,19 +38,30 @@ vi.mock("./tauri", () => ({
   exportScheme: tauriMocks.exportScheme,
   getAiIntegrationStatus: tauriMocks.getAiIntegrationStatus,
   getCurseForgeKeyStatus: tauriMocks.getCurseForgeKeyStatus,
+  getSchemeRenderScene: tauriMocks.getSchemeRenderScene,
   listLibrary: tauriMocks.listLibrary,
   listenToAgentEvents: tauriMocks.listenToAgentEvents,
-  listenToModpackImportStatus: tauriMocks.listenToModpackImportStatus,
   listenToModpackImportProgress: tauriMocks.listenToModpackImportProgress,
+  listenToModpackImportStatus: tauriMocks.listenToModpackImportStatus,
   openAppDataFolder: tauriMocks.openAppDataFolder,
   renameImportedModpack: tauriMocks.renameImportedModpack,
   renameScheme: tauriMocks.renameScheme,
   retryModpackImport: tauriMocks.retryModpackImport,
   saveCurseForgeApiKey: tauriMocks.saveCurseForgeApiKey,
-  searchCurseForgeModpacks: tauriMocks.searchCurseForgeModpacks,
 }));
 
 import { App } from "./App";
+import type { RenderScene } from "./renderViewer";
+
+const createdRenderScene: RenderScene = {
+  schemeId: 10,
+  schemeName: "Compact Base",
+  dimensions: [12, 2500, 24],
+  stages: [],
+  blocks: [],
+  chunks: [],
+  largeSchemeThreshold: 4096,
+};
 
 function installLocalStorageMock() {
   const values = new Map<string, string>();
@@ -82,7 +95,13 @@ function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
   return button;
 }
 
-describe("modpack import modal", () => {
+function changeInput(input: HTMLInputElement, value: string) {
+  const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  valueSetter?.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+describe("create scheme dialog", () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -109,13 +128,51 @@ describe("modpack import modal", () => {
       activeClient: null,
       toolCount: 19,
     });
-    tauriMocks.listLibrary.mockResolvedValue([]);
+    tauriMocks.checkForUpdates.mockResolvedValue({
+      status: "current",
+      currentVersion: "0.1.0",
+      latestVersion: null,
+      notes: null,
+      date: null,
+      errorMessage: null,
+    });
     tauriMocks.listenToAgentEvents.mockResolvedValue(() => {});
     tauriMocks.listenToModpackImportStatus.mockResolvedValue(() => {});
     tauriMocks.listenToModpackImportProgress.mockResolvedValue(() => {});
-    tauriMocks.searchCurseForgeModpacks.mockResolvedValue([
-      { id: 42, name: "AOC", slug: "aoc", logoUrl: null },
+    tauriMocks.listLibrary.mockResolvedValue([
+      {
+        id: 1,
+        localName: "AOC - 1.0.0",
+        sourceUrl: "https://www.curseforge.com/minecraft/modpacks/aoc",
+        versionName: "1.0.0",
+        minecraftVersion: "1.20.1",
+        loader: "Forge",
+        importStatus: "imported",
+        importMessage: null,
+        schemes: [],
+      },
     ]);
+    tauriMocks.createScheme.mockResolvedValue([
+      {
+        id: 1,
+        localName: "AOC - 1.0.0",
+        sourceUrl: "https://www.curseforge.com/minecraft/modpacks/aoc",
+        versionName: "1.0.0",
+        minecraftVersion: "1.20.1",
+        loader: "Forge",
+        importStatus: "imported",
+        importMessage: null,
+        schemes: [
+          {
+            id: 10,
+            modpackId: 1,
+            name: "Compact Base",
+            dimensions: [12, 2500, 24],
+          },
+        ],
+      },
+    ]);
+    tauriMocks.getSchemeRenderScene.mockResolvedValue(createdRenderScene);
 
     container = document.createElement("div");
     document.body.append(container);
@@ -126,33 +183,40 @@ describe("modpack import modal", () => {
   });
 
   afterEach(() => {
-    if (root) {
-      act(() => {
-        root.unmount();
-      });
-    }
-    container?.remove();
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
     localStorage.clear();
     vi.clearAllMocks();
   });
 
-  it("opens add-modpack as a dialog without rendering the empty viewer workspace", async () => {
+  it("lets users choose dimensions with sliders or manual values beyond the slider cap", async () => {
     await act(async () => {
-      buttonByText(container, "Add modpack").click();
+      container.querySelector<HTMLButtonElement>('button[aria-label="Create scheme"]')?.click();
     });
 
-    const dialog = container.querySelector('section[role="dialog"][aria-label="Add modpack"]');
-    const viewer = container.querySelector('.content-grid > .viewer-region[aria-label="Viewer"]');
-    const toolsSidebar = container.querySelector(".content-grid > .tools-sidebar");
-    const importInWorkspace = container.querySelector(".content-grid > .import-workspace");
-
+    const dialog = container.querySelector('section[role="dialog"][aria-label="Create scheme"]');
     expect(dialog).not.toBeNull();
-    expect(viewer).toBeNull();
-    expect(toolsSidebar).toBeNull();
-    expect(importInWorkspace).toBeNull();
-  });
+    const nameInput = dialog!.querySelector<HTMLInputElement>('input[type="text"]');
+    const sliders = [...dialog!.querySelectorAll<HTMLInputElement>('input[type="range"]')];
+    const dimensionInputs = [...dialog!.querySelectorAll<HTMLInputElement>('input[type="number"]')];
+    expect(nameInput?.value).toBe("New scheme");
+    expect(sliders).toHaveLength(3);
+    expect(dimensionInputs).toHaveLength(3);
+    expect(sliders.map((input) => input.max)).toEqual(["2000", "2000", "2000"]);
+    expect(dimensionInputs.map((input) => input.value)).toEqual(["64", "64", "64"]);
 
-  it("does not render asset diagnostics in the main workspace", () => {
-    expect(container.querySelector(".asset-preview-panel")).toBeNull();
+    await act(async () => {
+      changeInput(nameInput!, "Compact Base");
+      changeInput(sliders[0], "12");
+      changeInput(dimensionInputs[1], "2500");
+      changeInput(sliders[2], "24");
+    });
+    await act(async () => {
+      buttonByText(container, "Confirm").click();
+    });
+
+    expect(tauriMocks.createScheme).toHaveBeenCalledWith(1, "Compact Base", [12, 2500, 24]);
   });
 });
