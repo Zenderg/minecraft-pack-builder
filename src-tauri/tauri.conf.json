@@ -29,7 +29,7 @@
     "active": true,
     "targets": ["app", "dmg", "msi", "nsis", "appimage", "deb", "rpm"],
     "createUpdaterArtifacts": true,
-    "icon": ["icons/icon.png", "icons/icon.ico"],
+    "icon": ["icons/icon.png", "icons/icon.ico", "icons/icon.icns"],
     "category": "DeveloperTool",
     "shortDescription": "Local-first Minecraft modpack scheme builder",
     "longDescription": "Minecraft Pack Builder imports CurseForge modpacks, stores local schemes, exposes MCP-compatible AI tools, renders structures, validates changes, and exports Minecraft ecosystem files.",
