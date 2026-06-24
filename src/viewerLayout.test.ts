@@ -13,7 +13,8 @@ describe("desktop viewer layout CSS", () => {
     "styles/settings.css",
   ]
     .map((file) => readFileSync(join(process.cwd(), "src", file), "utf8"))
-    .join("\n");
+    .join("\n")
+    .replace(/\r\n/g, "\n");
 
   it("does not force the desktop webview into page-scale shrinking", () => {
     const bodyBlock = css.match(/body\s*\{[^}]*\}/)?.[0] ?? "";
@@ -21,8 +22,8 @@ describe("desktop viewer layout CSS", () => {
 
     expect(bodyBlock).not.toMatch(/min-width\s*:/);
     expect(viewerRegionBlock).not.toMatch(/border\s*:/);
-    expect(css).not.toMatch(/\.viewer-footer span,\n\.viewer-footer strong/);
-    expect(css).toMatch(/\.viewer-footer > span,\n\.viewer-footer > strong/);
+    expect(css).not.toMatch(/\.viewer-footer span,\s*\.viewer-footer strong/);
+    expect(css).toMatch(/\.viewer-footer > span,\s*\.viewer-footer > strong/);
     expect(css).not.toMatch(/\.viewer-footer-actions/);
     expect(css).not.toMatch(/\.viewer-footer-action/);
     expect(css).toMatch(/\.app-shell\s*\{[^}]*width:\s*100dvw/);
@@ -32,7 +33,7 @@ describe("desktop viewer layout CSS", () => {
   it("keeps the dark theme tokens after CSS file decomposition", () => {
     const rootBlock = css.match(/:root\s*\{[^}]*\}/)?.[0] ?? "";
     const bodyBlock = css.match(/body\s*\{[^}]*\}/)?.[0] ?? "";
-    const htmlRootBlock = css.match(/html,\n#root\s*\{[^}]*\}/)?.[0] ?? "";
+    const htmlRootBlock = css.match(/html,\s*#root\s*\{[^}]*\}/)?.[0] ?? "";
 
     expect(rootBlock).toMatch(/color-scheme:\s*dark/);
     expect(rootBlock).toMatch(/--bg:\s*#0b0f10/);
