@@ -1,6 +1,7 @@
 //! PrismLauncher discovery and local Minecraft asset indexing helpers.
 
 mod asset_index;
+mod blockstate;
 mod prism;
 
 use std::sync::{
@@ -11,7 +12,7 @@ use std::sync::{
 pub use asset_index::{
     build_prism_asset_index, build_prism_asset_index_with_events, AssetIndexEvent,
     AssetIndexProgress, BlockAssetSample, PrismAssetIndexReport, PrismAssetIndexRequest,
-    TextureAtlasEntry, TextureAtlasMetadata,
+    TextureAtlasEntry, TextureAtlasMetadata, PRISM_REGISTRY_SCHEMA_VERSION,
 };
 pub use prism::{
     validate_prism_root, PrismInstanceDescriptor, PrismInstanceStatus, PrismRootValidation,

@@ -7,7 +7,7 @@ use std::time::Duration;
 use mpb_agent::{start_streamable_http_server, AgentServer, AgentStatus, McpHttpServerHandle};
 use mpb_assets::{
     build_prism_asset_index, validate_prism_root, PrismAssetIndexRequest, PrismInstanceDescriptor,
-    PrismRootValidation,
+    PrismRootValidation, PRISM_REGISTRY_SCHEMA_VERSION,
 };
 use mpb_export::{write_scheme_export, ExportArtifact, ExportFormat};
 use mpb_storage::{
@@ -814,7 +814,7 @@ fn registry_report_is_current(diagnostics_dir: &Path, instance: &PrismInstanceDe
     if report
         .get("schemaVersion")
         .and_then(serde_json::Value::as_u64)
-        != Some(4)
+        != Some(PRISM_REGISTRY_SCHEMA_VERSION as u64)
     {
         return false;
     }
@@ -1131,4 +1131,64 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("failed to run Minecraft Pack Builder desktop app");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mpb_assets::PrismInstanceStatus as AssetPrismInstanceStatus;
+    use serde_json::json;
+    use tempfile::tempdir;
+
+    fn prism_instance(root: &Path, identity_fingerprint: &str) -> PrismInstanceDescriptor {
+        PrismInstanceDescriptor {
+            instance_id: "prod-pack".to_string(),
+            display_name: "Prod Pack".to_string(),
+            instance_path: root.join("PrismLauncher/instances/prod-pack"),
+            minecraft_dir: root.join("PrismLauncher/instances/prod-pack/.minecraft"),
+            minecraft_version: Some("1.20.1".to_string()),
+            loader: Some("Forge".to_string()),
+            loader_version: Some("47.4.20".to_string()),
+            identity_fingerprint: identity_fingerprint.to_string(),
+            content_fingerprint: "prod-pack-content".to_string(),
+            status: AssetPrismInstanceStatus::Pending,
+            status_message: None,
+        }
+    }
+
+    fn write_registry_report(
+        diagnostics_dir: &Path,
+        identity_fingerprint: &str,
+        schema_version: u64,
+    ) {
+        let path = registry_report_path(diagnostics_dir, identity_fingerprint);
+        std::fs::create_dir_all(diagnostics_dir).expect("diagnostics dir");
+        std::fs::write(
+            path,
+            json!({
+                "schemaVersion": schema_version,
+                "runtimeStatus": "ready"
+            })
+            .to_string(),
+        )
+        .expect("registry report");
+    }
+
+    #[test]
+    fn registry_report_freshness_uses_current_asset_schema_version() {
+        let temp = tempdir().expect("temp dir");
+        let diagnostics_dir = temp.path().join("diagnostics");
+        let current = prism_instance(temp.path(), "current-identity");
+        let stale = prism_instance(temp.path(), "stale-identity");
+
+        write_registry_report(
+            &diagnostics_dir,
+            &current.identity_fingerprint,
+            PRISM_REGISTRY_SCHEMA_VERSION as u64,
+        );
+        write_registry_report(&diagnostics_dir, &stale.identity_fingerprint, 4);
+
+        assert!(registry_report_is_current(&diagnostics_dir, &current));
+        assert!(!registry_report_is_current(&diagnostics_dir, &stale));
+    }
 }

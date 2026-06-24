@@ -105,6 +105,12 @@ fn enriches_render_materials_from_registry_report_without_faking_stack_sizes() {
                     {
                         "from": [7, 0, 7],
                         "to": [9, 10, 9],
+                        "rotation": {
+                            "origin": [8, 8, 8],
+                            "axis": "y",
+                            "angle": 45,
+                            "rescale": false
+                        },
                         "faceTexturePaths": {
                             "north": "/tmp/furnace_side.png",
                             "south": "/tmp/furnace_side.png",
@@ -112,6 +118,10 @@ fn enriches_render_materials_from_registry_report_without_faking_stack_sizes() {
                             "west": "/tmp/furnace_side.png",
                             "up": "/tmp/furnace_top.png",
                             "down": "/tmp/furnace_top.png"
+                        },
+                        "faceUvs": {
+                            "east": [7, 0, 9, 16],
+                            "west": [7, 0, 9, 16]
                         }
                     }
                 ]
@@ -164,9 +174,21 @@ fn enriches_render_materials_from_registry_report_without_faking_stack_sizes() {
     assert_eq!(furnace.model_elements.len(), 1);
     assert_eq!(furnace.model_elements[0].from, [7.0, 0.0, 7.0]);
     assert_eq!(furnace.model_elements[0].to, [9.0, 10.0, 9.0]);
+    let rotation = furnace.model_elements[0]
+        .rotation
+        .as_ref()
+        .expect("model element rotation");
+    assert_eq!(rotation.origin, [8.0, 8.0, 8.0]);
+    assert_eq!(rotation.axis, "y");
+    assert_eq!(rotation.angle, 45.0);
+    assert!(!rotation.rescale);
     assert_eq!(
         furnace.model_elements[0].face_texture_paths.up.as_deref(),
         Some("/tmp/furnace_top.png")
+    );
+    assert_eq!(
+        furnace.model_elements[0].face_uvs.east,
+        Some([7.0, 0.0, 9.0, 16.0])
     );
 
     let casing = scene
@@ -177,4 +199,177 @@ fn enriches_render_materials_from_registry_report_without_faking_stack_sizes() {
     assert_eq!(casing.display_name, "Andesite Casing");
     assert_eq!(casing.max_stack_size, None);
     assert_eq!(casing.stack_count, None);
+}
+
+#[test]
+fn selects_render_model_variant_from_block_states() {
+    let registry = BlockRegistry::from_block_ids(["minecraft:wall_torch".to_string()]);
+    let mut scheme = Scheme::new(
+        "Torch Variant",
+        Dimensions::new(3, 3, 3).expect("dimensions"),
+    );
+    scheme
+        .apply(
+            &registry,
+            SchemeOperation::Place(BlockPlacement::new(
+                Coordinate::new(1, 1, 1),
+                "minecraft:wall_torch",
+                [("facing", "east")],
+                StageRef::Unassigned,
+            )),
+        )
+        .expect("place wall torch");
+    let report = serde_json::json!({
+        "runtimeStatus": "ready",
+        "blocks": [
+            {
+                "identifier": "minecraft:wall_torch",
+                "displayName": "Wall Torch",
+                "itemId": "minecraft:torch",
+                "maxStackSize": 64,
+                "modelVariants": [
+                    {
+                        "condition": { "anyOf": [{ "facing": ["north"] }] },
+                        "model": "minecraft:block/wall_torch",
+                        "y": 0,
+                        "uvLock": true,
+                        "modelElements": [
+                            {
+                                "from": [7, 3, 0],
+                                "to": [9, 13, 2],
+                                "faceTexturePaths": { "north": "/tmp/torch.png" },
+                                "faceUvs": { "north": [7, 3, 9, 13] }
+                            }
+                        ]
+                    },
+                    {
+                        "condition": { "anyOf": [{ "facing": ["east"] }] },
+                        "model": "minecraft:block/wall_torch",
+                        "y": 90,
+                        "uvLock": true,
+                        "modelElements": [
+                            {
+                                "from": [7, 3, 0],
+                                "to": [9, 13, 2],
+                                "faceTexturePaths": { "north": "/tmp/torch.png" },
+                                "faceUvs": { "north": [7, 3, 9, 13] }
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    });
+
+    let scene = render_scene_from_scheme_with_registry_report(42, &scheme, Some(&report));
+    let torch = scene
+        .blocks
+        .iter()
+        .find(|block| block.block_id == "minecraft:wall_torch")
+        .expect("wall torch render block");
+
+    assert_eq!(torch.model_elements.len(), 1);
+    assert_eq!(
+        torch.model_elements[0]
+            .model_rotation
+            .as_ref()
+            .map(|rotation| (rotation.x, rotation.y, rotation.uv_lock,)),
+        Some((0.0, 90.0, true))
+    );
+    assert_eq!(
+        torch.model_elements[0].face_uvs.north,
+        Some([7.0, 3.0, 9.0, 13.0])
+    );
+}
+
+#[test]
+fn combines_matching_multipart_render_model_variants() {
+    let registry = BlockRegistry::from_block_ids(["minecraft:oak_fence".to_string()]);
+    let mut scheme = Scheme::new(
+        "Fence Variant",
+        Dimensions::new(3, 3, 3).expect("dimensions"),
+    );
+    scheme
+        .apply(
+            &registry,
+            SchemeOperation::Place(BlockPlacement::new(
+                Coordinate::new(1, 1, 1),
+                "minecraft:oak_fence",
+                [
+                    ("north", "true"),
+                    ("east", "true"),
+                    ("south", "false"),
+                    ("west", "false"),
+                ],
+                StageRef::Unassigned,
+            )),
+        )
+        .expect("place fence");
+    let report = serde_json::json!({
+        "runtimeStatus": "ready",
+        "blocks": [
+            {
+                "identifier": "minecraft:oak_fence",
+                "displayName": "Oak Fence",
+                "modelVariantsAreMultipart": true,
+                "modelVariants": [
+                    {
+                        "model": "minecraft:block/oak_fence_post",
+                        "modelElements": [
+                            {
+                                "from": [6, 0, 6],
+                                "to": [10, 16, 10],
+                                "faceTexturePaths": { "north": "/tmp/planks.png" },
+                                "faceUvs": {}
+                            }
+                        ]
+                    },
+                    {
+                        "condition": { "anyOf": [{ "north": ["true"] }] },
+                        "model": "minecraft:block/oak_fence_side",
+                        "y": 0,
+                        "uvLock": true,
+                        "modelElements": [
+                            {
+                                "from": [7, 6, 0],
+                                "to": [9, 12, 8],
+                                "faceTexturePaths": { "north": "/tmp/planks.png" },
+                                "faceUvs": {}
+                            }
+                        ]
+                    },
+                    {
+                        "condition": { "anyOf": [{ "east": ["true"] }] },
+                        "model": "minecraft:block/oak_fence_side",
+                        "y": 90,
+                        "uvLock": true,
+                        "modelElements": [
+                            {
+                                "from": [7, 6, 0],
+                                "to": [9, 12, 8],
+                                "faceTexturePaths": { "north": "/tmp/planks.png" },
+                                "faceUvs": {}
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    });
+
+    let scene = render_scene_from_scheme_with_registry_report(42, &scheme, Some(&report));
+    let fence = scene
+        .blocks
+        .iter()
+        .find(|block| block.block_id == "minecraft:oak_fence")
+        .expect("fence render block");
+
+    assert_eq!(fence.model_elements.len(), 3);
+    assert_eq!(
+        fence.model_elements[2]
+            .model_rotation
+            .as_ref()
+            .map(|rotation| rotation.y),
+        Some(90.0)
+    );
 }

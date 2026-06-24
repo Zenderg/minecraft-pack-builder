@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use mpb_core::{Scheme, StageRef};
+use mpb_core::{Scheme, SchemeBlock, StageRef};
 use mpb_render::{prepare_render_chunks, RenderOptions};
 use serde::Serialize;
 use serde_json::Value;
@@ -49,11 +49,17 @@ pub struct RenderMaterialDto {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FaceTexturePathsDto {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub north: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub south: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub east: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub west: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub up: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub down: Option<String>,
 }
 
@@ -62,7 +68,44 @@ pub struct FaceTexturePathsDto {
 pub struct ModelElementDto {
     pub from: [f32; 3],
     pub to: [f32; 3],
+    pub rotation: Option<ModelElementRotationDto>,
+    pub model_rotation: Option<ModelRotationDto>,
     pub face_texture_paths: FaceTexturePathsDto,
+    pub face_uvs: FaceUvsDto,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelElementRotationDto {
+    pub origin: [f32; 3],
+    pub axis: String,
+    pub angle: f32,
+    pub rescale: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelRotationDto {
+    pub x: f32,
+    pub y: f32,
+    pub uv_lock: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FaceUvsDto {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub north: Option<[f32; 4]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub south: Option<[f32; 4]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub east: Option<[f32; 4]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub west: Option<[f32; 4]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub up: Option<[f32; 4]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub down: Option<[f32; 4]>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -147,6 +190,7 @@ pub fn render_scene_from_scheme_with_registry_report(
                     .get(&block.block_id)
                     .cloned()
                     .unwrap_or_default();
+                let render_model = metadata.render_model_for_block(block);
                 RenderBlockDto {
                     coordinate: [coordinate.x, coordinate.y, coordinate.z],
                     block_id: block.block_id.clone(),
@@ -156,9 +200,9 @@ pub fn render_scene_from_scheme_with_registry_report(
                     },
                     color: block_color(&block.block_id).to_string(),
                     alpha: block_alpha(&block.block_id),
-                    texture_path: metadata.texture_path.clone(),
-                    face_texture_paths: metadata.face_texture_paths,
-                    model_elements: metadata.model_elements,
+                    texture_path: render_model.texture_path,
+                    face_texture_paths: render_model.face_texture_paths,
+                    model_elements: render_model.model_elements,
                 }
             })
             .collect(),
@@ -175,6 +219,102 @@ struct RegistryBlockMetadata {
     texture_path: Option<String>,
     face_texture_paths: Option<FaceTexturePathsDto>,
     model_elements: Vec<ModelElementDto>,
+    model_variants_are_multipart: bool,
+    model_variants: Vec<RegistryModelVariant>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct RegistryRenderModel {
+    texture_path: Option<String>,
+    face_texture_paths: Option<FaceTexturePathsDto>,
+    model_elements: Vec<ModelElementDto>,
+}
+
+#[derive(Debug, Clone)]
+struct RegistryModelVariant {
+    condition: Option<RegistryModelCondition>,
+    x: f32,
+    y: f32,
+    uv_lock: bool,
+    texture_path: Option<String>,
+    face_texture_paths: Option<FaceTexturePathsDto>,
+    model_elements: Vec<ModelElementDto>,
+}
+
+#[derive(Debug, Clone)]
+struct RegistryModelCondition {
+    any_of: Vec<BTreeMap<String, Vec<String>>>,
+}
+
+impl RegistryBlockMetadata {
+    fn render_model_for_block(&self, block: &SchemeBlock) -> RegistryRenderModel {
+        if self.model_variants.is_empty() {
+            return RegistryRenderModel {
+                texture_path: self.texture_path.clone(),
+                face_texture_paths: self.face_texture_paths.clone(),
+                model_elements: self.model_elements.clone(),
+            };
+        }
+
+        let matching = self
+            .model_variants
+            .iter()
+            .filter(|variant| variant_matches(variant.condition.as_ref(), &block.states))
+            .collect::<Vec<_>>();
+        let selected = if self.model_variants_are_multipart {
+            matching
+        } else {
+            matching.into_iter().take(1).collect()
+        };
+        if selected.is_empty() {
+            return RegistryRenderModel {
+                texture_path: self.texture_path.clone(),
+                face_texture_paths: self.face_texture_paths.clone(),
+                model_elements: self.model_elements.clone(),
+            };
+        }
+
+        let mut model_elements = Vec::new();
+        for variant in &selected {
+            let rotation = Some(ModelRotationDto {
+                x: variant.x,
+                y: variant.y,
+                uv_lock: variant.uv_lock,
+            });
+            model_elements.extend(variant.model_elements.iter().cloned().map(|mut element| {
+                element.model_rotation = rotation.clone();
+                element
+            }));
+        }
+
+        RegistryRenderModel {
+            texture_path: selected
+                .first()
+                .and_then(|variant| variant.texture_path.clone())
+                .or_else(|| self.texture_path.clone()),
+            face_texture_paths: selected
+                .first()
+                .and_then(|variant| variant.face_texture_paths.clone())
+                .or_else(|| self.face_texture_paths.clone()),
+            model_elements,
+        }
+    }
+}
+
+fn variant_matches(
+    condition: Option<&RegistryModelCondition>,
+    states: &BTreeMap<String, String>,
+) -> bool {
+    let Some(condition) = condition else {
+        return true;
+    };
+    condition.any_of.iter().any(|expected_states| {
+        expected_states.iter().all(|(name, allowed_values)| {
+            states
+                .get(name)
+                .is_some_and(|value| allowed_values.iter().any(|allowed| allowed == value))
+        })
+    })
 }
 
 fn render_materials(
@@ -245,6 +385,17 @@ fn registry_block_metadata(report: &Value) -> BTreeMap<String, RegistryBlockMeta
                                     elements.iter().filter_map(registry_model_element).collect()
                                 })
                                 .unwrap_or_default(),
+                            model_variants_are_multipart: block
+                                .get("modelVariantsAreMultipart")
+                                .and_then(Value::as_bool)
+                                .unwrap_or(false),
+                            model_variants: block
+                                .get("modelVariants")
+                                .and_then(Value::as_array)
+                                .map(|variants| {
+                                    variants.iter().filter_map(registry_model_variant).collect()
+                                })
+                                .unwrap_or_default(),
                         },
                     ))
                 })
@@ -286,7 +437,128 @@ fn registry_model_element(value: &Value) -> Option<ModelElementDto> {
     Some(ModelElementDto {
         from: registry_model_vector(value.get("from")?)?,
         to: registry_model_vector(value.get("to")?)?,
+        rotation: value
+            .get("rotation")
+            .and_then(registry_model_element_rotation),
+        model_rotation: value.get("modelRotation").and_then(registry_model_rotation),
         face_texture_paths: registry_face_texture_paths(value.get("faceTexturePaths")?),
+        face_uvs: value
+            .get("faceUvs")
+            .map(registry_face_uvs)
+            .unwrap_or_else(empty_face_uvs),
+    })
+}
+
+fn registry_model_variant(value: &Value) -> Option<RegistryModelVariant> {
+    Some(RegistryModelVariant {
+        condition: value.get("condition").and_then(registry_model_condition),
+        x: value.get("x").and_then(Value::as_f64).unwrap_or(0.0) as f32,
+        y: value.get("y").and_then(Value::as_f64).unwrap_or(0.0) as f32,
+        uv_lock: value
+            .get("uvLock")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        texture_path: value
+            .get("texturePath")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        face_texture_paths: value
+            .get("faceTexturePaths")
+            .map(registry_face_texture_paths),
+        model_elements: value
+            .get("modelElements")
+            .and_then(Value::as_array)
+            .map(|elements| elements.iter().filter_map(registry_model_element).collect())
+            .unwrap_or_default(),
+    })
+}
+
+fn registry_model_condition(value: &Value) -> Option<RegistryModelCondition> {
+    let any_of = value
+        .get("anyOf")?
+        .as_array()?
+        .iter()
+        .filter_map(|condition| {
+            let object = condition.as_object()?;
+            Some(
+                object
+                    .iter()
+                    .filter_map(|(name, values)| {
+                        let allowed_values = values
+                            .as_array()?
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>();
+                        (!allowed_values.is_empty()).then_some((name.clone(), allowed_values))
+                    })
+                    .collect::<BTreeMap<_, _>>(),
+            )
+        })
+        .filter(|states| !states.is_empty())
+        .collect::<Vec<_>>();
+    (!any_of.is_empty()).then_some(RegistryModelCondition { any_of })
+}
+
+fn registry_model_rotation(value: &Value) -> Option<ModelRotationDto> {
+    Some(ModelRotationDto {
+        x: value.get("x").and_then(Value::as_f64).unwrap_or(0.0) as f32,
+        y: value.get("y").and_then(Value::as_f64).unwrap_or(0.0) as f32,
+        uv_lock: value
+            .get("uvLock")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    })
+}
+
+fn registry_face_uvs(value: &Value) -> FaceUvsDto {
+    FaceUvsDto {
+        north: value.get("north").and_then(registry_model_face_uv),
+        south: value.get("south").and_then(registry_model_face_uv),
+        east: value.get("east").and_then(registry_model_face_uv),
+        west: value.get("west").and_then(registry_model_face_uv),
+        up: value.get("up").and_then(registry_model_face_uv),
+        down: value.get("down").and_then(registry_model_face_uv),
+    }
+}
+
+fn empty_face_uvs() -> FaceUvsDto {
+    FaceUvsDto {
+        north: None,
+        south: None,
+        east: None,
+        west: None,
+        up: None,
+        down: None,
+    }
+}
+
+fn registry_model_face_uv(value: &Value) -> Option<[f32; 4]> {
+    let array = value.as_array()?;
+    let [u0, v0, u1, v1] = array.as_slice() else {
+        return None;
+    };
+    Some([
+        u0.as_f64()? as f32,
+        v0.as_f64()? as f32,
+        u1.as_f64()? as f32,
+        v1.as_f64()? as f32,
+    ])
+}
+
+fn registry_model_element_rotation(value: &Value) -> Option<ModelElementRotationDto> {
+    let axis = value.get("axis")?.as_str()?;
+    if !matches!(axis, "x" | "y" | "z") {
+        return None;
+    }
+    Some(ModelElementRotationDto {
+        origin: registry_model_vector(value.get("origin")?)?,
+        axis: axis.to_string(),
+        angle: value.get("angle")?.as_f64()? as f32,
+        rescale: value
+            .get("rescale")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     })
 }
 

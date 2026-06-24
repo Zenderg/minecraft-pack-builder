@@ -10,7 +10,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{AssetError, CancellationToken};
 
-const PRISM_REGISTRY_SCHEMA_VERSION: u32 = 4;
+use crate::blockstate::{
+    collect_blockstate_models, BlockstateModelCondition, BlockstateModelReference,
+};
+
+pub const PRISM_REGISTRY_SCHEMA_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrismAssetIndexRequest {
@@ -89,6 +93,21 @@ pub struct BlockAssetSample {
     pub texture_path: Option<PathBuf>,
     pub face_texture_paths: Option<FaceTexturePaths>,
     pub model_elements: Vec<ModelElementSample>,
+    pub model_variants_are_multipart: bool,
+    pub model_variants: Vec<BlockModelVariantSample>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockModelVariantSample {
+    pub condition: Option<BlockstateModelCondition>,
+    pub model: Option<String>,
+    pub x: Option<f32>,
+    pub y: Option<f32>,
+    pub uv_lock: bool,
+    pub texture_path: Option<PathBuf>,
+    pub face_texture_paths: Option<FaceTexturePaths>,
+    pub model_elements: Vec<ModelElementSample>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,7 +126,29 @@ pub struct FaceTexturePaths {
 pub struct ModelElementSample {
     pub from: [f32; 3],
     pub to: [f32; 3],
+    pub rotation: Option<ModelElementRotationSample>,
     pub face_texture_paths: FaceTexturePaths,
+    pub face_uvs: FaceUvs,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelElementRotationSample {
+    pub origin: [f32; 3],
+    pub axis: String,
+    pub angle: f32,
+    pub rescale: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FaceUvs {
+    pub north: Option<[f32; 4]>,
+    pub south: Option<[f32; 4]>,
+    pub east: Option<[f32; 4]>,
+    pub west: Option<[f32; 4]>,
+    pub up: Option<[f32; 4]>,
+    pub down: Option<[f32; 4]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1208,7 +1249,7 @@ impl AssetCollector {
             BlockstateAsset {
                 identifier,
                 namespace: asset_path.namespace,
-                models: collect_string_fields(&value, "model"),
+                models: collect_blockstate_models(&value),
             },
         );
         Ok(())
@@ -1261,23 +1302,24 @@ impl AssetCollector {
                     .as_ref()
                     .and_then(|id| self.items.get(id))
                     .and_then(|item| item.max_stack_size);
-                let model = blockstate
+                let model_variants = blockstate
                     .models
+                    .models
+                    .iter()
+                    .map(|variant| self.block_model_variant_sample(blockstate, variant))
+                    .collect::<Vec<_>>();
+                let model = model_variants
                     .first()
-                    .map(|model| normalize_asset_reference(model, &blockstate.namespace));
-                let resolved_model = model
-                    .as_ref()
-                    .and_then(|model_id| self.resolved_model_textures(model_id));
-                let texture_path = resolved_model
-                    .as_ref()
-                    .and_then(|resolved| resolved.primary_texture_id())
-                    .and_then(|texture_id| self.textures.get(&texture_id).cloned());
-                let face_texture_paths = resolved_model
-                    .as_ref()
-                    .and_then(|resolved| resolved.face_paths(&self.textures));
-                let model_elements = resolved_model
-                    .as_ref()
-                    .map(|resolved| resolved.element_samples(&self.textures))
+                    .and_then(|variant| variant.model.clone());
+                let texture_path = model_variants
+                    .first()
+                    .and_then(|variant| variant.texture_path.clone());
+                let face_texture_paths = model_variants
+                    .first()
+                    .and_then(|variant| variant.face_texture_paths.clone());
+                let model_elements = model_variants
+                    .first()
+                    .map(|variant| variant.model_elements.clone())
                     .unwrap_or_default();
                 let language_key = format!(
                     "block.{}.{}",
@@ -1302,9 +1344,46 @@ impl AssetCollector {
                     texture_path,
                     face_texture_paths,
                     model_elements,
+                    model_variants_are_multipart: blockstate.models.variants_are_multipart,
+                    model_variants,
                 }
             })
             .collect()
+    }
+
+    fn block_model_variant_sample(
+        &self,
+        blockstate: &BlockstateAsset,
+        variant: &BlockstateModelReference,
+    ) -> BlockModelVariantSample {
+        let model = Some(normalize_asset_reference(
+            &variant.model,
+            &blockstate.namespace,
+        ));
+        let resolved_model = model
+            .as_ref()
+            .and_then(|model_id| self.resolved_model_textures(model_id));
+        let texture_path = resolved_model
+            .as_ref()
+            .and_then(|resolved| resolved.primary_texture_id())
+            .and_then(|texture_id| self.textures.get(&texture_id).cloned());
+        let face_texture_paths = resolved_model
+            .as_ref()
+            .and_then(|resolved| resolved.face_paths(&self.textures));
+        let model_elements = resolved_model
+            .as_ref()
+            .map(|resolved| resolved.element_samples(&self.textures))
+            .unwrap_or_default();
+        BlockModelVariantSample {
+            condition: variant.condition.clone(),
+            model,
+            x: variant.x,
+            y: variant.y,
+            uv_lock: variant.uv_lock,
+            texture_path,
+            face_texture_paths,
+            model_elements,
+        }
     }
 
     fn resolved_model_textures(&self, model_id: &str) -> Option<ResolvedModelTextures> {
@@ -1350,7 +1429,7 @@ impl AssetCollector {
 struct BlockstateAsset {
     identifier: String,
     namespace: String,
-    models: Vec<String>,
+    models: crate::blockstate::BlockstateModelReferences,
 }
 
 struct ModelAsset {
@@ -1364,7 +1443,17 @@ struct ModelAsset {
 struct ModelElementAsset {
     from: [f32; 3],
     to: [f32; 3],
+    rotation: Option<ModelElementRotationAsset>,
     face_textures: BTreeMap<BlockFace, String>,
+    face_uvs: BTreeMap<BlockFace, [f32; 4]>,
+}
+
+#[derive(Debug, Clone)]
+struct ModelElementRotationAsset {
+    origin: [f32; 3],
+    axis: String,
+    angle: f32,
+    rescale: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -1458,7 +1547,23 @@ impl ResolvedModelTextures {
                 ModelElementSample {
                     from: element.from,
                     to: element.to,
+                    rotation: element.rotation.as_ref().map(|rotation| {
+                        ModelElementRotationSample {
+                            origin: rotation.origin,
+                            axis: rotation.axis.clone(),
+                            angle: rotation.angle,
+                            rescale: rotation.rescale,
+                        }
+                    }),
                     face_texture_paths,
+                    face_uvs: FaceUvs {
+                        north: element.face_uvs.get(&BlockFace::North).copied(),
+                        south: element.face_uvs.get(&BlockFace::South).copied(),
+                        east: element.face_uvs.get(&BlockFace::East).copied(),
+                        west: element.face_uvs.get(&BlockFace::West).copied(),
+                        up: element.face_uvs.get(&BlockFace::Up).copied(),
+                        down: element.face_uvs.get(&BlockFace::Down).copied(),
+                    },
                 }
             })
             .collect()
@@ -1533,33 +1638,6 @@ fn read_json_bytes(bytes: &[u8]) -> Result<serde_json::Value, AssetError> {
         .map_err(|error| AssetError::InvalidAssetIndex(error.to_string()))
 }
 
-fn collect_string_fields(value: &serde_json::Value, field: &str) -> Vec<String> {
-    let mut values = Vec::new();
-    collect_string_fields_into(value, field, &mut values);
-    values
-}
-
-fn collect_string_fields_into(value: &serde_json::Value, field: &str, values: &mut Vec<String>) {
-    match value {
-        serde_json::Value::Object(object) => {
-            for (key, value) in object {
-                if key == field {
-                    if let Some(text) = value.as_str() {
-                        values.push(text.to_string());
-                    }
-                }
-                collect_string_fields_into(value, field, values);
-            }
-        }
-        serde_json::Value::Array(array) => {
-            for item in array {
-                collect_string_fields_into(item, field, values);
-            }
-        }
-        _ => {}
-    }
-}
-
 fn collect_model_textures(value: &serde_json::Value) -> BTreeMap<String, String> {
     value
         .get("textures")
@@ -1624,13 +1702,40 @@ fn collect_model_elements(value: &serde_json::Value) -> Vec<ModelElementAsset> {
             if face_textures.is_empty() {
                 return None;
             }
+            let face_uvs = face_object
+                .iter()
+                .filter_map(|(face_name, face_value)| {
+                    let face = parse_block_face(face_name)?;
+                    let uv = parse_model_face_uv(face_value.get("uv")?)?;
+                    Some((face, uv))
+                })
+                .collect::<BTreeMap<_, _>>();
             Some(ModelElementAsset {
                 from,
                 to,
+                rotation: collect_model_element_rotation(element),
                 face_textures,
+                face_uvs,
             })
         })
         .collect()
+}
+
+fn collect_model_element_rotation(value: &serde_json::Value) -> Option<ModelElementRotationAsset> {
+    let rotation = value.get("rotation")?;
+    let axis = rotation.get("axis")?.as_str()?;
+    if !matches!(axis, "x" | "y" | "z") {
+        return None;
+    }
+    Some(ModelElementRotationAsset {
+        origin: parse_model_vector(rotation.get("origin")?)?,
+        axis: axis.to_string(),
+        angle: rotation.get("angle")?.as_f64()? as f32,
+        rescale: rotation
+            .get("rescale")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+    })
 }
 
 fn parse_model_vector(value: &serde_json::Value) -> Option<[f32; 3]> {
@@ -1639,6 +1744,19 @@ fn parse_model_vector(value: &serde_json::Value) -> Option<[f32; 3]> {
         return None;
     };
     Some([x.as_f64()? as f32, y.as_f64()? as f32, z.as_f64()? as f32])
+}
+
+fn parse_model_face_uv(value: &serde_json::Value) -> Option<[f32; 4]> {
+    let array = value.as_array()?;
+    let [u0, v0, u1, v1] = array.as_slice() else {
+        return None;
+    };
+    Some([
+        u0.as_f64()? as f32,
+        v0.as_f64()? as f32,
+        u1.as_f64()? as f32,
+        v1.as_f64()? as f32,
+    ])
 }
 
 fn parse_block_face(value: &str) -> Option<BlockFace> {

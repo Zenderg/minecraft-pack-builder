@@ -29,8 +29,26 @@ export type FaceTexturePaths = {
 export type RenderModelElement = {
   from: [number, number, number];
   to: [number, number, number];
+  rotation?: RenderModelElementRotation | null;
+  modelRotation?: RenderModelRotation | null;
   faceTexturePaths: FaceTexturePaths;
+  faceUvs?: FaceUvs | null;
 };
+
+export type RenderModelElementRotation = {
+  origin: [number, number, number];
+  axis: "x" | "y" | "z";
+  angle: number;
+  rescale: boolean;
+};
+
+export type RenderModelRotation = {
+  x: number;
+  y: number;
+  uvLock: boolean;
+};
+
+export type FaceUvs = Partial<Record<keyof FaceTexturePaths, [number, number, number, number] | null>>;
 
 export type RenderChunkSummary = {
   coordinate: [number, number, number];

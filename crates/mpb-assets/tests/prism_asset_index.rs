@@ -40,7 +40,7 @@ fn builds_registry_report_from_prism_mod_jars() {
         build_prism_asset_index(request(temp.path(), &minecraft_dir)).expect("Prism asset index");
 
     assert_eq!(report.status, "ready");
-    assert_eq!(report.schema_version, 4);
+    assert_eq!(report.schema_version, 5);
     assert_eq!(report.static_status, "ready");
     assert_eq!(report.runtime_status, "unavailable");
     assert_eq!(report.instance_id, "aoc");
@@ -303,9 +303,15 @@ fn resolves_model_parent_elements_for_non_full_cube_blocks() {
                         {
                             "from": [7, 0, 0],
                             "to": [9, 16, 16],
+                            "rotation": {
+                                "origin": [8, 8, 8],
+                                "axis": "y",
+                                "angle": 45,
+                                "rescale": false
+                            },
                             "faces": {
-                                "west": { "texture": "#torch" },
-                                "east": { "texture": "#torch" }
+                                "west": { "texture": "#torch", "uv": [7, 0, 9, 16] },
+                                "east": { "texture": "#torch", "uv": [7, 0, 9, 16] }
                             }
                         }
                     ]
@@ -335,6 +341,19 @@ fn resolves_model_parent_elements_for_non_full_cube_blocks() {
     assert_eq!(torch.model_elements[0].to, [9.0, 10.0, 9.0]);
     assert_eq!(torch.model_elements[1].from, [7.0, 0.0, 0.0]);
     assert_eq!(torch.model_elements[1].to, [9.0, 16.0, 16.0]);
+    assert_eq!(
+        torch.model_elements[1].rotation.as_ref().map(|rotation| (
+            rotation.origin,
+            rotation.axis.as_str(),
+            rotation.angle,
+            rotation.rescale,
+        )),
+        Some(([8.0, 8.0, 8.0], "y", 45.0, false)),
+    );
+    assert_eq!(
+        torch.model_elements[1].face_uvs.east,
+        Some([7.0, 0.0, 9.0, 16.0])
+    );
     assert!(torch.model_elements[0]
         .face_texture_paths
         .up
@@ -345,6 +364,136 @@ fn resolves_model_parent_elements_for_non_full_cube_blocks() {
         .east
         .as_ref()
         .is_some_and(|path| std::fs::read_to_string(path).expect("torch texture") == "torch"));
+}
+
+#[test]
+fn preserves_blockstate_variant_conditions_and_rotations() {
+    let temp = tempdir().expect("temp dir");
+    let minecraft_dir = temp.path().join("PrismLauncher/instances/aoc/.minecraft");
+    let mods_dir = minecraft_dir.join("mods");
+    std::fs::create_dir_all(&mods_dir).expect("mods dir");
+    write_zip(
+        &mods_dir.join("wall-torch.jar"),
+        &[
+            (
+                "assets/minecraft/blockstates/wall_torch.json",
+                r##"{
+                    "variants": {
+                        "facing=east": { "model": "minecraft:block/wall_torch", "y": 90, "uvlock": true },
+                        "facing=south": { "model": "minecraft:block/wall_torch", "y": 180, "uvlock": true },
+                        "facing=west": { "model": "minecraft:block/wall_torch", "y": 270, "uvlock": true },
+                        "facing=north": { "model": "minecraft:block/wall_torch" }
+                    }
+                }"##,
+            ),
+            (
+                "assets/minecraft/models/block/wall_torch.json",
+                r##"{
+                    "textures": { "torch": "minecraft:block/torch" },
+                    "elements": [
+                        {
+                            "from": [7, 3, 0],
+                            "to": [9, 13, 2],
+                            "faces": {
+                                "north": { "texture": "#torch", "uv": [7, 3, 9, 13] },
+                                "south": { "texture": "#torch", "uv": [7, 3, 9, 13] }
+                            }
+                        }
+                    ]
+                }"##,
+            ),
+            ("assets/minecraft/textures/block/torch.png", "torch"),
+        ],
+    );
+
+    let report =
+        build_prism_asset_index(request(temp.path(), &minecraft_dir)).expect("Prism asset index");
+    let wall_torch = report
+        .blocks
+        .iter()
+        .find(|block| block.identifier == "minecraft:wall_torch")
+        .expect("wall torch block");
+
+    assert_eq!(wall_torch.model_variants.len(), 4);
+    let east = wall_torch
+        .model_variants
+        .iter()
+        .find(|variant| {
+            variant.condition.as_ref().is_some_and(|condition| {
+                condition.any_of.iter().any(|states| {
+                    states
+                        .get("facing")
+                        .is_some_and(|values| values == &vec!["east".to_string()])
+                })
+            })
+        })
+        .expect("east-facing variant");
+    assert_eq!(east.model.as_deref(), Some("minecraft:block/wall_torch"));
+    assert_eq!(east.y, Some(90.0));
+    assert!(east.uv_lock);
+    assert_eq!(east.model_elements.len(), 1);
+    assert_eq!(
+        east.model_elements[0].face_uvs.north,
+        Some([7.0, 3.0, 9.0, 13.0])
+    );
+}
+
+#[test]
+fn preserves_multipart_blockstate_conditions_as_additive_variants() {
+    let temp = tempdir().expect("temp dir");
+    let minecraft_dir = temp.path().join("PrismLauncher/instances/aoc/.minecraft");
+    let mods_dir = minecraft_dir.join("mods");
+    std::fs::create_dir_all(&mods_dir).expect("mods dir");
+    write_zip(
+        &mods_dir.join("fence.jar"),
+        &[
+            (
+                "assets/minecraft/blockstates/oak_fence.json",
+                r##"{
+                    "multipart": [
+                        { "apply": { "model": "minecraft:block/oak_fence_post" } },
+                        { "when": { "north": "true" }, "apply": { "model": "minecraft:block/oak_fence_side", "y": 0, "uvlock": true } },
+                        { "when": { "OR": [{ "east": "true" }, { "west": "true" }] }, "apply": { "model": "minecraft:block/oak_fence_side", "y": 90, "uvlock": true } }
+                    ]
+                }"##,
+            ),
+            (
+                "assets/minecraft/models/block/oak_fence_post.json",
+                r##"{ "textures": { "all": "minecraft:block/oak_planks" }, "elements": [
+                    { "from": [6, 0, 6], "to": [10, 16, 10], "faces": { "north": { "texture": "#all" } } }
+                ] }"##,
+            ),
+            (
+                "assets/minecraft/models/block/oak_fence_side.json",
+                r##"{ "textures": { "all": "minecraft:block/oak_planks" }, "elements": [
+                    { "from": [7, 6, 0], "to": [9, 12, 8], "faces": { "north": { "texture": "#all" } } }
+                ] }"##,
+            ),
+            ("assets/minecraft/textures/block/oak_planks.png", "planks"),
+        ],
+    );
+
+    let report =
+        build_prism_asset_index(request(temp.path(), &minecraft_dir)).expect("Prism asset index");
+    let fence = report
+        .blocks
+        .iter()
+        .find(|block| block.identifier == "minecraft:oak_fence")
+        .expect("oak fence block");
+
+    assert!(fence.model_variants_are_multipart);
+    assert_eq!(fence.model_variants.len(), 3);
+    assert!(fence.model_variants[0].condition.is_none());
+    assert_eq!(fence.model_variants[2].y, Some(90.0));
+    assert_eq!(
+        fence.model_variants[2]
+            .condition
+            .as_ref()
+            .expect("OR condition")
+            .any_of
+            .len(),
+        2
+    );
 }
 
 #[test]
