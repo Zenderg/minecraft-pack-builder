@@ -1,6 +1,8 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use mpb_core::{
-    BlockPlacement, BlockRegistry, Coordinate, Dimensions, MaterialLine, Scheme, SchemeOperation,
-    StageRef,
+    BlockPlacement, BlockRegistry, Coordinate, Dimensions, MaterialLine, Scheme, SchemeError,
+    SchemeOperation, StageRef,
 };
 
 fn demo_scheme() -> (BlockRegistry, Scheme, u32, u32) {
@@ -204,4 +206,73 @@ fn construction_stage_visibility_is_cumulative() {
     assert_eq!(scheme.visible_blocks(StageRef::Stage(foundation)).len(), 1);
     assert_eq!(scheme.visible_blocks(StageRef::Stage(machinery)).len(), 2);
     assert_eq!(scheme.visible_blocks(StageRef::Unassigned).len(), 1);
+}
+
+#[test]
+fn registry_built_from_blockstate_definitions_validates_directional_states() {
+    let registry = BlockRegistry::from_block_state_definitions([(
+        "minecraft:furnace".to_string(),
+        BTreeMap::from([(
+            "facing".to_string(),
+            BTreeSet::from([
+                "north".to_string(),
+                "south".to_string(),
+                "east".to_string(),
+                "west".to_string(),
+            ]),
+        )]),
+    )]);
+    let mut scheme = Scheme::new("Directional", Dimensions::new(2, 2, 2).expect("dimensions"));
+
+    scheme
+        .apply(
+            &registry,
+            SchemeOperation::Place(BlockPlacement::new(
+                Coordinate::new(0, 0, 0),
+                "minecraft:furnace",
+                [("facing", "north")],
+                StageRef::Unassigned,
+            )),
+        )
+        .expect("valid furnace facing");
+
+    let missing = scheme
+        .apply(
+            &registry,
+            SchemeOperation::Place(BlockPlacement::new(
+                Coordinate::new(1, 0, 0),
+                "minecraft:furnace",
+                [],
+                StageRef::Unassigned,
+            )),
+        )
+        .expect_err("missing facing is rejected");
+    assert!(matches!(missing, SchemeError::MissingBlockState { .. }));
+
+    let invalid = scheme
+        .apply(
+            &registry,
+            SchemeOperation::Place(BlockPlacement::new(
+                Coordinate::new(1, 0, 0),
+                "minecraft:furnace",
+                [("facing", "up")],
+                StageRef::Unassigned,
+            )),
+        )
+        .expect_err("invalid facing is rejected");
+    assert!(matches!(invalid, SchemeError::InvalidBlockState { .. }));
+
+    let unknown = scheme
+        .apply(
+            &registry,
+            SchemeOperation::Place(BlockPlacement::new(
+                Coordinate::new(1, 0, 0),
+                "minecraft:furnace",
+                [("facing", "south"), ("lit", "false")],
+                StageRef::Unassigned,
+            )),
+        )
+        .expect_err("unknown state is rejected");
+    assert!(matches!(unknown, SchemeError::UnknownBlockState { .. }));
+    assert_eq!(scheme.block_count(), 1);
 }

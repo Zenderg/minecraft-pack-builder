@@ -52,12 +52,38 @@ pub(crate) fn tool_definitions() -> Vec<Value> {
             vec![],
         ),
         tool_schema(
+            "summarize_scheme",
+            "Read a compact scheme overview: dimensions, filled bounds, stages, stage block counts, and top materials.",
+            json!({ "schemeId": integer_schema("Scheme id.") }),
+            vec!["schemeId"],
+        ),
+        tool_schema(
+            "search_blocks",
+            "Search block ids and display names in a ready Prism instance registry before placing blocks.",
+            json!({
+                "instanceId": integer_schema("Prism instance id."),
+                "query": string_schema("Case-insensitive block id or display-name search text."),
+                "limit": optional_integer_schema("Maximum results to return. Defaults to 20.")
+            }),
+            vec!["instanceId", "query"],
+        ),
+        tool_schema(
+            "get_block_definition",
+            "Inspect one block id, including valid block states and model variants for orientation-sensitive blocks.",
+            json!({
+                "instanceId": integer_schema("Prism instance id."),
+                "blockId": string_schema("Minecraft block identifier, for example minecraft:furnace.")
+            }),
+            vec!["instanceId", "blockId"],
+        ),
+        tool_schema(
             "place_block",
             "Place or replace one block.",
             json!({
                 "schemeId": integer_schema("Scheme id."),
                 "coordinate": vector3_schema("Block coordinate [x, y, z]."),
-                "block": block_schema()
+                "block": block_schema(),
+                "responseMode": response_mode_schema()
             }),
             vec!["schemeId", "coordinate", "block"],
         ),
@@ -66,7 +92,8 @@ pub(crate) fn tool_definitions() -> Vec<Value> {
             "Delete one block.",
             json!({
                 "schemeId": integer_schema("Scheme id."),
-                "coordinate": vector3_schema("Block coordinate [x, y, z].")
+                "coordinate": vector3_schema("Block coordinate [x, y, z]."),
+                "responseMode": response_mode_schema()
             }),
             vec!["schemeId", "coordinate"],
         ),
@@ -76,7 +103,8 @@ pub(crate) fn tool_definitions() -> Vec<Value> {
             json!({
                 "schemeId": integer_schema("Scheme id."),
                 "fromBlockId": string_schema("Existing block identifier to replace."),
-                "to": block_schema()
+                "to": block_schema(),
+                "responseMode": response_mode_schema()
             }),
             vec!["schemeId", "fromBlockId", "to"],
         ),
@@ -87,16 +115,33 @@ pub(crate) fn tool_definitions() -> Vec<Value> {
                 "schemeId": integer_schema("Scheme id."),
                 "from": vector3_schema("First area corner [x, y, z]."),
                 "to": vector3_schema("Opposite area corner [x, y, z]."),
-                "block": block_schema()
+                "block": block_schema(),
+                "responseMode": response_mode_schema()
             }),
             vec!["schemeId", "from", "to", "block"],
+        ),
+        tool_schema(
+            "apply_mutations",
+            "Apply an ordered array of place/delete/replace/bulk/stage-assignment mutations transactionally.",
+            json!({
+                "schemeId": integer_schema("Scheme id."),
+                "mutations": {
+                    "type": "array",
+                    "description": "Ordered mutations. If any mutation is invalid, none are saved.",
+                    "items": mutation_schema(),
+                    "minItems": 1
+                },
+                "responseMode": response_mode_schema()
+            }),
+            vec!["schemeId", "mutations"],
         ),
         tool_schema(
             "resize_scheme",
             "Resize the scheme if no existing blocks would be dropped.",
             json!({
                 "schemeId": integer_schema("Scheme id."),
-                "dimensions": vector3_schema("New dimensions [x, y, z].")
+                "dimensions": vector3_schema("New dimensions [x, y, z]."),
+                "responseMode": response_mode_schema()
             }),
             vec!["schemeId", "dimensions"],
         ),
@@ -126,7 +171,8 @@ pub(crate) fn tool_definitions() -> Vec<Value> {
                 "schemeId": integer_schema("Scheme id."),
                 "from": vector3_schema("First area corner [x, y, z]."),
                 "to": vector3_schema("Opposite area corner [x, y, z]."),
-                "stageId": nullable_integer_schema("Construction stage id, or null for Unassigned.")
+                "stageId": nullable_integer_schema("Construction stage id, or null for Unassigned."),
+                "responseMode": response_mode_schema()
             }),
             vec!["schemeId", "from", "to", "stageId"],
         ),
@@ -180,6 +226,10 @@ fn integer_schema(description: &str) -> Value {
     json!({ "type": "integer", "description": description })
 }
 
+fn optional_integer_schema(description: &str) -> Value {
+    integer_schema(description)
+}
+
 fn nullable_integer_schema(description: &str) -> Value {
     json!({
         "description": description,
@@ -214,6 +264,36 @@ fn block_schema() -> Value {
             "stageId": nullable_integer_schema("Construction stage id, or null for Unassigned.")
         },
         "required": ["blockId", "states", "stageId"],
+        "additionalProperties": false
+    })
+}
+
+fn response_mode_schema() -> Value {
+    json!({
+        "type": "string",
+        "enum": ["content", "summary"],
+        "description": "Return full scheme content, or a compact mutation summary. Defaults to content."
+    })
+}
+
+fn mutation_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "type": {
+                "type": "string",
+                "enum": ["placeBlock", "deleteBlock", "replaceBlocks", "bulkSetArea", "assignBlocksToStage", "resizeScheme"]
+            },
+            "coordinate": vector3_schema("Block coordinate [x, y, z] for placeBlock/deleteBlock."),
+            "block": block_schema(),
+            "fromBlockId": string_schema("Existing block identifier to replace."),
+            "toBlock": block_schema(),
+            "from": vector3_schema("First area corner [x, y, z]."),
+            "to": vector3_schema("Opposite area corner [x, y, z]."),
+            "stageId": nullable_integer_schema("Construction stage id, or null for Unassigned."),
+            "dimensions": vector3_schema("New dimensions [x, y, z].")
+        },
+        "required": ["type"],
         "additionalProperties": false
     })
 }

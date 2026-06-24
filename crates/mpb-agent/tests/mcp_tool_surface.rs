@@ -61,10 +61,14 @@ fn initializes_mcp_server_and_lists_full_phase_9_tool_surface() {
             "delete_scheme",
             "read_scheme_content",
             "read_current_selection",
+            "summarize_scheme",
+            "search_blocks",
+            "get_block_definition",
             "place_block",
             "delete_block",
             "replace_blocks",
             "bulk_set_area",
+            "apply_mutations",
             "resize_scheme",
             "create_stage",
             "rename_stage",
@@ -75,6 +79,183 @@ fn initializes_mcp_server_and_lists_full_phase_9_tool_surface() {
         ]
     );
     assert!(tools["result"]["tools"][0]["inputSchema"].is_object());
+}
+
+#[test]
+fn block_introspection_exposes_valid_directional_states() {
+    let server = AgentServer::new_test_fixture();
+
+    let search = call_tool(
+        &server,
+        1,
+        "search_blocks",
+        json!({ "instanceId": 1, "query": "furnace" }),
+    );
+    assert_eq!(search["isError"], false);
+    assert_eq!(
+        search["structuredContent"]["blocks"][0]["blockId"],
+        "minecraft:furnace"
+    );
+
+    let definition = call_tool(
+        &server,
+        2,
+        "get_block_definition",
+        json!({ "instanceId": 1, "blockId": "minecraft:furnace" }),
+    );
+    assert_eq!(definition["isError"], false);
+    assert_eq!(
+        definition["structuredContent"]["block"]["allowedStates"][0]["name"],
+        "facing"
+    );
+    assert_eq!(
+        definition["structuredContent"]["block"]["allowedStates"][0]["values"],
+        json!(["east", "north", "south", "west"])
+    );
+}
+
+#[test]
+fn mutating_tools_can_return_compact_summaries_without_full_block_lists() {
+    let server = AgentServer::new_test_fixture();
+
+    let response = call_tool(
+        &server,
+        1,
+        "place_block",
+        json!({
+            "schemeId": 10,
+            "coordinate": [4, 0, 0],
+            "block": {
+                "blockId": "minecraft:furnace",
+                "states": { "facing": "north" },
+                "stageId": null
+            },
+            "responseMode": "summary"
+        }),
+    );
+
+    assert_eq!(response["isError"], false);
+    let summary = &response["structuredContent"]["summary"];
+    assert_eq!(summary["schemeId"], 10);
+    assert_eq!(summary["blockCount"], 6);
+    assert_eq!(summary["changedCoordinateCount"], 1);
+    assert_eq!(summary["changedCoordinates"], json!([[4, 0, 0]]));
+    assert_eq!(summary["diagnostic"]["status"], "success");
+    assert_eq!(summary.get("blocks"), None);
+
+    let definition = call_tool(&server, 2, "read_scheme_content", json!({ "schemeId": 10 }));
+    let furnace = definition["structuredContent"]["blocks"]
+        .as_array()
+        .expect("blocks")
+        .iter()
+        .find(|block| block["blockId"] == "minecraft:furnace")
+        .expect("placed furnace");
+    assert_eq!(furnace["states"]["facing"], "north");
+}
+
+#[test]
+fn apply_mutations_is_transactional_and_reports_summary() {
+    let server = AgentServer::new_test_fixture();
+    let before = call_tool(&server, 1, "read_scheme_content", json!({ "schemeId": 10 }));
+    let before_count = before["structuredContent"]["blockCount"].clone();
+
+    let rejected = call_tool(
+        &server,
+        2,
+        "apply_mutations",
+        json!({
+            "schemeId": 10,
+            "responseMode": "summary",
+            "mutations": [
+                {
+                    "type": "placeBlock",
+                    "coordinate": [4, 0, 0],
+                    "block": {
+                        "blockId": "minecraft:furnace",
+                        "states": { "facing": "south" },
+                        "stageId": null
+                    }
+                },
+                {
+                    "type": "placeBlock",
+                    "coordinate": [5, 0, 0],
+                    "block": {
+                        "blockId": "minecraft:furnace",
+                        "states": { "facing": "up" },
+                        "stageId": null
+                    }
+                }
+            ]
+        }),
+    );
+
+    assert_eq!(rejected["isError"], true);
+    assert_eq!(
+        rejected["structuredContent"]["error"]["code"],
+        "invalid_block_state"
+    );
+    let after_rejected = call_tool(&server, 3, "read_scheme_content", json!({ "schemeId": 10 }));
+    assert_eq!(
+        after_rejected["structuredContent"]["blockCount"],
+        before_count
+    );
+
+    let accepted = call_tool(
+        &server,
+        4,
+        "apply_mutations",
+        json!({
+            "schemeId": 10,
+            "responseMode": "summary",
+            "mutations": [
+                {
+                    "type": "placeBlock",
+                    "coordinate": [4, 0, 0],
+                    "block": {
+                        "blockId": "minecraft:furnace",
+                        "states": { "facing": "south" },
+                        "stageId": null
+                    }
+                },
+                {
+                    "type": "deleteBlock",
+                    "coordinate": [3, 0, 0]
+                }
+            ]
+        }),
+    );
+
+    assert_eq!(accepted["isError"], false);
+    assert_eq!(
+        accepted["structuredContent"]["summary"]["changedCoordinateCount"],
+        2
+    );
+    assert_eq!(
+        accepted["structuredContent"]["summary"]["blockCount"],
+        before_count
+    );
+}
+
+#[test]
+fn summarize_scheme_returns_scan_friendly_overview() {
+    let server = AgentServer::new_test_fixture();
+
+    let response = call_tool(&server, 1, "summarize_scheme", json!({ "schemeId": 10 }));
+
+    assert_eq!(response["isError"], false);
+    assert_eq!(response["structuredContent"]["summary"]["schemeId"], 10);
+    assert_eq!(
+        response["structuredContent"]["summary"]["filledBounds"]["from"],
+        json!([0, 0, 0])
+    );
+    assert_eq!(
+        response["structuredContent"]["summary"]["stageBlockCounts"][0]["blockCount"],
+        2
+    );
+    assert_eq!(
+        response["structuredContent"]["summary"]["topMaterials"][0]["blockId"],
+        "minecraft:stone_bricks"
+    );
 }
 
 #[test]

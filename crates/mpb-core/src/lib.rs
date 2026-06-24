@@ -127,6 +127,14 @@ impl BlockDefinition {
             allow_any_states: true,
         }
     }
+
+    pub fn allowed_states(&self) -> &BTreeMap<String, BTreeSet<String>> {
+        &self.allowed_states
+    }
+
+    pub fn allows_any_states(&self) -> bool {
+        self.allow_any_states
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -153,6 +161,10 @@ impl BlockRegistry {
             "create:andesite_casing".to_string(),
             BlockDefinition::new(&[]),
         );
+        blocks.insert(
+            "minecraft:furnace".to_string(),
+            BlockDefinition::new(&[("facing", &["east", "north", "south", "west"])]),
+        );
         Self { blocks }
     }
 
@@ -163,6 +175,52 @@ impl BlockRegistry {
                 .map(|block_id| (block_id, BlockDefinition::permissive()))
                 .collect(),
         }
+    }
+
+    pub fn from_block_state_definitions(
+        definitions: impl IntoIterator<Item = (String, BTreeMap<String, BTreeSet<String>>)>,
+    ) -> Self {
+        Self {
+            blocks: definitions
+                .into_iter()
+                .map(|(block_id, allowed_states)| {
+                    (
+                        block_id,
+                        BlockDefinition {
+                            allowed_states,
+                            allow_any_states: false,
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    pub fn from_mixed_block_state_definitions(
+        definitions: impl IntoIterator<Item = (String, Option<BTreeMap<String, BTreeSet<String>>>)>,
+    ) -> Self {
+        Self {
+            blocks: definitions
+                .into_iter()
+                .map(|(block_id, allowed_states)| {
+                    let definition = allowed_states
+                        .map(|allowed_states| BlockDefinition {
+                            allowed_states,
+                            allow_any_states: false,
+                        })
+                        .unwrap_or_else(BlockDefinition::permissive);
+                    (block_id, definition)
+                })
+                .collect(),
+        }
+    }
+
+    pub fn block_definition(&self, block_id: &str) -> Option<&BlockDefinition> {
+        self.blocks.get(block_id)
+    }
+
+    pub fn block_ids(&self) -> impl Iterator<Item = &str> {
+        self.blocks.keys().map(String::as_str)
     }
 
     fn validate_block(&self, block: &SchemeBlock) -> Result<(), SchemeError> {

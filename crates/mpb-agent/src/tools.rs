@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use mpb_core::{
@@ -15,6 +15,15 @@ use thiserror::Error;
 
 use crate::protocol::AgentEvent;
 use crate::workspace::{AgentScheme, AgentWorkspace};
+
+mod tool_support;
+
+use tool_support::{
+    apply_parsed_mutations, block_definition_content, find_report_block, memory_mutation_response,
+    parse_mutations, report_block_definition_content, response_mode, scheme_overview,
+    search_registry_blocks, search_report_blocks, stored_mutation_response,
+    unknown_block_definition, MutationImpact,
+};
 
 pub(crate) type StoredSelection = Option<Selection>;
 
@@ -141,12 +150,47 @@ pub(crate) fn dispatch_tool(
         "read_current_selection" => Ok(ToolOutcome::read(selection_content(
             workspace.current_selection,
         ))),
+        "summarize_scheme" => {
+            let scheme_id = required_i64(&arguments, "schemeId")?;
+            let scheme = workspace_scheme(workspace, scheme_id)?;
+            Ok(ToolOutcome::read(json!({
+                "summary": scheme_overview(
+                    scheme_id,
+                    scheme.instance_id,
+                    &scheme.name,
+                    &scheme.scheme,
+                    None
+                )
+            })))
+        }
+        "search_blocks" => {
+            let instance_id = required_i64(&arguments, "instanceId")?;
+            ensure_instance_ready(workspace, instance_id)?;
+            let query = required_string(&arguments, "query")?;
+            let limit = optional_usize(&arguments, "limit")?.unwrap_or(20);
+            Ok(ToolOutcome::read(json!({
+                "blocks": search_registry_blocks(&workspace.registry, &query, limit)
+            })))
+        }
+        "get_block_definition" => {
+            let instance_id = required_i64(&arguments, "instanceId")?;
+            ensure_instance_ready(workspace, instance_id)?;
+            let block_id = required_string(&arguments, "blockId")?;
+            let definition = workspace
+                .registry
+                .block_definition(&block_id)
+                .ok_or_else(|| unknown_block_definition(&block_id))?;
+            Ok(ToolOutcome::read(json!({
+                "block": block_definition_content(&block_id, definition, None)
+            })))
+        }
         "place_block" => {
             let scheme_id = required_i64(&arguments, "schemeId")?;
             let coordinate = parse_coordinate_field(&arguments, "coordinate")?;
             let block = parse_block(&arguments["block"])?;
             let registry = workspace.registry.clone();
             let scheme = workspace_scheme_mut(workspace, scheme_id)?;
+            let before = scheme.scheme.clone();
             scheme
                 .scheme
                 .apply(
@@ -155,7 +199,12 @@ pub(crate) fn dispatch_tool(
                 )
                 .map_err(ToolFailure::scheme)?;
             Ok(ToolOutcome::changed(
-                scheme_content(scheme),
+                memory_mutation_response(
+                    scheme,
+                    &before,
+                    vec![MutationImpact::single(coordinate)],
+                    response_mode(&arguments)?,
+                ),
                 AgentEvent::SchemeChanged { scheme_id },
             ))
         }
@@ -164,12 +213,18 @@ pub(crate) fn dispatch_tool(
             let coordinate = parse_coordinate_field(&arguments, "coordinate")?;
             let registry = workspace.registry.clone();
             let scheme = workspace_scheme_mut(workspace, scheme_id)?;
+            let before = scheme.scheme.clone();
             scheme
                 .scheme
                 .apply(&registry, SchemeOperation::Delete(coordinate))
                 .map_err(ToolFailure::scheme)?;
             Ok(ToolOutcome::changed(
-                scheme_content(scheme),
+                memory_mutation_response(
+                    scheme,
+                    &before,
+                    vec![MutationImpact::single(coordinate)],
+                    response_mode(&arguments)?,
+                ),
                 AgentEvent::SchemeChanged { scheme_id },
             ))
         }
@@ -179,12 +234,22 @@ pub(crate) fn dispatch_tool(
             let to = parse_block(&arguments["to"])?;
             let registry = workspace.registry.clone();
             let scheme = workspace_scheme_mut(workspace, scheme_id)?;
+            let before = scheme.scheme.clone();
+            let impact = MutationImpact::coordinates(
+                scheme
+                    .scheme
+                    .blocks()
+                    .filter_map(|(coordinate, block)| {
+                        (block.block_id == from_block_id).then_some(*coordinate)
+                    })
+                    .collect(),
+            );
             scheme
                 .scheme
                 .apply(&registry, SchemeOperation::ReplaceAll { from_block_id, to })
                 .map_err(ToolFailure::scheme)?;
             Ok(ToolOutcome::changed(
-                scheme_content(scheme),
+                memory_mutation_response(scheme, &before, vec![impact], response_mode(&arguments)?),
                 AgentEvent::SchemeChanged { scheme_id },
             ))
         }
@@ -194,12 +259,33 @@ pub(crate) fn dispatch_tool(
             let block = parse_block(&arguments["block"])?;
             let registry = workspace.registry.clone();
             let scheme = workspace_scheme_mut(workspace, scheme_id)?;
+            let before = scheme.scheme.clone();
             scheme
                 .scheme
                 .apply(&registry, SchemeOperation::BulkSet { selection, block })
                 .map_err(ToolFailure::scheme)?;
             Ok(ToolOutcome::changed(
-                scheme_content(scheme),
+                memory_mutation_response(
+                    scheme,
+                    &before,
+                    vec![MutationImpact::selection(selection)],
+                    response_mode(&arguments)?,
+                ),
+                AgentEvent::SchemeChanged { scheme_id },
+            ))
+        }
+        "apply_mutations" => {
+            let scheme_id = required_i64(&arguments, "schemeId")?;
+            let registry = workspace.registry.clone();
+            let response_mode = response_mode(&arguments)?;
+            let mutations = parse_mutations(&arguments)?;
+            let scheme = workspace_scheme_mut(workspace, scheme_id)?;
+            let before = scheme.scheme.clone();
+            let mut candidate = scheme.scheme.clone();
+            let impacts = apply_parsed_mutations(&mut candidate, &registry, &mutations)?;
+            scheme.scheme = candidate;
+            Ok(ToolOutcome::changed(
+                memory_mutation_response(scheme, &before, impacts, response_mode),
                 AgentEvent::SchemeChanged { scheme_id },
             ))
         }
@@ -208,12 +294,13 @@ pub(crate) fn dispatch_tool(
             let dimensions = parse_dimensions(&arguments)?;
             let registry = workspace.registry.clone();
             let scheme = workspace_scheme_mut(workspace, scheme_id)?;
+            let before = scheme.scheme.clone();
             scheme
                 .scheme
                 .apply(&registry, SchemeOperation::Resize(dimensions))
                 .map_err(ToolFailure::scheme)?;
             Ok(ToolOutcome::changed(
-                scheme_content(scheme),
+                memory_mutation_response(scheme, &before, Vec::new(), response_mode(&arguments)?),
                 AgentEvent::SchemeChanged { scheme_id },
             ))
         }
@@ -250,12 +337,18 @@ pub(crate) fn dispatch_tool(
             let stage = parse_stage_ref(arguments.get("stageId"))?;
             let registry = workspace.registry.clone();
             let scheme = workspace_scheme_mut(workspace, scheme_id)?;
+            let before = scheme.scheme.clone();
             scheme
                 .scheme
                 .apply(&registry, SchemeOperation::AssignStage { selection, stage })
                 .map_err(ToolFailure::scheme)?;
             Ok(ToolOutcome::changed(
-                scheme_content(scheme),
+                memory_mutation_response(
+                    scheme,
+                    &before,
+                    vec![MutationImpact::selection(selection)],
+                    response_mode(&arguments)?,
+                ),
                 AgentEvent::SchemeChanged { scheme_id },
             ))
         }
@@ -395,6 +488,50 @@ pub(crate) fn dispatch_storage_tool(
             )))
         }
         "read_current_selection" => Ok(ToolOutcome::read(selection_content(*selection))),
+        "summarize_scheme" => {
+            let scheme_id = required_i64(&arguments, "schemeId")?;
+            let stored = repository
+                .load_scheme(scheme_id)
+                .map_err(ToolFailure::storage)?;
+            let registry_report =
+                registry_report_for_scheme(&repository, config.diagnostics_dir, &stored)?;
+            Ok(ToolOutcome::read(json!({
+                "summary": scheme_overview(
+                    stored.record.id,
+                    stored.record.prism_instance_id,
+                    &stored.record.name,
+                    &stored.scheme,
+                    Some(&registry_report)
+                )
+            })))
+        }
+        "search_blocks" => {
+            let instance_id = required_i64(&arguments, "instanceId")?;
+            ensure_storage_instance_ready(&repository, instance_id)?;
+            let query = required_string(&arguments, "query")?;
+            let limit = optional_usize(&arguments, "limit")?.unwrap_or(20);
+            let instance = repository
+                .get_prism_instance(instance_id)
+                .map_err(ToolFailure::storage)?;
+            let registry_report = registry_report_for_instance(config.diagnostics_dir, &instance)?;
+            Ok(ToolOutcome::read(json!({
+                "blocks": search_report_blocks(&registry_report, &query, limit)
+            })))
+        }
+        "get_block_definition" => {
+            let instance_id = required_i64(&arguments, "instanceId")?;
+            ensure_storage_instance_ready(&repository, instance_id)?;
+            let block_id = required_string(&arguments, "blockId")?;
+            let instance = repository
+                .get_prism_instance(instance_id)
+                .map_err(ToolFailure::storage)?;
+            let registry_report = registry_report_for_instance(config.diagnostics_dir, &instance)?;
+            let block = find_report_block(&registry_report, &block_id)
+                .ok_or_else(|| unknown_block_definition(&block_id))?;
+            Ok(ToolOutcome::read(json!({
+                "block": report_block_definition_content(block)
+            })))
+        }
         "place_block" => mutate_stored_scheme(
             &repository,
             config.diagnostics_dir,
@@ -407,7 +544,8 @@ pub(crate) fn dispatch_storage_tool(
                         registry,
                         SchemeOperation::Place(BlockPlacement { coordinate, block }),
                     )
-                    .map_err(ToolFailure::scheme)
+                    .map_err(ToolFailure::scheme)?;
+                Ok(vec![MutationImpact::single(coordinate)])
             },
         ),
         "delete_block" => mutate_stored_scheme(
@@ -418,7 +556,8 @@ pub(crate) fn dispatch_storage_tool(
                 let coordinate = parse_coordinate_field(arguments, "coordinate")?;
                 scheme
                     .apply(registry, SchemeOperation::Delete(coordinate))
-                    .map_err(ToolFailure::scheme)
+                    .map_err(ToolFailure::scheme)?;
+                Ok(vec![MutationImpact::single(coordinate)])
             },
         ),
         "replace_blocks" => mutate_stored_scheme(
@@ -428,9 +567,18 @@ pub(crate) fn dispatch_storage_tool(
             |scheme, registry, arguments| {
                 let from_block_id = required_string(arguments, "fromBlockId")?;
                 let to = parse_block(&arguments["to"])?;
+                let impact = MutationImpact::coordinates(
+                    scheme
+                        .blocks()
+                        .filter_map(|(coordinate, block)| {
+                            (block.block_id == from_block_id).then_some(*coordinate)
+                        })
+                        .collect(),
+                );
                 scheme
                     .apply(registry, SchemeOperation::ReplaceAll { from_block_id, to })
-                    .map_err(ToolFailure::scheme)
+                    .map_err(ToolFailure::scheme)?;
+                Ok(vec![impact])
             },
         ),
         "bulk_set_area" => mutate_stored_scheme(
@@ -442,7 +590,17 @@ pub(crate) fn dispatch_storage_tool(
                 let block = parse_block(&arguments["block"])?;
                 scheme
                     .apply(registry, SchemeOperation::BulkSet { selection, block })
-                    .map_err(ToolFailure::scheme)
+                    .map_err(ToolFailure::scheme)?;
+                Ok(vec![MutationImpact::selection(selection)])
+            },
+        ),
+        "apply_mutations" => mutate_stored_scheme(
+            &repository,
+            config.diagnostics_dir,
+            &arguments,
+            |scheme, registry, arguments| {
+                let mutations = parse_mutations(arguments)?;
+                apply_parsed_mutations(scheme, registry, &mutations)
             },
         ),
         "resize_scheme" => mutate_stored_scheme(
@@ -453,7 +611,8 @@ pub(crate) fn dispatch_storage_tool(
                 let dimensions = parse_dimensions(arguments)?;
                 scheme
                     .apply(registry, SchemeOperation::Resize(dimensions))
-                    .map_err(ToolFailure::scheme)
+                    .map_err(ToolFailure::scheme)?;
+                Ok(Vec::new())
             },
         ),
         "create_stage" => {
@@ -511,7 +670,8 @@ pub(crate) fn dispatch_storage_tool(
                 let stage = parse_stage_ref(arguments.get("stageId"))?;
                 scheme
                     .apply(registry, SchemeOperation::AssignStage { selection, stage })
-                    .map_err(ToolFailure::scheme)
+                    .map_err(ToolFailure::scheme)?;
+                Ok(vec![MutationImpact::selection(selection)])
             },
         ),
         "validate_scheme" => {
@@ -728,7 +888,11 @@ fn mutate_stored_scheme(
     repository: &LibraryRepository,
     diagnostics_dir: &Path,
     arguments: &Value,
-    operation: impl FnOnce(&mut Scheme, &BlockRegistry, &Value) -> Result<(), ToolFailure>,
+    operation: impl FnOnce(
+        &mut Scheme,
+        &BlockRegistry,
+        &Value,
+    ) -> Result<Vec<MutationImpact>, ToolFailure>,
 ) -> Result<ToolOutcome, ToolFailure> {
     let scheme_id = required_i64(arguments, "schemeId")?;
     let mut stored = repository
@@ -736,15 +900,23 @@ fn mutate_stored_scheme(
         .map_err(ToolFailure::storage)?;
     ensure_storage_instance_ready(repository, stored.record.prism_instance_id)?;
     let registry = registry_for_scheme(repository, diagnostics_dir, &stored)?;
-    operation(&mut stored.scheme, &registry, arguments)?;
+    let before = stored.scheme.clone();
+    let mut candidate = stored.scheme.clone();
+    let impacts = operation(&mut candidate, &registry, arguments)?;
+    stored.scheme = candidate;
     repository
         .save_scheme(scheme_id, &stored.scheme)
         .map_err(ToolFailure::storage)?;
     let registry_report = registry_report_for_scheme(repository, diagnostics_dir, &stored)?;
     Ok(ToolOutcome::changed(
-        json!({
-            "scheme": stored_scheme_content(&stored.record, &stored.scheme, Some(&registry_report))
-        }),
+        stored_mutation_response(
+            &stored.record,
+            &stored.scheme,
+            &before,
+            impacts,
+            Some(&registry_report),
+            response_mode(arguments)?,
+        ),
         AgentEvent::SchemeChanged { scheme_id },
     ))
 }
@@ -812,19 +984,43 @@ fn block_registry_from_report(
     report: &Value,
     instance_id: i64,
 ) -> Result<BlockRegistry, ToolFailure> {
-    let blocks = report["blocks"]
-        .as_array()
-        .ok_or_else(|| {
-            ToolFailure::new(
-                "invalid_asset_registry",
-                "Prism registry report has no blocks array",
-                json!({ "instanceId": instance_id }),
-            )
-        })?
+    let blocks = report["blocks"].as_array().ok_or_else(|| {
+        ToolFailure::new(
+            "invalid_asset_registry",
+            "Prism registry report has no blocks array",
+            json!({ "instanceId": instance_id }),
+        )
+    })?;
+    let definitions = blocks
         .iter()
-        .filter_map(|block| block["identifier"].as_str().map(ToString::to_string))
+        .filter_map(|block| {
+            let block_id = block["identifier"].as_str()?.to_string();
+            Some((block_id, allowed_states_from_report_block(block)))
+        })
         .collect::<Vec<_>>();
-    Ok(BlockRegistry::from_block_ids(blocks))
+    Ok(BlockRegistry::from_mixed_block_state_definitions(
+        definitions,
+    ))
+}
+
+fn allowed_states_from_report_block(block: &Value) -> Option<BTreeMap<String, BTreeSet<String>>> {
+    let states = block.get("allowedStates")?.as_array()?;
+    Some(
+        states
+            .iter()
+            .filter_map(|state| {
+                let name = state.get("name")?.as_str()?.to_string();
+                let values = state
+                    .get("values")?
+                    .as_array()?
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(ToString::to_string)
+                    .collect::<BTreeSet<_>>();
+                Some((name, values))
+            })
+            .collect(),
+    )
 }
 
 fn scheme_summary(scheme: &AgentScheme) -> Value {
@@ -1083,6 +1279,19 @@ fn required_u32(arguments: &Value, field: &str) -> Result<u32, ToolFailure> {
         .map_err(|_| invalid_arguments(format!("{field} must be a positive integer")))
 }
 
+fn optional_usize(arguments: &Value, field: &str) -> Result<Option<usize>, ToolFailure> {
+    arguments
+        .get(field)
+        .map(|value| {
+            value
+                .as_u64()
+                .and_then(|value| usize::try_from(value).ok())
+                .filter(|value| *value > 0)
+                .ok_or_else(|| invalid_arguments(format!("{field} must be a positive integer")))
+        })
+        .transpose()
+}
+
 fn ensure_instance_ready(workspace: &AgentWorkspace, instance_id: i64) -> Result<(), ToolFailure> {
     let instance = workspace
         .instances
@@ -1278,6 +1487,125 @@ mod tests {
         assert_eq!(casing["displayName"], "Andesite Casing");
         assert!(casing["maxStackSize"].is_null());
         assert!(casing["stackCount"].is_null());
+
+        let _ = fs::remove_dir_all(&test_dir);
+    }
+
+    #[test]
+    fn storage_mutations_validate_states_from_registry_report() {
+        let test_dir = std::env::temp_dir().join(format!(
+            "mpb-agent-state-validation-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let _ = fs::remove_dir_all(&test_dir);
+        fs::create_dir_all(&test_dir).expect("create test dir");
+        let database_path = test_dir.join("library.sqlite3");
+        let diagnostics_dir = test_dir.join("diagnostics");
+        fs::create_dir_all(&diagnostics_dir).expect("create diagnostics dir");
+
+        let database = LibraryDatabase::open(&database_path).expect("open database");
+        let repository = LibraryRepository::new(database);
+        let instance = repository
+            .upsert_prism_instance(NewPrismInstance {
+                instance_id: "aoc".to_string(),
+                display_name: "AOC".to_string(),
+                instance_path: PathBuf::from("/PrismLauncher/instances/aoc"),
+                minecraft_dir: PathBuf::from("/PrismLauncher/instances/aoc/minecraft"),
+                minecraft_version: Some("1.21.1".to_string()),
+                loader: Some("NeoForge".to_string()),
+                loader_version: Some("21.1.233".to_string()),
+                identity_fingerprint: "identity-aoc".to_string(),
+                content_fingerprint: "content-aoc".to_string(),
+                status: PrismInstanceStatus::Ready,
+                status_message: None,
+            })
+            .expect("insert instance");
+        let record = repository
+            .create_scheme(NewScheme {
+                prism_instance_id: instance.id,
+                name: "Factory".to_string(),
+                size_x: 5,
+                size_y: 5,
+                size_z: 5,
+            })
+            .expect("create scheme");
+        fs::write(
+            diagnostics_dir.join("identity-aoc-registry.json"),
+            serde_json::to_string_pretty(&json!({
+                "schemaVersion": 6,
+                "status": "ready",
+                "blocks": [
+                    {
+                        "identifier": "minecraft:furnace",
+                        "displayName": "Furnace",
+                        "itemId": "minecraft:furnace",
+                        "maxStackSize": 64,
+                        "texturePath": null,
+                        "allowedStates": [
+                            { "name": "facing", "values": ["east", "north", "south", "west"] }
+                        ],
+                        "modelVariants": []
+                    }
+                ]
+            }))
+            .expect("serialize report"),
+        )
+        .expect("write report");
+
+        let rejected = dispatch_storage_tool(
+            StorageWorkspaceConfig {
+                database_path: &database_path,
+                diagnostics_dir: &diagnostics_dir,
+            },
+            &mut None,
+            "place_block",
+            json!({
+                "schemeId": record.id,
+                "coordinate": [0, 0, 0],
+                "block": {
+                    "blockId": "minecraft:furnace",
+                    "states": { "facing": "up" },
+                    "stageId": null
+                },
+                "responseMode": "summary"
+            }),
+        )
+        .expect_err("invalid state rejected");
+        assert_eq!(rejected.code, "invalid_block_state");
+        assert_eq!(
+            repository
+                .load_scheme(record.id)
+                .expect("load rejected scheme")
+                .scheme
+                .block_count(),
+            0
+        );
+
+        let accepted = dispatch_storage_tool(
+            StorageWorkspaceConfig {
+                database_path: &database_path,
+                diagnostics_dir: &diagnostics_dir,
+            },
+            &mut None,
+            "place_block",
+            json!({
+                "schemeId": record.id,
+                "coordinate": [0, 0, 0],
+                "block": {
+                    "blockId": "minecraft:furnace",
+                    "states": { "facing": "west" },
+                    "stageId": null
+                },
+                "responseMode": "summary"
+            }),
+        )
+        .expect("valid state accepted");
+        assert_eq!(accepted.value["summary"]["blockCount"], 1);
+        assert_eq!(
+            accepted.value["summary"]["materialsDelta"][0]["blockId"],
+            "minecraft:furnace"
+        );
 
         let _ = fs::remove_dir_all(&test_dir);
     }

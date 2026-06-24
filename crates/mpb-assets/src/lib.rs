@@ -10,9 +10,10 @@ use std::sync::{
 };
 
 pub use asset_index::{
-    build_prism_asset_index, build_prism_asset_index_with_events, AssetIndexEvent,
-    AssetIndexProgress, BlockAssetSample, PrismAssetIndexReport, PrismAssetIndexRequest,
-    TextureAtlasEntry, TextureAtlasMetadata, PRISM_REGISTRY_SCHEMA_VERSION,
+    build_prism_asset_index, build_prism_asset_index_with_events, prism_registry_metadata_path,
+    prism_registry_report_path, AssetIndexEvent, AssetIndexProgress, BlockAssetSample,
+    PrismAssetIndexMetadata, PrismAssetIndexReport, PrismAssetIndexRequest, TextureAtlasEntry,
+    TextureAtlasMetadata, PRISM_REGISTRY_SCHEMA_VERSION,
 };
 pub use prism::{
     validate_prism_root, PrismInstanceDescriptor, PrismInstanceStatus, PrismRootValidation,

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -21,13 +21,16 @@ pub struct BlockstateModelReference {
 pub struct BlockstateModelReferences {
     pub variants_are_multipart: bool,
     pub models: Vec<BlockstateModelReference>,
+    pub state_definitions: BTreeMap<String, BTreeSet<String>>,
 }
 
 pub fn collect_blockstate_models(value: &serde_json::Value) -> BlockstateModelReferences {
     if let Some(multipart) = value.get("multipart").and_then(serde_json::Value::as_array) {
+        let models = collect_multipart_models(multipart);
         return BlockstateModelReferences {
             variants_are_multipart: true,
-            models: collect_multipart_models(multipart),
+            state_definitions: state_definitions_from_models(&models),
+            models,
         };
     }
 
@@ -40,12 +43,14 @@ pub fn collect_blockstate_models(value: &serde_json::Value) -> BlockstateModelRe
                 .flat_map(|(condition, model)| {
                     collect_model_references(parse_variant_condition(condition), model)
                 })
-                .collect()
+                .collect::<Vec<_>>()
         })
         .unwrap_or_default();
+    let state_definitions = state_definitions_from_models(&models);
 
     BlockstateModelReferences {
         variants_are_multipart: false,
+        state_definitions,
         models,
     }
 }
@@ -152,4 +157,30 @@ fn parse_simple_state_map(value: &serde_json::Value) -> Option<BTreeMap<String, 
         .filter(|(_, values)| !values.is_empty())
         .collect::<BTreeMap<_, _>>();
     (!states.is_empty()).then_some(states)
+}
+
+fn state_definitions_from_models(
+    models: &[BlockstateModelReference],
+) -> BTreeMap<String, BTreeSet<String>> {
+    let mut definitions = BTreeMap::new();
+    for condition in models.iter().filter_map(|model| model.condition.as_ref()) {
+        for states in &condition.any_of {
+            for (name, values) in states {
+                definitions
+                    .entry(name.clone())
+                    .or_insert_with(BTreeSet::new)
+                    .extend(values.iter().cloned());
+            }
+        }
+    }
+    for values in definitions.values_mut() {
+        if values
+            .iter()
+            .all(|value| value == "true" || value == "false")
+        {
+            values.insert("false".to_string());
+            values.insert("true".to_string());
+        }
+    }
+    definitions
 }

@@ -3,7 +3,7 @@ use std::path::Path;
 
 use mpb_assets::{
     build_prism_asset_index, build_prism_asset_index_with_events, AssetError, AssetIndexEvent,
-    CancellationToken, PrismAssetIndexRequest,
+    CancellationToken, PrismAssetIndexMetadata, PrismAssetIndexRequest,
 };
 use tempfile::tempdir;
 use zip::write::SimpleFileOptions;
@@ -40,7 +40,7 @@ fn builds_registry_report_from_prism_mod_jars() {
         build_prism_asset_index(request(temp.path(), &minecraft_dir)).expect("Prism asset index");
 
     assert_eq!(report.status, "ready");
-    assert_eq!(report.schema_version, 5);
+    assert_eq!(report.schema_version, 6);
     assert_eq!(report.static_status, "ready");
     assert_eq!(report.runtime_status, "unavailable");
     assert_eq!(report.instance_id, "aoc");
@@ -68,6 +68,22 @@ fn builds_registry_report_from_prism_mod_jars() {
         .report_path
         .ends_with("diagnostics/fingerprint-aoc-registry.json"));
     assert!(report.report_path.exists());
+    let registry_json = std::fs::read_to_string(&report.report_path).expect("registry report");
+    assert!(registry_json.contains("allowedStates"));
+    assert!(registry_json.contains("modelVariants"));
+    assert!(!registry_json.contains("modelElements"));
+    let metadata_path = temp
+        .path()
+        .join("diagnostics/fingerprint-aoc-registry-meta.json");
+    let metadata = serde_json::from_str::<PrismAssetIndexMetadata>(
+        &std::fs::read_to_string(metadata_path).expect("registry metadata"),
+    )
+    .expect("parse registry metadata");
+    assert_eq!(metadata.schema_version, report.schema_version);
+    assert_eq!(metadata.runtime_status, report.runtime_status);
+    assert_eq!(metadata.content_fingerprint, report.content_fingerprint);
+    assert_eq!(metadata.block_count, report.block_count);
+    assert_eq!(metadata.report_path, report.report_path);
 }
 
 #[test]
@@ -436,6 +452,20 @@ fn preserves_blockstate_variant_conditions_and_rotations() {
         east.model_elements[0].face_uvs.north,
         Some([7.0, 3.0, 9.0, 13.0])
     );
+    let facing = wall_torch
+        .allowed_states
+        .iter()
+        .find(|state| state.name == "facing")
+        .expect("facing state definition");
+    assert_eq!(
+        facing.values,
+        vec![
+            "east".to_string(),
+            "north".to_string(),
+            "south".to_string(),
+            "west".to_string()
+        ]
+    );
 }
 
 #[test]
@@ -493,6 +523,18 @@ fn preserves_multipart_blockstate_conditions_as_additive_variants() {
             .any_of
             .len(),
         2
+    );
+    assert_eq!(
+        fence
+            .allowed_states
+            .iter()
+            .map(|state| (state.name.as_str(), state.values.clone()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("east", vec!["false".to_string(), "true".to_string()]),
+            ("north", vec!["false".to_string(), "true".to_string()]),
+            ("west", vec!["false".to_string(), "true".to_string()])
+        ]
     );
 }
 

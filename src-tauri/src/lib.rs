@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{mpsc, Mutex};
@@ -6,7 +8,8 @@ use std::time::Duration;
 
 use mpb_agent::{start_streamable_http_server, AgentServer, AgentStatus, McpHttpServerHandle};
 use mpb_assets::{
-    build_prism_asset_index, validate_prism_root, PrismAssetIndexRequest, PrismInstanceDescriptor,
+    build_prism_asset_index, prism_registry_metadata_path, prism_registry_report_path,
+    validate_prism_root, PrismAssetIndexMetadata, PrismAssetIndexRequest, PrismInstanceDescriptor,
     PrismRootValidation, PRISM_REGISTRY_SCHEMA_VERSION,
 };
 use mpb_export::{write_scheme_export, ExportArtifact, ExportFormat};
@@ -15,7 +18,8 @@ use mpb_storage::{
     NewScheme, PrismInstanceStatus,
 };
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, value::RawValue};
 use tauri::{Emitter, Manager};
 use tauri_plugin_updater::UpdaterExt;
 
@@ -326,7 +330,16 @@ fn list_library(app: tauri::AppHandle) -> Result<Vec<LibraryInstance>, String> {
 }
 
 #[tauri::command]
-fn get_scheme_render_scene(
+async fn get_scheme_render_scene(
+    app: tauri::AppHandle,
+    scheme_id: i64,
+) -> Result<RenderSceneDto, String> {
+    tauri::async_runtime::spawn_blocking(move || get_scheme_render_scene_blocking(app, scheme_id))
+        .await
+        .map_err(|error| format!("Could not join render scene worker: {error}"))?
+}
+
+fn get_scheme_render_scene_blocking(
     app: tauri::AppHandle,
     scheme_id: i64,
 ) -> Result<RenderSceneDto, String> {
@@ -334,11 +347,20 @@ fn get_scheme_render_scene(
     let stored = repository
         .load_scheme(scheme_id)
         .map_err(|error| error.to_string())?;
+    let block_ids = stored
+        .scheme
+        .blocks()
+        .map(|(_, block)| block.block_id.clone())
+        .collect::<BTreeSet<_>>();
     let registry_report = repository
         .get_prism_instance(stored.record.prism_instance_id)
         .ok()
         .and_then(|instance| {
-            read_registry_report(&paths.diagnostics_dir, &instance.identity_fingerprint)
+            read_registry_report_for_block_ids(
+                &paths.diagnostics_dir,
+                &instance.identity_fingerprint,
+                &block_ids,
+            )
         });
     Ok(render_scene_from_scheme_with_registry_report(
         scheme_id,
@@ -789,10 +811,11 @@ fn new_prism_instance(
 }
 
 fn registry_report_path(diagnostics_dir: &Path, identity_fingerprint: &str) -> PathBuf {
-    diagnostics_dir.join(format!(
-        "{}-registry.json",
-        safe_report_stem(identity_fingerprint)
-    ))
+    prism_registry_report_path(diagnostics_dir, identity_fingerprint)
+}
+
+fn registry_metadata_path(diagnostics_dir: &Path, identity_fingerprint: &str) -> PathBuf {
+    prism_registry_metadata_path(diagnostics_dir, identity_fingerprint)
 }
 
 fn prism_root_from_instance_path(instance_path: &Path) -> Option<PathBuf> {
@@ -804,28 +827,77 @@ fn prism_root_from_instance_path(instance_path: &Path) -> Option<PathBuf> {
 }
 
 fn registry_report_is_current(diagnostics_dir: &Path, instance: &PrismInstanceDescriptor) -> bool {
-    let path = registry_report_path(diagnostics_dir, &instance.identity_fingerprint);
-    let Some(report) = std::fs::read_to_string(path)
+    let path = registry_metadata_path(diagnostics_dir, &instance.identity_fingerprint);
+    let Some(metadata) = std::fs::read_to_string(&path)
         .ok()
-        .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
+        .and_then(|json| serde_json::from_str::<PrismAssetIndexMetadata>(&json).ok())
     else {
-        return false;
+        return legacy_registry_report_is_current(diagnostics_dir, instance);
     };
-    if report
-        .get("schemaVersion")
-        .and_then(serde_json::Value::as_u64)
-        != Some(PRISM_REGISTRY_SCHEMA_VERSION as u64)
-    {
+    if metadata.schema_version != PRISM_REGISTRY_SCHEMA_VERSION {
         return false;
     }
-    if report
-        .get("runtimeStatus")
-        .and_then(serde_json::Value::as_str)
-        == Some("ready")
-    {
+    if metadata.identity_fingerprint != instance.identity_fingerprint {
+        return false;
+    }
+    if metadata.content_fingerprint != instance.content_fingerprint {
+        return false;
+    }
+    if !metadata.report_path.is_file() {
+        return false;
+    }
+    if metadata.runtime_status == "ready" {
         return true;
     }
     !runtime_prerequisites_present(instance)
+}
+
+fn legacy_registry_report_is_current(
+    diagnostics_dir: &Path,
+    instance: &PrismInstanceDescriptor,
+) -> bool {
+    let path = registry_report_path(diagnostics_dir, &instance.identity_fingerprint);
+    if !path.is_file() {
+        return false;
+    }
+    let Some(header) = read_registry_report_header(&path) else {
+        return false;
+    };
+    if raw_json_u64_field(&header, "schemaVersion") != Some(PRISM_REGISTRY_SCHEMA_VERSION as u64) {
+        return false;
+    }
+    if raw_json_string_field(&header, "runtimeStatus").as_deref() == Some("ready") {
+        return true;
+    }
+    !runtime_prerequisites_present(instance)
+}
+
+fn read_registry_report_header(path: &Path) -> Option<String> {
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut buffer = vec![0; 16 * 1024];
+    let len = file.read(&mut buffer).ok()?;
+    buffer.truncate(len);
+    String::from_utf8(buffer).ok()
+}
+
+fn raw_json_u64_field(raw: &str, field: &str) -> Option<u64> {
+    let key = format!("\"{field}\"");
+    let after_key = raw.get(raw.find(&key)? + key.len()..)?;
+    let after_colon = after_key.get(after_key.find(':')? + 1..)?.trim_start();
+    let end = after_colon
+        .find(|character: char| !character.is_ascii_digit())
+        .unwrap_or(after_colon.len());
+    after_colon.get(..end)?.parse().ok()
+}
+
+fn raw_json_string_field(raw: &str, field: &str) -> Option<String> {
+    let key = format!("\"{field}\"");
+    let after_key = raw.get(raw.find(&key)? + key.len()..)?;
+    let after_colon = after_key.get(after_key.find(':')? + 1..)?;
+    let value = after_colon.trim_start().strip_prefix('"')?;
+    let end = value.find('"')?;
+    let text = value.get(..end)?;
+    (!text.contains('\\')).then(|| text.to_string())
 }
 
 pub fn runtime_prerequisites_present(instance: &PrismInstanceDescriptor) -> bool {
@@ -925,14 +997,48 @@ fn argument_value<'a>(arguments: &'a str, name: &str) -> Option<&'a str> {
     None
 }
 
-fn read_registry_report(
+fn read_registry_report_for_block_ids(
     diagnostics_dir: &Path,
     identity_fingerprint: &str,
+    block_ids: &BTreeSet<String>,
 ) -> Option<serde_json::Value> {
     let path = registry_report_path(diagnostics_dir, identity_fingerprint);
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|json| serde_json::from_str(&json).ok())
+    let json_text = std::fs::read_to_string(path).ok()?;
+    let report = serde_json::from_str::<RawRegistryReport>(&json_text).ok()?;
+    let blocks = report
+        .blocks
+        .into_iter()
+        .filter_map(|raw_block| {
+            let id = raw_registry_block_identifier(raw_block.get())?;
+            block_ids
+                .contains(id)
+                .then(|| serde_json::from_str::<serde_json::Value>(raw_block.get()).ok())
+                .flatten()
+        })
+        .collect::<Vec<_>>();
+    Some(json!({
+        "runtimeStatus": report.runtime_status,
+        "blocks": blocks
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawRegistryReport<'a> {
+    #[serde(default)]
+    runtime_status: Option<&'a str>,
+    #[serde(default, borrow)]
+    blocks: Vec<&'a RawValue>,
+}
+
+fn raw_registry_block_identifier(raw_block: &str) -> Option<&str> {
+    let key = "\"identifier\"";
+    let after_key = raw_block.get(raw_block.find(key)? + key.len()..)?;
+    let after_colon = after_key.get(after_key.find(':')? + 1..)?;
+    let value = after_colon.trim_start().strip_prefix('"')?;
+    let end = value.find('"')?;
+    let identifier = value.get(..end)?;
+    (!identifier.contains('\\')).then_some(identifier)
 }
 
 fn prism_relink_candidates(
@@ -991,24 +1097,6 @@ fn normalized_match_key(value: &str) -> String {
         .filter(|character| character.is_ascii_alphanumeric())
         .flat_map(|character| character.to_lowercase())
         .collect()
-}
-
-fn safe_report_stem(value: &str) -> String {
-    let cleaned = value
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_') {
-                character
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>();
-    if cleaned.is_empty() {
-        "prism-instance".to_string()
-    } else {
-        cleaned
-    }
 }
 
 fn replace_prism_watcher(app: &tauri::AppHandle, root: &Path) -> Result<(), String> {
@@ -1164,7 +1252,7 @@ mod tests {
         let path = registry_report_path(diagnostics_dir, identity_fingerprint);
         std::fs::create_dir_all(diagnostics_dir).expect("diagnostics dir");
         std::fs::write(
-            path,
+            &path,
             json!({
                 "schemaVersion": schema_version,
                 "runtimeStatus": "ready"
@@ -1172,6 +1260,43 @@ mod tests {
             .to_string(),
         )
         .expect("registry report");
+        write_registry_metadata(
+            diagnostics_dir,
+            identity_fingerprint,
+            schema_version as u32,
+            "prod-pack-content",
+            &path,
+        );
+    }
+
+    fn write_registry_metadata(
+        diagnostics_dir: &Path,
+        identity_fingerprint: &str,
+        schema_version: u32,
+        content_fingerprint: &str,
+        report_path: &Path,
+    ) {
+        let metadata = PrismAssetIndexMetadata {
+            schema_version,
+            status: "ready".to_string(),
+            static_status: "ready".to_string(),
+            runtime_status: "ready".to_string(),
+            runtime_message: None,
+            instance_id: "prod-pack".to_string(),
+            identity_fingerprint: identity_fingerprint.to_string(),
+            content_fingerprint: content_fingerprint.to_string(),
+            minecraft_version: Some("1.20.1".to_string()),
+            loader: Some("Forge".to_string()),
+            archive_count: 1,
+            block_count: 1,
+            asset_count: 1,
+            report_path: report_path.to_path_buf(),
+        };
+        std::fs::write(
+            registry_metadata_path(diagnostics_dir, identity_fingerprint),
+            serde_json::to_string(&metadata).expect("metadata json"),
+        )
+        .expect("registry metadata");
     }
 
     #[test]
@@ -1190,5 +1315,127 @@ mod tests {
 
         assert!(registry_report_is_current(&diagnostics_dir, &current));
         assert!(!registry_report_is_current(&diagnostics_dir, &stale));
+    }
+
+    #[test]
+    fn render_scene_registry_reader_keeps_only_scheme_block_metadata() {
+        let temp = tempdir().expect("temp dir");
+        let diagnostics_dir = temp.path().join("diagnostics");
+        let identity = "filtered-identity";
+        std::fs::create_dir_all(&diagnostics_dir).expect("diagnostics dir");
+        let report_path = registry_report_path(&diagnostics_dir, identity);
+        std::fs::write(
+            &report_path,
+            json!({
+                "schemaVersion": PRISM_REGISTRY_SCHEMA_VERSION,
+                "runtimeStatus": "ready",
+                "blocks": [
+                    {
+                        "identifier": "minecraft:stone",
+                        "displayName": "Stone",
+                        "modelElements": []
+                    },
+                    {
+                        "identifier": "mod:huge_unused_machine",
+                        "displayName": "Huge Unused Machine",
+                        "modelElements": (0..2048)
+                            .map(|index| json!({
+                                "from": [index, 0, 0],
+                                "to": [index + 1, 1, 1],
+                                "faceTexturePaths": { "north": format!("/tmp/{index}.png") },
+                                "faceUvs": {}
+                            }))
+                            .collect::<Vec<_>>()
+                    }
+                ]
+            })
+            .to_string(),
+        )
+        .expect("registry report");
+        write_registry_metadata(
+            &diagnostics_dir,
+            identity,
+            PRISM_REGISTRY_SCHEMA_VERSION,
+            "prod-pack-content",
+            &report_path,
+        );
+
+        let instance = prism_instance(temp.path(), identity);
+        assert!(registry_report_is_current(&diagnostics_dir, &instance));
+
+        let report = read_registry_report_for_block_ids(
+            &diagnostics_dir,
+            identity,
+            &["minecraft:stone".to_string()].into_iter().collect(),
+        )
+        .expect("filtered registry report");
+        let blocks = report["blocks"].as_array().expect("blocks");
+
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0]["identifier"], "minecraft:stone");
+        assert!(!report.to_string().contains("huge_unused_machine"));
+    }
+
+    #[test]
+    fn registry_freshness_reads_metadata_without_parsing_registry_report() {
+        let temp = tempdir().expect("temp dir");
+        let diagnostics_dir = temp.path().join("diagnostics");
+        let identity = "metadata-only-identity";
+        std::fs::create_dir_all(&diagnostics_dir).expect("diagnostics dir");
+        let report_path = registry_report_path(&diagnostics_dir, identity);
+        std::fs::write(
+            &report_path,
+            r#"{"schemaVersion":6,"runtimeStatus":"ready","blocks":[{"identifier":"broken""#,
+        )
+        .expect("registry report");
+        write_registry_metadata(
+            &diagnostics_dir,
+            identity,
+            PRISM_REGISTRY_SCHEMA_VERSION,
+            "prod-pack-content",
+            &report_path,
+        );
+
+        let instance = prism_instance(temp.path(), identity);
+        assert!(registry_report_is_current(&diagnostics_dir, &instance));
+    }
+
+    #[test]
+    fn registry_freshness_accepts_legacy_current_report_without_metadata() {
+        let temp = tempdir().expect("temp dir");
+        let diagnostics_dir = temp.path().join("diagnostics");
+        let current = prism_instance(temp.path(), "legacy-current");
+        let stale = prism_instance(temp.path(), "legacy-stale");
+        std::fs::create_dir_all(&diagnostics_dir).expect("diagnostics dir");
+        std::fs::write(
+            registry_report_path(&diagnostics_dir, &current.identity_fingerprint),
+            format!(
+                r#"{{"schemaVersion":{},"runtimeStatus":"ready","blocks":[{{"identifier":"minecraft:stone","modelElements":[{}]}}]}}"#,
+                PRISM_REGISTRY_SCHEMA_VERSION,
+                "0,".repeat(2048)
+            ),
+        )
+        .expect("current report");
+        std::fs::write(
+            registry_report_path(&diagnostics_dir, &stale.identity_fingerprint),
+            r#"{"schemaVersion":4,"runtimeStatus":"ready","blocks":[]}"#,
+        )
+        .expect("stale report");
+
+        assert!(registry_report_is_current(&diagnostics_dir, &current));
+        assert!(!registry_report_is_current(&diagnostics_dir, &stale));
+    }
+
+    #[test]
+    fn raw_registry_block_identifier_does_not_parse_the_whole_block() {
+        let raw_block = r#"{
+            "identifier": "mod:heavy_machine",
+            "modelElements": [ this tail intentionally is not valid json ]
+        }"#;
+
+        assert_eq!(
+            raw_registry_block_identifier(raw_block),
+            Some("mod:heavy_machine")
+        );
     }
 }

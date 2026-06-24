@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
-use std::io::{Cursor, Read};
+use std::io::{BufWriter, Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
@@ -14,7 +14,7 @@ use crate::blockstate::{
     collect_blockstate_models, BlockstateModelCondition, BlockstateModelReference,
 };
 
-pub const PRISM_REGISTRY_SCHEMA_VERSION: u32 = 5;
+pub const PRISM_REGISTRY_SCHEMA_VERSION: u32 = 6;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrismAssetIndexRequest {
@@ -48,6 +48,25 @@ pub struct PrismAssetIndexReport {
     pub blocks: Vec<BlockAssetSample>,
     pub texture_atlas: TextureAtlasMetadata,
     pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrismAssetIndexMetadata {
+    pub schema_version: u32,
+    pub status: String,
+    pub static_status: String,
+    pub runtime_status: String,
+    pub runtime_message: Option<String>,
+    pub instance_id: String,
+    pub identity_fingerprint: String,
+    pub content_fingerprint: String,
+    pub minecraft_version: Option<String>,
+    pub loader: Option<String>,
+    pub archive_count: usize,
+    pub block_count: usize,
+    pub asset_count: usize,
+    pub report_path: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,12 +108,20 @@ pub struct BlockAssetSample {
     pub max_stack_size: Option<u32>,
     pub display_name: String,
     pub namespace: String,
+    pub allowed_states: Vec<BlockStatePropertySample>,
     pub model: Option<String>,
     pub texture_path: Option<PathBuf>,
     pub face_texture_paths: Option<FaceTexturePaths>,
     pub model_elements: Vec<ModelElementSample>,
     pub model_variants_are_multipart: bool,
     pub model_variants: Vec<BlockModelVariantSample>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockStatePropertySample {
+    pub name: String,
+    pub values: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -253,10 +280,8 @@ pub fn build_prism_asset_index_with_events(
         return Err(AssetError::NoParseableBlocks);
     }
     let texture_atlas = texture_atlas_metadata(&blocks);
-    let report_path = request.diagnostics_dir.join(format!(
-        "{}-registry.json",
-        safe_path_segment(&request.identity_fingerprint)
-    ));
+    let report_path =
+        prism_registry_report_path(&request.diagnostics_dir, &request.identity_fingerprint);
     let report = PrismAssetIndexReport {
         schema_version: PRISM_REGISTRY_SCHEMA_VERSION,
         status: "ready".to_string(),
@@ -276,14 +301,172 @@ pub fn build_prism_asset_index_with_events(
         texture_atlas,
         warnings: collector.warnings,
     };
-    let json = serde_json::to_string_pretty(&report)
-        .map_err(|error| AssetError::InvalidAssetIndex(error.to_string()))?;
-    fs::write(&report_path, json)?;
+    let registry_file = PrismAssetIndexRegistryFile::from(&report);
+    write_json_file(&report_path, &registry_file)?;
+    let metadata = PrismAssetIndexMetadata::from(&report);
+    write_json_file(
+        prism_registry_metadata_path(&request.diagnostics_dir, &report.identity_fingerprint),
+        &metadata,
+    )?;
     on_event(AssetIndexEvent::message(format!(
         "Prism block registry written: {}",
         report_path.display()
     )));
     Ok(report)
+}
+
+fn write_json_file<T: Serialize>(path: impl AsRef<Path>, value: &T) -> Result<(), AssetError> {
+    let file = File::create(path)?;
+    let mut writer = BufWriter::new(file);
+    serde_json::to_writer(&mut writer, value)
+        .map_err(|error| AssetError::InvalidAssetIndex(error.to_string()))?;
+    writer.flush()?;
+    Ok(())
+}
+
+impl From<&PrismAssetIndexReport> for PrismAssetIndexMetadata {
+    fn from(report: &PrismAssetIndexReport) -> Self {
+        Self {
+            schema_version: report.schema_version,
+            status: report.status.clone(),
+            static_status: report.static_status.clone(),
+            runtime_status: report.runtime_status.clone(),
+            runtime_message: report.runtime_message.clone(),
+            instance_id: report.instance_id.clone(),
+            identity_fingerprint: report.identity_fingerprint.clone(),
+            content_fingerprint: report.content_fingerprint.clone(),
+            minecraft_version: report.minecraft_version.clone(),
+            loader: report.loader.clone(),
+            archive_count: report.archive_count,
+            block_count: report.block_count,
+            asset_count: report.asset_count,
+            report_path: report.report_path.clone(),
+        }
+    }
+}
+
+pub fn prism_registry_report_path(diagnostics_dir: &Path, identity_fingerprint: &str) -> PathBuf {
+    diagnostics_dir.join(format!(
+        "{}-registry.json",
+        safe_path_segment(identity_fingerprint)
+    ))
+}
+
+pub fn prism_registry_metadata_path(diagnostics_dir: &Path, identity_fingerprint: &str) -> PathBuf {
+    diagnostics_dir.join(format!(
+        "{}-registry-meta.json",
+        safe_path_segment(identity_fingerprint)
+    ))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PrismAssetIndexRegistryFile<'a> {
+    schema_version: u32,
+    status: &'a str,
+    static_status: &'a str,
+    runtime_status: &'a str,
+    runtime_message: Option<&'a str>,
+    instance_id: &'a str,
+    identity_fingerprint: &'a str,
+    content_fingerprint: &'a str,
+    minecraft_version: Option<&'a str>,
+    loader: Option<&'a str>,
+    archive_count: usize,
+    block_count: usize,
+    asset_count: usize,
+    report_path: &'a PathBuf,
+    blocks: Vec<RegistryBlockFile<'a>>,
+    texture_atlas: &'a TextureAtlasMetadata,
+    warnings: &'a [String],
+}
+
+impl<'a> From<&'a PrismAssetIndexReport> for PrismAssetIndexRegistryFile<'a> {
+    fn from(report: &'a PrismAssetIndexReport) -> Self {
+        Self {
+            schema_version: report.schema_version,
+            status: &report.status,
+            static_status: &report.static_status,
+            runtime_status: &report.runtime_status,
+            runtime_message: report.runtime_message.as_deref(),
+            instance_id: &report.instance_id,
+            identity_fingerprint: &report.identity_fingerprint,
+            content_fingerprint: &report.content_fingerprint,
+            minecraft_version: report.minecraft_version.as_deref(),
+            loader: report.loader.as_deref(),
+            archive_count: report.archive_count,
+            block_count: report.block_count,
+            asset_count: report.asset_count,
+            report_path: &report.report_path,
+            blocks: report.blocks.iter().map(RegistryBlockFile::from).collect(),
+            texture_atlas: &report.texture_atlas,
+            warnings: &report.warnings,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RegistryBlockFile<'a> {
+    identifier: &'a str,
+    item_id: Option<&'a str>,
+    max_stack_size: Option<u32>,
+    display_name: &'a str,
+    namespace: &'a str,
+    allowed_states: &'a [BlockStatePropertySample],
+    model: Option<&'a str>,
+    texture_path: Option<&'a PathBuf>,
+    face_texture_paths: Option<&'a FaceTexturePaths>,
+    model_variants_are_multipart: bool,
+    model_variants: Vec<RegistryBlockModelVariantFile<'a>>,
+}
+
+impl<'a> From<&'a BlockAssetSample> for RegistryBlockFile<'a> {
+    fn from(block: &'a BlockAssetSample) -> Self {
+        Self {
+            identifier: &block.identifier,
+            item_id: block.item_id.as_deref(),
+            max_stack_size: block.max_stack_size,
+            display_name: &block.display_name,
+            namespace: &block.namespace,
+            allowed_states: &block.allowed_states,
+            model: block.model.as_deref(),
+            texture_path: block.texture_path.as_ref(),
+            face_texture_paths: block.face_texture_paths.as_ref(),
+            model_variants_are_multipart: block.model_variants_are_multipart,
+            model_variants: block
+                .model_variants
+                .iter()
+                .map(RegistryBlockModelVariantFile::from)
+                .collect(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RegistryBlockModelVariantFile<'a> {
+    condition: Option<&'a BlockstateModelCondition>,
+    model: Option<&'a str>,
+    x: Option<f32>,
+    y: Option<f32>,
+    uv_lock: bool,
+    texture_path: Option<&'a PathBuf>,
+    face_texture_paths: Option<&'a FaceTexturePaths>,
+}
+
+impl<'a> From<&'a BlockModelVariantSample> for RegistryBlockModelVariantFile<'a> {
+    fn from(variant: &'a BlockModelVariantSample) -> Self {
+        Self {
+            condition: variant.condition.as_ref(),
+            model: variant.model.as_deref(),
+            x: variant.x,
+            y: variant.y,
+            uv_lock: variant.uv_lock,
+            texture_path: variant.texture_path.as_ref(),
+            face_texture_paths: variant.face_texture_paths.as_ref(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1340,6 +1523,15 @@ impl AssetCollector {
                         .cloned()
                         .unwrap_or_else(|| blockstate.identifier.clone()),
                     namespace: blockstate.namespace.clone(),
+                    allowed_states: blockstate
+                        .models
+                        .state_definitions
+                        .iter()
+                        .map(|(name, values)| BlockStatePropertySample {
+                            name: name.clone(),
+                            values: values.iter().cloned().collect(),
+                        })
+                        .collect(),
                     model,
                     texture_path,
                     face_texture_paths,
