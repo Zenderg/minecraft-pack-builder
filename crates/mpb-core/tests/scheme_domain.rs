@@ -5,9 +5,108 @@ use mpb_core::{
     SchemeOperation, StageRef,
 };
 
+#[test]
+fn new_schemes_are_sparse_and_compute_bounds_from_blocks() {
+    let registry = BlockRegistry::synthetic_fixture();
+    let mut scheme = Scheme::new("Sparse Factory");
+
+    assert_eq!(scheme.bounds(), None);
+    assert_eq!(scheme.computed_dimensions(), None);
+
+    scheme
+        .apply(
+            &registry,
+            SchemeOperation::Place(BlockPlacement::new(
+                Coordinate::new(4, 2, 7),
+                "minecraft:stone_bricks",
+                [("cracked", "false")],
+                StageRef::Unassigned,
+            )),
+        )
+        .expect("place positive coordinate");
+
+    let bounds = scheme.bounds().expect("bounds");
+    assert_eq!(bounds.min, Coordinate::new(4, 2, 7));
+    assert_eq!(bounds.max, Coordinate::new(4, 2, 7));
+    assert_eq!(
+        scheme.computed_dimensions(),
+        Some(Dimensions::new(5, 3, 8).expect("computed dimensions"))
+    );
+}
+
+#[test]
+fn sparse_schemes_reject_negative_coordinates_without_fixed_size_limits() {
+    let registry = BlockRegistry::synthetic_fixture();
+    let mut scheme = Scheme::new("Sparse Bounds");
+
+    scheme
+        .apply(
+            &registry,
+            SchemeOperation::Place(BlockPlacement::new(
+                Coordinate::new(512, 0, 512),
+                "minecraft:stone_bricks",
+                [("cracked", "false")],
+                StageRef::Unassigned,
+            )),
+        )
+        .expect("large positive coordinates are valid");
+
+    let result = scheme.apply(
+        &registry,
+        SchemeOperation::Place(BlockPlacement::new(
+            Coordinate::new(-1, 0, 0),
+            "minecraft:stone_bricks",
+            [("cracked", "false")],
+            StageRef::Unassigned,
+        )),
+    );
+
+    assert!(matches!(
+        result,
+        Err(SchemeError::NegativeCoordinate {
+            coordinate: Coordinate { x: -1, y: 0, z: 0 }
+        })
+    ));
+}
+
+#[test]
+fn incomplete_stages_fall_back_to_single_build_stage() {
+    let registry = BlockRegistry::synthetic_fixture();
+    let mut scheme = Scheme::new("Incomplete Stages");
+    let foundation = scheme.add_stage("Foundation").expect("stage");
+    scheme
+        .apply(
+            &registry,
+            SchemeOperation::Place(BlockPlacement::new(
+                Coordinate::new(0, 0, 0),
+                "minecraft:stone_bricks",
+                [("cracked", "false")],
+                StageRef::Stage(foundation),
+            )),
+        )
+        .expect("staged block");
+    scheme
+        .apply(
+            &registry,
+            SchemeOperation::Place(BlockPlacement::new(
+                Coordinate::new(1, 0, 0),
+                "create:andesite_casing",
+                [],
+                StageRef::Unassigned,
+            )),
+        )
+        .expect("unassigned block");
+
+    let plan = scheme.stage_plan();
+
+    assert!(!plan.complete);
+    assert_eq!(plan.effective_stage_count, 1);
+    assert_eq!(plan.message.as_deref(), Some("Stages incomplete"));
+}
+
 fn demo_scheme() -> (BlockRegistry, Scheme, u32, u32) {
     let registry = BlockRegistry::synthetic_fixture();
-    let mut scheme = Scheme::new("Domain Demo", Dimensions::new(4, 3, 4).expect("dimensions"));
+    let mut scheme = Scheme::new("Domain Demo");
     let foundation = scheme.add_stage("Foundation").expect("foundation stage");
     let machinery = scheme.add_stage("Machinery").expect("machinery stage");
     (registry, scheme, foundation, machinery)
@@ -15,10 +114,7 @@ fn demo_scheme() -> (BlockRegistry, Scheme, u32, u32) {
 
 #[test]
 fn scheme_exposes_user_facing_name_for_export_metadata() {
-    let scheme = Scheme::new(
-        "Exportable Factory",
-        Dimensions::new(4, 3, 4).expect("dimensions"),
-    );
+    let scheme = Scheme::new("Exportable Factory");
 
     assert_eq!(scheme.name(), "Exportable Factory");
 }
@@ -112,9 +208,9 @@ fn invalid_bulk_operations_are_atomic() {
 }
 
 #[test]
-fn coordinates_are_valid_only_inside_scheme_dimensions() {
+fn coordinates_are_valid_when_non_negative() {
     let registry = BlockRegistry::synthetic_fixture();
-    let mut scheme = Scheme::new("Bounds", Dimensions::new(2, 2, 2).expect("dimensions"));
+    let mut scheme = Scheme::new("Bounds");
 
     for x in -1..=2 {
         for y in -1..=2 {
@@ -131,39 +227,12 @@ fn coordinates_are_valid_only_inside_scheme_dimensions() {
                 );
                 assert_eq!(
                     result.is_ok(),
-                    (0..2).contains(&x) && (0..2).contains(&y) && (0..2).contains(&z),
+                    x >= 0 && y >= 0 && z >= 0,
                     "unexpected coordinate validation for {coord:?}"
                 );
             }
         }
     }
-}
-
-#[test]
-fn resize_rejects_dimensions_that_would_drop_existing_blocks() {
-    let (registry, mut scheme, foundation, _) = demo_scheme();
-    scheme
-        .apply(
-            &registry,
-            SchemeOperation::Place(BlockPlacement::new(
-                Coordinate::new(3, 2, 3),
-                "minecraft:stone_bricks",
-                [("cracked", "false")],
-                StageRef::Stage(foundation),
-            )),
-        )
-        .expect("place edge block");
-
-    let result = scheme.apply(
-        &registry,
-        SchemeOperation::Resize(Dimensions::new(3, 3, 4).expect("smaller dimensions")),
-    );
-
-    assert!(result.is_err());
-    assert_eq!(
-        scheme.dimensions(),
-        Dimensions::new(4, 3, 4).expect("original dimensions")
-    );
 }
 
 #[test]
@@ -222,7 +291,7 @@ fn registry_built_from_blockstate_definitions_validates_directional_states() {
             ]),
         )]),
     )]);
-    let mut scheme = Scheme::new("Directional", Dimensions::new(2, 2, 2).expect("dimensions"));
+    let mut scheme = Scheme::new("Directional");
 
     scheme
         .apply(

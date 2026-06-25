@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "modId": "mpb",
+  "modVersion": "0.1.0",
+  "loaders": [
+    {
+      "loader": "Fabric",
+      "minecraftVersions": ["1.20.1"],
+      "artifact": "mpb-minecraft-mod-fabric.jar",
+      "buildToolchain": "Fabric Loom 1.12.7"
+    },
+    {
+      "loader": "Forge",
+      "minecraftVersions": ["1.20.1"],
+      "artifact": "mpb-minecraft-mod-forge.jar",
+      "buildToolchain": "ForgeGradle 6.0.54"
+    },
+    {
+      "loader": "NeoForge",
+      "minecraftVersions": ["1.21.1"],
+      "artifact": "mpb-minecraft-mod-neoforge.jar",
+      "buildToolchain": "NeoForge ModDevGradle 2.0.141"
+    }
+  ]
+}

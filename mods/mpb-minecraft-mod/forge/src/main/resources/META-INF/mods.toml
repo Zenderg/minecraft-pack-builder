@@ -1,0 +1,16 @@
+modLoader = "javafml"
+loaderVersion = "[46,)"
+license = "MIT"
+
+[[mods]]
+modId = "mpb"
+version = "${version}"
+displayName = "Minecraft Pack Builder"
+description = "Client-only MPB runtime, MCP server, manager UI, and in-world build guide."
+
+[[dependencies.mpb]]
+modId = "minecraft"
+mandatory = true
+versionRange = "[1.20,)"
+ordering = "NONE"
+side = "CLIENT"

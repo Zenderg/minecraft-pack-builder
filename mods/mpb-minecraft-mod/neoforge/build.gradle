@@ -1,0 +1,43 @@
+plugins {
+    id 'net.neoforged.moddev' version "${neoforge_moddev_version}"
+    id 'java'
+}
+
+base {
+    archivesName = 'mpb-minecraft-mod-neoforge'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 21
+}
+
+sourceSets {
+    main {
+        java {
+            srcDirs = ['../common/src/main/java', 'src/main/java']
+        }
+        resources {
+            srcDirs = ['src/main/resources']
+        }
+    }
+}
+
+neoForge {
+    enable {
+        version = neoforge_version
+        disableRecompilation = true
+    }
+
+    mods {
+        mpb {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+processResources {
+    inputs.property 'version', project.version
+    filesMatching('META-INF/neoforge.mods.toml') {
+        expand version: project.version
+    }
+}

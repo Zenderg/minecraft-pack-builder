@@ -1,7 +1,6 @@
-//! PrismLauncher discovery and local Minecraft asset indexing helpers.
+//! PrismLauncher discovery and MPB patch management helpers.
 
-mod asset_index;
-mod blockstate;
+mod patcher;
 mod prism;
 
 use std::sync::{
@@ -9,11 +8,10 @@ use std::sync::{
     Arc,
 };
 
-pub use asset_index::{
-    build_prism_asset_index, build_prism_asset_index_with_events, prism_registry_metadata_path,
-    prism_registry_report_path, AssetIndexEvent, AssetIndexProgress, BlockAssetSample,
-    PrismAssetIndexMetadata, PrismAssetIndexReport, PrismAssetIndexRequest, TextureAtlasEntry,
-    TextureAtlasMetadata, PRISM_REGISTRY_SCHEMA_VERSION,
+pub use patcher::{
+    apply_mpb_patch, evaluate_mpb_patch, remove_mpb_patch, MpbFileOwner, MpbManagedFile,
+    MpbPatchAction, MpbPatchEvaluation, MpbPatchManifest, MpbPatchOperationResult,
+    MpbPatchProgressStep, MpbPatchStatus,
 };
 pub use prism::{
     validate_prism_root, PrismInstanceDescriptor, PrismInstanceStatus, PrismRootValidation,
@@ -28,10 +26,10 @@ pub enum AssetError {
     Io(#[from] std::io::Error),
     #[error("zip archive could not be parsed: {0}")]
     Zip(String),
-    #[error("modpack did not contain any parseable block assets")]
-    NoParseableBlocks,
     #[error("asset index could not be parsed: {0}")]
     InvalidAssetIndex(String),
+    #[error("patch operation failed: {0}")]
+    Patch(String),
 }
 
 #[derive(Debug, Clone, Default)]

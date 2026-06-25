@@ -2,4 +2,10 @@
 node_modules/
 dist/
 target/
+mods/mpb-minecraft-mod/build/
+mods/mpb-minecraft-mod/.gradle/
+mods/mpb-minecraft-mod/fabric/build/
+mods/mpb-minecraft-mod/forge/build/
+mods/mpb-minecraft-mod/neoforge/build/
+mods/mpb-minecraft-mod/artifacts/generated/
 .DS_Store

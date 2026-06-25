@@ -1,0 +1,54 @@
+plugins {
+    id 'net.minecraftforge.gradle' version "${forgegradle_version}"
+    id 'java'
+}
+
+base {
+    archivesName = 'mpb-minecraft-mod-forge'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 17
+    options.compilerArgs += ['-Xlint:deprecation']
+}
+
+sourceSets {
+    main {
+        java {
+            srcDirs = ['../common/src/main/java', 'src/main/java']
+        }
+        resources {
+            srcDirs = ['src/main/resources']
+        }
+    }
+}
+
+minecraft {
+    mappings channel: 'official', version: '1.20.1'
+
+    runs {
+        client {
+            workingDirectory project.file('run')
+            mods {
+                mpb {
+                    source sourceSets.main
+                }
+            }
+        }
+    }
+}
+
+dependencies {
+    minecraft "net.minecraftforge:forge:${forge_version}"
+}
+
+processResources {
+    inputs.property 'version', project.version
+    filesMatching('META-INF/mods.toml') {
+        expand version: project.version
+    }
+}
+
+tasks.named('jar') {
+    finalizedBy 'reobfJar'
+}

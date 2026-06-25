@@ -1,0 +1,37 @@
+plugins {
+    id 'fabric-loom' version "${fabric_loom_version}"
+    id 'java'
+}
+
+base {
+    archivesName = 'mpb-minecraft-mod-fabric'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 17
+}
+
+sourceSets {
+    main {
+        java {
+            srcDirs = ['../common/src/main/java', 'src/main/java']
+        }
+        resources {
+            srcDirs = ['src/main/resources']
+        }
+    }
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${minecraft_version}"
+    mappings loom.officialMojangMappings()
+    modImplementation "net.fabricmc:fabric-loader:${fabric_loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_api_version}"
+}
+
+processResources {
+    inputs.property 'version', project.version
+    filesMatching('fabric.mod.json') {
+        expand version: project.version
+    }
+}

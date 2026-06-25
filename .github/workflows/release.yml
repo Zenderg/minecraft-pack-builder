@@ -42,6 +42,22 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      - name: Set up Java 17 for Forge toolchains
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Java 21 for Gradle and NeoForge
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.14.3
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.platform == 'macos' && 'x86_64-apple-darwin,aarch64-apple-darwin' || '' }}
@@ -62,6 +78,12 @@ jobs:
 
       - name: Test frontend
         run: pnpm test
+
+      - name: Build embedded Minecraft mod artifacts
+        shell: bash
+        env:
+          MPB_GRADLE: gradle
+        run: mods/mpb-minecraft-mod/build.sh
 
       - name: Test Rust workspace
         run: cargo test --workspace

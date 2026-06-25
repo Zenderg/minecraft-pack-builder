@@ -1,9 +1,0 @@
-[package]
-name = "mpb-render"
-edition.workspace = true
-license.workspace = true
-version.workspace = true
-
-[dependencies]
-mpb-core = { path = "../mpb-core" }
-serde.workspace = true

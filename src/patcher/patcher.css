@@ -1,0 +1,265 @@
+.patcher-shell {
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  gap: 16px;
+  width: 100%;
+  height: 100%;
+  padding: 24px;
+  background: #0b0f10;
+  color: #e8f0ec;
+}
+
+.patcher-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.patcher-header h1,
+.patcher-detail h2,
+.patcher-list h2 {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+.patcher-header h1 {
+  font-size: 28px;
+  line-height: 1.15;
+}
+
+.patcher-header p {
+  margin: 8px 0 0;
+  color: #a8b8b2;
+}
+
+.patcher-actions,
+.patcher-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.patcher-button {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 6px;
+  padding: 0 13px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.patcher-button.primary {
+  background: #42d392;
+  color: #07110c;
+}
+
+.patcher-button.secondary {
+  border: 1px solid #2b3735;
+  background: #141b1c;
+  color: #e8f0ec;
+}
+
+.patcher-button.danger {
+  background: #3a1d22;
+  color: #ffc2cb;
+}
+
+.patcher-root,
+.patcher-message {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 42px;
+  border: 1px solid #263130;
+  border-radius: 6px;
+  background: #101617;
+  padding: 10px 12px;
+  color: #a8b8b2;
+}
+
+.patcher-root strong,
+.patcher-message {
+  color: #e8f0ec;
+}
+
+.patcher-grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+  min-height: 0;
+  gap: 16px;
+}
+
+.patcher-list,
+.patcher-detail {
+  min-height: 0;
+  border: 1px solid #263130;
+  border-radius: 8px;
+  background: #121819;
+  padding: 16px;
+}
+
+.patcher-list {
+  overflow: auto;
+}
+
+.patcher-list h2,
+.patcher-detail h2 {
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.patcher-instance {
+  display: grid;
+  width: 100%;
+  gap: 8px;
+  margin-top: 10px;
+  border: 1px solid #263130;
+  border-radius: 6px;
+  background: #0f1516;
+  padding: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.patcher-instance.selected {
+  border-color: #42d392;
+  background: #11201a;
+}
+
+.patcher-instance-name {
+  font-weight: 800;
+}
+
+.patcher-meta {
+  color: #93a19c;
+  font-size: 12px;
+}
+
+.patcher-status {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.patcher-status.patched {
+  background: #193828;
+  color: #8ef0b9;
+}
+
+.patcher-status.notPatched,
+.patcher-status.needsUpdate,
+.patcher-status.needsRepair {
+  background: #322916;
+  color: #f1cf82;
+}
+
+.patcher-status.conflict,
+.patcher-status.unsupported,
+.patcher-status.instanceRunning {
+  background: #3b1f24;
+  color: #ffb4bf;
+}
+
+.patcher-detail {
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  overflow: auto;
+}
+
+.patcher-detail-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.patcher-facts {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.patcher-facts div {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 16px;
+  border-top: 1px solid #263130;
+  padding-top: 10px;
+}
+
+.patcher-facts dt {
+  color: #93a19c;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.patcher-facts dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.patcher-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #c4d0cc;
+  font-size: 13px;
+}
+
+.patcher-next {
+  border-left: 3px solid #42d392;
+  padding-left: 12px;
+}
+
+.patcher-next h3,
+.patcher-next p,
+.patcher-empty {
+  margin: 0;
+}
+
+.patcher-next h3 {
+  font-size: 14px;
+}
+
+.patcher-next p,
+.patcher-empty {
+  color: #a8b8b2;
+  line-height: 1.55;
+}
+
+@media (max-width: 860px) {
+  .patcher-shell {
+    padding: 16px;
+    overflow: auto;
+  }
+
+  .patcher-header,
+  .patcher-actions {
+    display: grid;
+    justify-content: stretch;
+  }
+
+  .patcher-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .patcher-facts div {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}

@@ -19,12 +19,6 @@ impl Dimensions {
         }
         Ok(Self { x, y, z })
     }
-
-    fn contains(self, coordinate: Coordinate) -> bool {
-        (0..self.x).contains(&coordinate.x)
-            && (0..self.y).contains(&coordinate.y)
-            && (0..self.z).contains(&coordinate.z)
-    }
 }
 
 impl std::fmt::Display for Dimensions {
@@ -84,6 +78,20 @@ impl Selection {
                 .flat_map(move |y| (self.from.z..=self.to.z).map(move |z| Coordinate::new(x, y, z)))
         })
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SchemeBounds {
+    pub min: Coordinate,
+    pub max: Coordinate,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StagePlan {
+    pub complete: bool,
+    pub effective_stage_count: usize,
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -316,7 +324,6 @@ pub enum SchemeOperation {
         selection: Selection,
         stage: StageRef,
     },
-    Resize(Dimensions),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -338,17 +345,15 @@ impl MaterialLine {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Scheme {
     name: String,
-    dimensions: Dimensions,
     stages: Vec<ConstructionStage>,
     blocks: BTreeMap<Coordinate, SchemeBlock>,
     next_stage_id: u32,
 }
 
 impl Scheme {
-    pub fn new(name: &str, dimensions: Dimensions) -> Self {
+    pub fn new(name: &str) -> Self {
         Self {
             name: name.to_string(),
-            dimensions,
             stages: Vec::new(),
             blocks: BTreeMap::new(),
             next_stage_id: 1,
@@ -357,7 +362,7 @@ impl Scheme {
 
     pub fn from_persisted(
         name: &str,
-        dimensions: Dimensions,
+        _legacy_dimensions: Dimensions,
         stages: Vec<ConstructionStage>,
         blocks: Vec<(Coordinate, SchemeBlock)>,
     ) -> Result<Self, SchemeError> {
@@ -369,13 +374,12 @@ impl Scheme {
             .saturating_add(1);
         let scheme = Self {
             name: name.to_string(),
-            dimensions,
             stages,
             blocks: blocks.into_iter().collect(),
             next_stage_id,
         };
         for (coordinate, block) in &scheme.blocks {
-            scheme.ensure_coordinate_in_bounds(*coordinate)?;
+            ensure_coordinate_non_negative(*coordinate)?;
             scheme.ensure_stage_exists(block.stage)?;
         }
         Ok(scheme)
@@ -447,9 +451,6 @@ impl Scheme {
                     }
                 }
             }
-            SchemeOperation::Resize(dimensions) => {
-                self.dimensions = dimensions;
-            }
         }
 
         self.validate(registry)
@@ -457,7 +458,7 @@ impl Scheme {
 
     pub fn validate(&self, registry: &BlockRegistry) -> Result<(), SchemeError> {
         for (coordinate, block) in &self.blocks {
-            self.ensure_coordinate_in_bounds(*coordinate)?;
+            ensure_coordinate_non_negative(*coordinate)?;
             self.ensure_stage_exists(block.stage)?;
             registry.validate_block(block)?;
         }
@@ -491,7 +492,60 @@ impl Scheme {
     }
 
     pub fn dimensions(&self) -> Dimensions {
-        self.dimensions
+        self.computed_dimensions()
+            .unwrap_or(Dimensions { x: 0, y: 0, z: 0 })
+    }
+
+    pub fn bounds(&self) -> Option<SchemeBounds> {
+        let mut coordinates = self.blocks.keys();
+        let first = *coordinates.next()?;
+        let mut min = first;
+        let mut max = first;
+        for coordinate in coordinates {
+            min.x = min.x.min(coordinate.x);
+            min.y = min.y.min(coordinate.y);
+            min.z = min.z.min(coordinate.z);
+            max.x = max.x.max(coordinate.x);
+            max.y = max.y.max(coordinate.y);
+            max.z = max.z.max(coordinate.z);
+        }
+        Some(SchemeBounds { min, max })
+    }
+
+    pub fn computed_dimensions(&self) -> Option<Dimensions> {
+        let bounds = self.bounds()?;
+        Some(Dimensions {
+            x: bounds.max.x + 1,
+            y: bounds.max.y + 1,
+            z: bounds.max.z + 1,
+        })
+    }
+
+    pub fn stage_plan(&self) -> StagePlan {
+        if self.stages.is_empty() {
+            return StagePlan {
+                complete: true,
+                effective_stage_count: 1,
+                message: None,
+            };
+        }
+        let complete = self
+            .blocks
+            .values()
+            .all(|block| matches!(block.stage, StageRef::Stage(_)));
+        if complete {
+            StagePlan {
+                complete: true,
+                effective_stage_count: self.stages.len(),
+                message: None,
+            }
+        } else {
+            StagePlan {
+                complete: false,
+                effective_stage_count: 1,
+                message: Some("Stages incomplete".to_string()),
+            }
+        }
     }
 
     pub fn name(&self) -> &str {
@@ -522,11 +576,11 @@ impl Scheme {
     ) -> Result<(), SchemeError> {
         match operation {
             SchemeOperation::Place(placement) => {
-                self.ensure_coordinate_in_bounds(placement.coordinate)?;
+                ensure_coordinate_non_negative(placement.coordinate)?;
                 self.ensure_stage_exists(placement.block.stage)?;
                 registry.validate_block(&placement.block)
             }
-            SchemeOperation::Delete(coordinate) => self.ensure_coordinate_in_bounds(*coordinate),
+            SchemeOperation::Delete(coordinate) => ensure_coordinate_non_negative(*coordinate),
             SchemeOperation::ReplaceAll { to, .. } => {
                 self.ensure_stage_exists(to.stage)?;
                 registry.validate_block(to)
@@ -540,34 +594,12 @@ impl Scheme {
                 self.ensure_selection_in_bounds(*selection)?;
                 self.ensure_stage_exists(*stage)
             }
-            SchemeOperation::Resize(dimensions) => {
-                for coordinate in self.blocks.keys() {
-                    if !dimensions.contains(*coordinate) {
-                        return Err(SchemeError::ResizeWouldDropBlock {
-                            coordinate: *coordinate,
-                            dimensions: *dimensions,
-                        });
-                    }
-                }
-                Ok(())
-            }
-        }
-    }
-
-    fn ensure_coordinate_in_bounds(&self, coordinate: Coordinate) -> Result<(), SchemeError> {
-        if self.dimensions.contains(coordinate) {
-            Ok(())
-        } else {
-            Err(SchemeError::CoordinateOutOfBounds {
-                coordinate,
-                dimensions: self.dimensions,
-            })
         }
     }
 
     fn ensure_selection_in_bounds(&self, selection: Selection) -> Result<(), SchemeError> {
-        self.ensure_coordinate_in_bounds(selection.from)?;
-        self.ensure_coordinate_in_bounds(selection.to)
+        ensure_coordinate_non_negative(selection.from)?;
+        ensure_coordinate_non_negative(selection.to)
     }
 
     fn ensure_stage_exists(&self, stage: StageRef) -> Result<(), SchemeError> {
@@ -598,20 +630,20 @@ impl Scheme {
     }
 }
 
+fn ensure_coordinate_non_negative(coordinate: Coordinate) -> Result<(), SchemeError> {
+    if coordinate.x >= 0 && coordinate.y >= 0 && coordinate.z >= 0 {
+        Ok(())
+    } else {
+        Err(SchemeError::NegativeCoordinate { coordinate })
+    }
+}
+
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum SchemeError {
     #[error("dimensions must be positive, got {x} x {y} x {z}")]
     InvalidDimensions { x: i32, y: i32, z: i32 },
-    #[error("coordinate {coordinate} is outside {dimensions}")]
-    CoordinateOutOfBounds {
-        coordinate: Coordinate,
-        dimensions: Dimensions,
-    },
-    #[error("resize to {dimensions} would drop existing block at {coordinate}")]
-    ResizeWouldDropBlock {
-        coordinate: Coordinate,
-        dimensions: Dimensions,
-    },
+    #[error("coordinate {coordinate} must not contain negative values")]
+    NegativeCoordinate { coordinate: Coordinate },
     #[error("unknown block id {block_id}")]
     UnknownBlock { block_id: String },
     #[error("missing state {state} for block {block_id}")]
@@ -634,8 +666,7 @@ impl SchemeError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::InvalidDimensions { .. } => "invalid_dimensions",
-            Self::CoordinateOutOfBounds { .. } => "coordinate_out_of_bounds",
-            Self::ResizeWouldDropBlock { .. } => "resize_would_drop_block",
+            Self::NegativeCoordinate { .. } => "negative_coordinate",
             Self::UnknownBlock { .. } => "unknown_block",
             Self::MissingBlockState { .. } => "missing_block_state",
             Self::UnknownBlockState { .. } => "unknown_block_state",

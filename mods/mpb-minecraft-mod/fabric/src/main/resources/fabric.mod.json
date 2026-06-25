@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "mpb",
+  "version": "${version}",
+  "name": "Minecraft Pack Builder",
+  "description": "Client-only MPB runtime, MCP server, manager UI, and in-world build guide.",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.mpb.fabric.MpbFabricClient"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "minecraft": ">=1.20"
+  }
+}
