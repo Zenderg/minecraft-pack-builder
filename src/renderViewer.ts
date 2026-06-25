@@ -15,6 +15,8 @@ export type RenderBlock = {
   texturePath?: string | null;
   faceTexturePaths?: FaceTexturePaths | null;
   modelElements?: RenderModelElement[] | null;
+  renderFidelity?: string | null;
+  renderSource?: string | null;
 };
 
 export type FaceTexturePaths = {

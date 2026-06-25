@@ -65,6 +65,16 @@ function modelElementKey(element: RenderModelElement): string {
   ].join("\u001e");
 }
 
+export function renderBlockInstanceKey(block: RenderBlock, element: RenderModelElement): string {
+  return [
+    modelElementKey(element),
+    block.color,
+    block.alpha ?? 1,
+    block.renderFidelity ?? "staticFallback",
+    block.renderSource ?? "",
+  ].join("\u001f");
+}
+
 export function ThreeSchemeViewer({
   blocks,
   dimensions,
@@ -141,7 +151,6 @@ export function ThreeSchemeViewer({
       const pointer = new THREE.Vector2();
       const interactiveMeshes: Array<{ mesh: InstancedMesh; blocks: RenderBlock[] }> = [];
       const textureLoader = new THREE.TextureLoader();
-      const materialKeySeparator = "\u001f";
       const textureCache = new Map<string, Texture>();
 
       function textureForPath(path: string): Texture {
@@ -178,17 +187,13 @@ export function ThreeSchemeViewer({
         const byMaterial = new Map<string, RenderBlockInstance[]>();
         for (const block of blocksRef.current) {
           for (const element of elementsForBlock(block)) {
-            const key = [
-              modelElementKey(element),
-              block.color,
-              block.alpha ?? 1,
-            ].join(materialKeySeparator);
+            const key = renderBlockInstanceKey(block, element);
             byMaterial.set(key, [...(byMaterial.get(key) ?? []), { block, element }]);
           }
         }
 
         for (const [key, materialInstances] of byMaterial) {
-          const [_elementKey, color, alphaValue] = key.split(materialKeySeparator);
+          const [_elementKey, color, alphaValue] = key.split("\u001f");
           const alpha = Number(alphaValue);
           const element = materialInstances[0].element;
           const geometry = createModelElementGeometry(element);

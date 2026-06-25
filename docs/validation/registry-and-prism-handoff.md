@@ -192,6 +192,52 @@ Do not show `[x stacks]` if max stack size is unknown.
 
 Duplicate name/id rows should be avoided. If the display name equals the id, show it once.
 
+## Runtime-Baked Viewer Contract
+
+The production viewer direction is runtime-authored baked render assets, not a hand-written Minecraft renderer in TypeScript or Rust. The app should keep Three.js as the local viewport, but the geometry it draws should come from the loaded Minecraft/loader/modpack runtime whenever that runtime can provide it.
+
+Registry reports may now include optional block render assets:
+
+```json
+{
+  "blocks": [
+    {
+      "identifier": "mod:complex_block",
+      "renderAssets": [
+        {
+          "fidelity": "runtimeBaked",
+          "source": "minecraft-runtime",
+          "condition": { "anyOf": [{ "facing": ["east"] }] },
+          "model": "mod:block/runtime_complex_block",
+          "elements": [
+            {
+              "from": [0, 0, 0],
+              "to": [16, 16, 16],
+              "faceTexturePaths": { "north": "/path/to/texture.png" },
+              "faceUvs": { "north": [0, 0, 16, 16] }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+Render-scene loading prefers matching authoritative runtime `renderAssets` over static `modelVariants`. If no authoritative runtime asset matches the block states, it falls back to the existing static JSON model path. Runtime-baked elements are treated as already transformed; the viewer should not re-apply blockstate rotations to them.
+
+The bundled Forge, NeoForge, and Fabric runtime extractor jars now write both authoritative runtime item stack sizes and server-side runtime shape render assets when Minecraft can expose bounded static voxel-shape boxes for a block state. These shape-derived assets use `"fidelity": "approximation"` and `"source": "minecraft-runtime-shape"`. The extractor intentionally skips single full-cube shapes to keep registry reports smaller and to avoid replacing better static JSON models with untextured shape boxes.
+
+`approximation` render assets are a fallback, not a higher-fidelity source. The app should use them only when the static JSON model path has no render payload. Full production fidelity for blocks whose appearance comes from client-only baked models, block entity renderers, animation, custom renderers, or world context still requires a future client-baked extractor path that can emit `exact` or `runtimeBaked` assets.
+
+Fidelity should remain explicit. Good values are:
+
+- `exact` for assets known to match in-game static rendering;
+- `runtimeBaked` for geometry authored by the Minecraft runtime/model system;
+- `staticModel` for the JSON model fallback;
+- `approximation` for deliberate substitutes;
+- `unsupportedDynamic` for blocks that depend on dynamic renderers, animation, block entities, or world context the extractor could not freeze.
+
 ## Important Product Principle
 
 Treat missing registry data as missing data. Do not mask it with `64`, regex guesses, pretty-name transforms, or static heuristics that look correct only for common vanilla blocks.

@@ -373,3 +373,221 @@ fn combines_matching_multipart_render_model_variants() {
         Some(90.0)
     );
 }
+
+#[test]
+fn prefers_runtime_baked_render_assets_over_static_model_variants() {
+    let registry = BlockRegistry::from_block_ids(["mod:complex_machine".to_string()]);
+    let mut scheme = Scheme::new(
+        "Runtime Baked",
+        Dimensions::new(3, 3, 3).expect("dimensions"),
+    );
+    scheme
+        .apply(
+            &registry,
+            SchemeOperation::Place(BlockPlacement::new(
+                Coordinate::new(1, 1, 1),
+                "mod:complex_machine",
+                [("facing", "east")],
+                StageRef::Unassigned,
+            )),
+        )
+        .expect("place complex machine");
+    let report = serde_json::json!({
+        "runtimeStatus": "ready",
+        "blocks": [
+            {
+                "identifier": "mod:complex_machine",
+                "displayName": "Complex Machine",
+                "modelVariants": [
+                    {
+                        "condition": { "anyOf": [{ "facing": ["east"] }] },
+                        "model": "mod:block/static_machine",
+                        "modelElements": [
+                            {
+                                "from": [0, 0, 0],
+                                "to": [16, 16, 16],
+                                "faceTexturePaths": { "north": "/tmp/static.png" },
+                                "faceUvs": {}
+                            }
+                        ]
+                    }
+                ],
+                "renderAssets": [
+                    {
+                        "fidelity": "runtimeBaked",
+                        "source": "minecraft-runtime",
+                        "condition": { "anyOf": [{ "facing": ["east"] }] },
+                        "model": "mod:block/runtime_machine",
+                        "elements": [
+                            {
+                                "from": [2, 0, 2],
+                                "to": [14, 14, 14],
+                                "faceTexturePaths": { "north": "/tmp/runtime.png" },
+                                "faceUvs": { "north": [2, 2, 14, 14] }
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    });
+
+    let scene = render_scene_from_scheme_with_registry_report(42, &scheme, Some(&report));
+    let machine = scene
+        .blocks
+        .iter()
+        .find(|block| block.block_id == "mod:complex_machine")
+        .expect("runtime render block");
+
+    assert_eq!(machine.render_fidelity.as_deref(), Some("runtimeBaked"));
+    assert_eq!(machine.render_source.as_deref(), Some("minecraft-runtime"));
+    assert_eq!(machine.model_elements.len(), 1);
+    assert_eq!(machine.model_elements[0].from, [2.0, 0.0, 2.0]);
+    assert_eq!(
+        machine.model_elements[0]
+            .face_texture_paths
+            .north
+            .as_deref(),
+        Some("/tmp/runtime.png")
+    );
+    assert_eq!(
+        machine.model_elements[0].face_uvs.north,
+        Some([2.0, 2.0, 14.0, 14.0])
+    );
+}
+
+#[test]
+fn keeps_static_model_ahead_of_runtime_shape_approximation() {
+    let registry = BlockRegistry::from_block_ids(["mod:machine_frame".to_string()]);
+    let mut scheme = Scheme::new(
+        "Static Beats Approximation",
+        Dimensions::new(3, 3, 3).expect("dimensions"),
+    );
+    scheme
+        .apply(
+            &registry,
+            SchemeOperation::Place(BlockPlacement::new(
+                Coordinate::new(1, 1, 1),
+                "mod:machine_frame",
+                [("powered", "false")],
+                StageRef::Unassigned,
+            )),
+        )
+        .expect("place machine frame");
+    let report = serde_json::json!({
+        "runtimeStatus": "ready",
+        "blocks": [
+            {
+                "identifier": "mod:machine_frame",
+                "displayName": "Machine Frame",
+                "modelVariants": [
+                    {
+                        "condition": { "anyOf": [{ "powered": ["false"] }] },
+                        "model": "mod:block/machine_frame",
+                        "modelElements": [
+                            {
+                                "from": [0, 0, 0],
+                                "to": [16, 16, 16],
+                                "faceTexturePaths": { "north": "/tmp/static.png" },
+                                "faceUvs": { "north": [0, 0, 16, 16] }
+                            }
+                        ]
+                    }
+                ],
+                "renderAssets": [
+                    {
+                        "fidelity": "approximation",
+                        "source": "minecraft-runtime-shape",
+                        "condition": { "anyOf": [{ "powered": ["false"] }] },
+                        "elements": [
+                            {
+                                "from": [4, 0, 4],
+                                "to": [12, 12, 12],
+                                "faceTexturePaths": {},
+                                "faceUvs": {}
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    });
+
+    let scene = render_scene_from_scheme_with_registry_report(42, &scheme, Some(&report));
+    let frame = scene
+        .blocks
+        .iter()
+        .find(|block| block.block_id == "mod:machine_frame")
+        .expect("machine frame render block");
+
+    assert_eq!(frame.render_fidelity.as_deref(), Some("staticModel"));
+    assert_eq!(
+        frame.render_source.as_deref(),
+        Some("mod:block/machine_frame")
+    );
+    assert_eq!(frame.model_elements.len(), 1);
+    assert_eq!(frame.model_elements[0].from, [0.0, 0.0, 0.0]);
+    assert_eq!(
+        frame.model_elements[0].face_texture_paths.north.as_deref(),
+        Some("/tmp/static.png")
+    );
+}
+
+#[test]
+fn falls_back_to_runtime_shape_approximation_when_static_model_is_missing() {
+    let registry = BlockRegistry::from_block_ids(["mod:dynamic_machine".to_string()]);
+    let mut scheme = Scheme::new(
+        "Approximation Fallback",
+        Dimensions::new(3, 3, 3).expect("dimensions"),
+    );
+    scheme
+        .apply(
+            &registry,
+            SchemeOperation::Place(BlockPlacement::new(
+                Coordinate::new(1, 1, 1),
+                "mod:dynamic_machine",
+                [("powered", "true")],
+                StageRef::Unassigned,
+            )),
+        )
+        .expect("place dynamic machine");
+    let report = serde_json::json!({
+        "runtimeStatus": "ready",
+        "blocks": [
+            {
+                "identifier": "mod:dynamic_machine",
+                "displayName": "Dynamic Machine",
+                "renderAssets": [
+                    {
+                        "fidelity": "approximation",
+                        "source": "minecraft-runtime-shape",
+                        "condition": { "anyOf": [{ "powered": ["true"] }] },
+                        "elements": [
+                            {
+                                "from": [4, 0, 4],
+                                "to": [12, 12, 12],
+                                "faceTexturePaths": {},
+                                "faceUvs": {}
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    });
+
+    let scene = render_scene_from_scheme_with_registry_report(42, &scheme, Some(&report));
+    let machine = scene
+        .blocks
+        .iter()
+        .find(|block| block.block_id == "mod:dynamic_machine")
+        .expect("dynamic machine render block");
+
+    assert_eq!(machine.render_fidelity.as_deref(), Some("approximation"));
+    assert_eq!(
+        machine.render_source.as_deref(),
+        Some("minecraft-runtime-shape")
+    );
+    assert_eq!(machine.model_elements.len(), 1);
+    assert_eq!(machine.model_elements[0].from, [4.0, 0.0, 4.0]);
+}

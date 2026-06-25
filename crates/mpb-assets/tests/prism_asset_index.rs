@@ -127,6 +127,89 @@ fn merges_cached_runtime_stack_sizes_by_item_id() {
 }
 
 #[test]
+fn merges_cached_runtime_baked_render_assets_by_block_id() {
+    let temp = tempdir().expect("temp dir");
+    let minecraft_dir = temp.path().join("PrismLauncher/instances/aoc/.minecraft");
+    let mods_dir = minecraft_dir.join("mods");
+    std::fs::create_dir_all(&mods_dir).expect("mods dir");
+    write_zip(
+        &mods_dir.join("thermal.jar"),
+        &[
+            (
+                "assets/thermal/lang/en_us.json",
+                r#"{ "block.thermal.machine_frame": "Machine Frame" }"#,
+            ),
+            (
+                "assets/thermal/blockstates/machine_frame.json",
+                r#"{ "variants": { "": { "model": "thermal:block/machine_frame" } } }"#,
+            ),
+        ],
+    );
+    let diagnostics_dir = temp.path().join("diagnostics");
+    std::fs::create_dir_all(&diagnostics_dir).expect("diagnostics dir");
+    std::fs::write(
+        diagnostics_dir.join("fingerprint-aoc-content-aoc-runtime.json"),
+        r#"{
+            "status": "ready",
+            "items": [
+                { "itemId": "thermal:machine_frame", "maxStackSize": 16 }
+            ],
+            "blocks": [
+                {
+                    "identifier": "thermal:machine_frame",
+                    "renderAssets": [
+                        {
+                            "fidelity": "runtimeBaked",
+                            "source": "minecraft-runtime",
+                            "model": "thermal:block/runtime_machine_frame",
+                            "elements": [
+                                {
+                                    "from": [0, 0, 0],
+                                    "to": [16, 16, 16],
+                                    "faceTexturePaths": {
+                                        "north": "/tmp/runtime-front.png"
+                                    },
+                                    "faceUvs": {
+                                        "north": [0, 0, 16, 16]
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }"#,
+    )
+    .expect("write runtime report");
+
+    let report =
+        build_prism_asset_index(request(temp.path(), &minecraft_dir)).expect("Prism asset index");
+
+    assert_eq!(report.runtime_status, "ready");
+    assert_eq!(report.blocks[0].max_stack_size, Some(16));
+    assert_eq!(report.blocks[0].render_assets.len(), 1);
+    let asset = &report.blocks[0].render_assets[0];
+    assert_eq!(asset.fidelity, "runtimeBaked");
+    assert_eq!(asset.source, "minecraft-runtime");
+    assert_eq!(
+        asset.model.as_deref(),
+        Some("thermal:block/runtime_machine_frame")
+    );
+    assert_eq!(asset.elements.len(), 1);
+    assert_eq!(
+        asset.elements[0].face_texture_paths.north.as_deref(),
+        Some(Path::new("/tmp/runtime-front.png"))
+    );
+    assert_eq!(
+        asset.elements[0].face_uvs.north,
+        Some([0.0, 0.0, 16.0, 16.0])
+    );
+    let registry_json = std::fs::read_to_string(&report.report_path).expect("registry report");
+    assert!(registry_json.contains("renderAssets"));
+    assert!(registry_json.contains("runtimeBaked"));
+}
+
+#[test]
 fn reports_forge_runtime_prerequisites_without_blocking_static_index() {
     let temp = tempdir().expect("temp dir");
     let minecraft_dir = temp.path().join("PrismLauncher/instances/aoc/.minecraft");

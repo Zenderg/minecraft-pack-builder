@@ -1,0 +1,9 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="MIT"
+
+[[mods]]
+modId="mpb_runtime_extractor"
+version="1.0.0"
+displayName="Minecraft Pack Builder Runtime Extractor"
+description="Extracts runtime registry and render metadata for Minecraft Pack Builder."

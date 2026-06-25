@@ -24,6 +24,8 @@ pub struct RenderBlockDto {
     pub texture_path: Option<String>,
     pub face_texture_paths: Option<FaceTexturePathsDto>,
     pub model_elements: Vec<ModelElementDto>,
+    pub render_fidelity: Option<String>,
+    pub render_source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -203,6 +205,8 @@ pub fn render_scene_from_scheme_with_registry_report(
                     texture_path: render_model.texture_path,
                     face_texture_paths: render_model.face_texture_paths,
                     model_elements: render_model.model_elements,
+                    render_fidelity: render_model.render_fidelity,
+                    render_source: render_model.render_source,
                 }
             })
             .collect(),
@@ -221,6 +225,7 @@ struct RegistryBlockMetadata {
     model_elements: Vec<ModelElementDto>,
     model_variants_are_multipart: bool,
     model_variants: Vec<RegistryModelVariant>,
+    render_assets: Vec<RegistryRenderAsset>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -228,14 +233,27 @@ struct RegistryRenderModel {
     texture_path: Option<String>,
     face_texture_paths: Option<FaceTexturePathsDto>,
     model_elements: Vec<ModelElementDto>,
+    render_fidelity: Option<String>,
+    render_source: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 struct RegistryModelVariant {
     condition: Option<RegistryModelCondition>,
+    model: Option<String>,
     x: f32,
     y: f32,
     uv_lock: bool,
+    texture_path: Option<String>,
+    face_texture_paths: Option<FaceTexturePathsDto>,
+    model_elements: Vec<ModelElementDto>,
+}
+
+#[derive(Debug, Clone)]
+struct RegistryRenderAsset {
+    condition: Option<RegistryModelCondition>,
+    fidelity: String,
+    source: String,
     texture_path: Option<String>,
     face_texture_paths: Option<FaceTexturePathsDto>,
     model_elements: Vec<ModelElementDto>,
@@ -248,11 +266,29 @@ struct RegistryModelCondition {
 
 impl RegistryBlockMetadata {
     fn render_model_for_block(&self, block: &SchemeBlock) -> RegistryRenderModel {
+        if let Some(render_model) =
+            self.runtime_render_model_for_block(block, RuntimeRenderAssetPreference::Authoritative)
+        {
+            return render_model;
+        }
+
+        let static_render_model = self.static_render_model_for_block(block);
+        if static_render_model.has_render_payload() || self.render_assets.is_empty() {
+            return static_render_model;
+        }
+
+        self.runtime_render_model_for_block(block, RuntimeRenderAssetPreference::Any)
+            .unwrap_or(static_render_model)
+    }
+
+    fn static_render_model_for_block(&self, block: &SchemeBlock) -> RegistryRenderModel {
         if self.model_variants.is_empty() {
             return RegistryRenderModel {
                 texture_path: self.texture_path.clone(),
                 face_texture_paths: self.face_texture_paths.clone(),
                 model_elements: self.model_elements.clone(),
+                render_fidelity: None,
+                render_source: None,
             };
         }
 
@@ -271,6 +307,8 @@ impl RegistryBlockMetadata {
                 texture_path: self.texture_path.clone(),
                 face_texture_paths: self.face_texture_paths.clone(),
                 model_elements: self.model_elements.clone(),
+                render_fidelity: None,
+                render_source: None,
             };
         }
 
@@ -297,6 +335,83 @@ impl RegistryBlockMetadata {
                 .and_then(|variant| variant.face_texture_paths.clone())
                 .or_else(|| self.face_texture_paths.clone()),
             model_elements,
+            render_fidelity: Some("staticModel".to_string()),
+            render_source: selected
+                .first()
+                .and_then(|variant| variant.model.clone())
+                .or_else(|| self.texture_path.clone()),
+        }
+    }
+
+    fn runtime_render_model_for_block(
+        &self,
+        block: &SchemeBlock,
+        preference: RuntimeRenderAssetPreference,
+    ) -> Option<RegistryRenderModel> {
+        if self.render_assets.is_empty() {
+            return None;
+        }
+        let matching = self
+            .render_assets
+            .iter()
+            .filter(|asset| preference.accepts(&asset.fidelity))
+            .filter(|asset| variant_matches(asset.condition.as_ref(), &block.states))
+            .collect::<Vec<_>>();
+        let selected = if self.model_variants_are_multipart {
+            matching
+        } else {
+            matching.into_iter().take(1).collect()
+        };
+        if selected.is_empty() {
+            return None;
+        }
+
+        let model_elements = selected
+            .iter()
+            .flat_map(|asset| asset.model_elements.iter().cloned())
+            .collect::<Vec<_>>();
+        if model_elements.is_empty() {
+            return None;
+        }
+
+        Some(RegistryRenderModel {
+            texture_path: selected
+                .first()
+                .and_then(|asset| asset.texture_path.clone())
+                .or_else(|| self.texture_path.clone()),
+            face_texture_paths: selected
+                .first()
+                .and_then(|asset| asset.face_texture_paths.clone())
+                .or_else(|| self.face_texture_paths.clone()),
+            model_elements,
+            render_fidelity: selected.first().map(|asset| asset.fidelity.clone()),
+            render_source: selected.first().map(|asset| asset.source.clone()),
+        })
+    }
+}
+
+impl RegistryRenderModel {
+    fn has_render_payload(&self) -> bool {
+        self.texture_path.is_some()
+            || self.face_texture_paths.is_some()
+            || !self.model_elements.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeRenderAssetPreference {
+    Authoritative,
+    Any,
+}
+
+impl RuntimeRenderAssetPreference {
+    fn accepts(self, fidelity: &str) -> bool {
+        match self {
+            Self::Any => true,
+            Self::Authoritative => !matches!(
+                fidelity,
+                "approximation" | "unsupportedDynamic" | "unsupported"
+            ),
         }
     }
 }
@@ -396,6 +511,13 @@ fn registry_block_metadata(report: &Value) -> BTreeMap<String, RegistryBlockMeta
                                     variants.iter().filter_map(registry_model_variant).collect()
                                 })
                                 .unwrap_or_default(),
+                            render_assets: block
+                                .get("renderAssets")
+                                .and_then(Value::as_array)
+                                .map(|assets| {
+                                    assets.iter().filter_map(registry_render_asset).collect()
+                                })
+                                .unwrap_or_default(),
                         },
                     ))
                 })
@@ -452,6 +574,10 @@ fn registry_model_element(value: &Value) -> Option<ModelElementDto> {
 fn registry_model_variant(value: &Value) -> Option<RegistryModelVariant> {
     Some(RegistryModelVariant {
         condition: value.get("condition").and_then(registry_model_condition),
+        model: value
+            .get("model")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
         x: value.get("x").and_then(Value::as_f64).unwrap_or(0.0) as f32,
         y: value.get("y").and_then(Value::as_f64).unwrap_or(0.0) as f32,
         uv_lock: value
@@ -471,6 +597,63 @@ fn registry_model_variant(value: &Value) -> Option<RegistryModelVariant> {
             .map(|elements| elements.iter().filter_map(registry_model_element).collect())
             .unwrap_or_default(),
     })
+}
+
+fn registry_render_asset(value: &Value) -> Option<RegistryRenderAsset> {
+    let model_elements: Vec<ModelElementDto> = value
+        .get("elements")
+        .and_then(Value::as_array)
+        .map(|elements| elements.iter().filter_map(registry_model_element).collect())
+        .unwrap_or_default();
+    let face_texture_paths = model_elements
+        .iter()
+        .find_map(|element| any_face_texture_paths(&element.face_texture_paths));
+    let texture_path = face_texture_paths
+        .as_ref()
+        .and_then(first_face_texture_path);
+    Some(RegistryRenderAsset {
+        condition: value.get("condition").and_then(registry_model_condition),
+        fidelity: value
+            .get("fidelity")
+            .and_then(Value::as_str)
+            .unwrap_or("runtimeBaked")
+            .to_string(),
+        source: value
+            .get("source")
+            .and_then(Value::as_str)
+            .unwrap_or("minecraft-runtime")
+            .to_string(),
+        texture_path,
+        face_texture_paths,
+        model_elements,
+    })
+}
+
+fn any_face_texture_paths(paths: &FaceTexturePathsDto) -> Option<FaceTexturePathsDto> {
+    [
+        &paths.north,
+        &paths.south,
+        &paths.east,
+        &paths.west,
+        &paths.up,
+        &paths.down,
+    ]
+    .iter()
+    .any(|path| path.is_some())
+    .then(|| paths.clone())
+}
+
+fn first_face_texture_path(paths: &FaceTexturePathsDto) -> Option<String> {
+    [
+        &paths.north,
+        &paths.south,
+        &paths.east,
+        &paths.west,
+        &paths.up,
+        &paths.down,
+    ]
+    .into_iter()
+    .find_map(Clone::clone)
 }
 
 fn registry_model_condition(value: &Value) -> Option<RegistryModelCondition> {

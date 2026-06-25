@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "mpb_runtime_extractor",
+  "version": "1.0.0",
+  "name": "Minecraft Pack Builder Runtime Extractor",
+  "environment": "server",
+  "entrypoints": {
+    "server": ["com.mpb.runtime.FabricRuntimeExtractor"]
+  },
+  "depends": {
+    "fabricloader": ">=0.14.0",
+    "minecraft": "*"
+  }
+}
