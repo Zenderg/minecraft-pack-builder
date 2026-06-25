@@ -20,13 +20,13 @@ public record MpbRuntimeConfig(boolean lanMode, String bindAddress, int port, St
                         MpbJson.flatFields(Files.readString(file, StandardCharsets.UTF_8));
                 lanMode = Boolean.parseBoolean(fields.getOrDefault("lanMode", "false"));
                 port = parsePort(fields.get("port"), port);
-                language = fields.getOrDefault("language", language);
+                language = normalizeLanguage(fields.getOrDefault("language", language));
             } catch (IOException ignored) {
                 // Broken configs are replaced with a safe localhost default below.
             }
         }
         MpbRuntimeConfig config =
-                new MpbRuntimeConfig(lanMode, lanMode ? "0.0.0.0" : "127.0.0.1", port, language);
+                new MpbRuntimeConfig(lanMode, lanMode ? "0.0.0.0" : "127.0.0.1", port, normalizeLanguage(language));
         config.save(file);
         return config;
     }
@@ -59,8 +59,12 @@ public record MpbRuntimeConfig(boolean lanMode, String bindAddress, int port, St
         return new MpbRuntimeConfig(enabled, enabled ? "0.0.0.0" : "127.0.0.1", port, language);
     }
 
+    public MpbRuntimeConfig withLanguage(String language) {
+        return new MpbRuntimeConfig(lanMode, bindAddress, port, normalizeLanguage(language));
+    }
+
     public String endpoint() {
-        return "http://" + bindAddress + ":" + port + "/mcp";
+        return "http://" + MpbNetwork.displayHostFor(bindAddress) + ":" + port + "/mcp";
     }
 
     private static int parsePort(String raw, int fallback) {
@@ -76,5 +80,12 @@ public record MpbRuntimeConfig(boolean lanMode, String bindAddress, int port, St
             // keep fallback
         }
         return fallback;
+    }
+
+    private static String normalizeLanguage(String language) {
+        if (language == null || language.isBlank()) {
+            return "en_us";
+        }
+        return language.toLowerCase(Locale.ROOT).replace('-', '_');
     }
 }

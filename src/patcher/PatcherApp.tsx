@@ -130,7 +130,7 @@ export function PatcherApp() {
       dispatch({
         type: "operationCompleted",
         instances,
-        message: getNextStepText(language),
+        message: "",
       });
     } catch (error) {
       dispatch({ type: "failed", message: formatBackendError(error) });
@@ -260,6 +260,7 @@ function InstanceDetails({
       : action?.labelKey === "patcher.update"
         ? t.update
         : t.repair;
+  const canRemovePatch = instance.patchStatus === "patched" || instance.patchStatus === "needsRepair";
 
   return (
     <>
@@ -297,41 +298,37 @@ function InstanceDetails({
         ) : null}
       </dl>
 
-      <div className="patcher-detail-actions">
-        {action ? (
+      {action ? (
+        <div className="patcher-detail-actions">
           <button type="button" className="patcher-button primary" onClick={onPatch} disabled={busy}>
             <Wrench size={16} aria-hidden="true" />
             {busy ? t.working : actionLabel}
           </button>
-        ) : null}
-        {instance.patchStatus === "patched" || instance.patchStatus === "needsRepair" ? (
-          <>
-            <label className="patcher-checkbox">
-              <input
-                type="checkbox"
-                checked={deleteSchemes}
-                onChange={(event) => setDeleteSchemes(event.currentTarget.checked)}
-              />
-              {t.deleteSchemes}
-            </label>
-            <button
-              type="button"
-              className="patcher-button danger"
-              onClick={onRemove}
-              disabled={busy}
-            >
-              <XCircle size={16} aria-hidden="true" />
-              {busy ? t.removing : t.remove}
-            </button>
-          </>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
 
       {instance.patchStatus === "patched" ? (
         <section className="patcher-next">
           <h3>{t.next}</h3>
           <p>{getNextStepText(language)}</p>
         </section>
+      ) : null}
+
+      {canRemovePatch ? (
+        <div className="patcher-detail-actions patcher-danger-zone">
+          <label className="patcher-checkbox">
+            <input
+              type="checkbox"
+              checked={deleteSchemes}
+              onChange={(event) => setDeleteSchemes(event.currentTarget.checked)}
+            />
+            {t.deleteSchemes}
+          </label>
+          <button type="button" className="patcher-button danger" onClick={onRemove} disabled={busy}>
+            <XCircle size={16} aria-hidden="true" />
+            {busy ? t.removing : t.remove}
+          </button>
+        </div>
       ) : null}
     </>
   );

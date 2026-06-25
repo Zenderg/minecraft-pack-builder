@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Read;
 use std::path::Path;
 
 use mpb_assets::{
@@ -252,6 +253,13 @@ fn installs_loader_specific_real_jar_artifacts() {
         assert!(bytes.starts_with(b"PK"));
         assert_bytes_contain(&bytes, metadata.as_bytes());
         assert_bytes_contain(&bytes, b"com/mpb/runtime/MpbClientRuntime.class");
+        if instance_name == "NeoForge Pack" {
+            let mods_toml = read_zip_file(&bytes, "META-INF/neoforge.mods.toml");
+            assert!(
+                mods_toml.contains("loaderVersion = \"[4,)\""),
+                "NeoForge 1.21.1 uses javafml 4.x; got metadata:\n{mods_toml}"
+            );
+        }
     }
 }
 
@@ -292,6 +300,72 @@ fn assert_bytes_contain(haystack: &[u8], needle: &[u8]) {
         "expected installed artifact to contain {}",
         String::from_utf8_lossy(needle)
     );
+}
+
+fn read_zip_file(bytes: &[u8], path: &str) -> String {
+    let central_directory = find_central_directory(bytes).expect("central directory");
+    let mut cursor = central_directory;
+    while bytes.get(cursor..cursor + 4) == Some(b"PK\x01\x02") {
+        let method = read_u16(bytes, cursor + 10);
+        let compressed_size = read_u32(bytes, cursor + 20) as usize;
+        let name_len = read_u16(bytes, cursor + 28) as usize;
+        let extra_len = read_u16(bytes, cursor + 30) as usize;
+        let comment_len = read_u16(bytes, cursor + 32) as usize;
+        let local_header = read_u32(bytes, cursor + 42) as usize;
+        let name_start = cursor + 46;
+        let name_end = name_start + name_len;
+        let name = std::str::from_utf8(&bytes[name_start..name_end]).expect("zip name");
+        if name == path {
+            return read_zip_local_file(bytes, local_header, method, compressed_size);
+        }
+        cursor = name_end + extra_len + comment_len;
+    }
+    panic!("zip entry not found: {path}");
+}
+
+fn read_zip_local_file(
+    bytes: &[u8],
+    local_header: usize,
+    method: u16,
+    compressed_size: usize,
+) -> String {
+    assert_eq!(
+        bytes.get(local_header..local_header + 4),
+        Some(&b"PK\x03\x04"[..])
+    );
+    let name_len = read_u16(bytes, local_header + 26) as usize;
+    let extra_len = read_u16(bytes, local_header + 28) as usize;
+    let data_start = local_header + 30 + name_len + extra_len;
+    let data_end = data_start + compressed_size;
+    let data = &bytes[data_start..data_end];
+    let raw = match method {
+        0 => data.to_vec(),
+        8 => {
+            let mut decoder = flate2::read::DeflateDecoder::new(data);
+            let mut decompressed = Vec::new();
+            decoder
+                .read_to_end(&mut decompressed)
+                .expect("deflate entry");
+            decompressed
+        }
+        other => panic!("unsupported zip compression method: {other}"),
+    };
+    String::from_utf8(raw).expect("utf-8 zip entry")
+}
+
+fn find_central_directory(bytes: &[u8]) -> Option<usize> {
+    bytes
+        .windows(4)
+        .rposition(|window| window == b"PK\x05\x06")
+        .map(|eocd| read_u32(bytes, eocd + 16) as usize)
+}
+
+fn read_u16(bytes: &[u8], offset: usize) -> u16 {
+    u16::from_le_bytes(bytes[offset..offset + 2].try_into().expect("u16"))
+}
+
+fn read_u32(bytes: &[u8], offset: usize) -> u32 {
+    u32::from_le_bytes(bytes[offset..offset + 4].try_into().expect("u32"))
 }
 
 fn write_instance(root: &Path, folder: &str, mmc_pack: &str) {

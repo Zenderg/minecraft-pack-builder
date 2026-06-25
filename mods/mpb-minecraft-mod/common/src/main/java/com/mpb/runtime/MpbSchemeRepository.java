@@ -140,14 +140,15 @@ public final class MpbSchemeRepository {
                 throw new IllegalArgumentException("Each point edit must use x,y,z=blockId.");
             }
             Coordinate coordinate = parseCoordinate(edit.substring(0, equals));
-            String blockId = edit.substring(equals + 1).trim();
+            String blockSpec = edit.substring(equals + 1).trim();
             String key = blockKey(coordinate.x(), coordinate.y(), coordinate.z());
-            if ("air".equals(blockId) || "minecraft:air".equals(blockId)) {
+            if ("air".equals(blockSpec) || "minecraft:air".equals(blockSpec)) {
                 blocks.remove(key);
             } else {
+                BlockSpec parsed = parseBlockSpec(blockSpec);
                 blocks.put(
                         key,
-                        new SchemeBlock(coordinate.x(), coordinate.y(), coordinate.z(), requiredBlockId(blockId), null));
+                        new SchemeBlock(coordinate.x(), coordinate.y(), coordinate.z(), parsed.blockId(), parsed.states(), null));
             }
         }
         writeBlocks(schemeId, blocks);
@@ -157,12 +158,12 @@ public final class MpbSchemeRepository {
     public String fillRegion(Map<String, String> fields) {
         String schemeId = requiredSchemeId(fields.get("schemeId"));
         Bounds bounds = Bounds.from(fields);
-        String blockId = requiredBlockId(fields.get("blockId"));
+        BlockSpec block = parseBlockSpec(fields.get("blockId"));
         Map<String, SchemeBlock> blocks = blockMap(read(schemeId));
         for (int x = bounds.minX(); x <= bounds.maxX(); x++) {
             for (int y = bounds.minY(); y <= bounds.maxY(); y++) {
                 for (int z = bounds.minZ(); z <= bounds.maxZ(); z++) {
-                    blocks.put(blockKey(x, y, z), new SchemeBlock(x, y, z, blockId, null));
+                    blocks.put(blockKey(x, y, z), new SchemeBlock(x, y, z, block.blockId(), block.states(), null));
                 }
             }
         }
@@ -252,13 +253,13 @@ public final class MpbSchemeRepository {
 
     public String replaceBlocks(Map<String, String> fields) {
         String schemeId = requiredSchemeId(fields.get("schemeId"));
-        String fromBlock = requiredBlockId(fields.get("fromBlock"));
-        String toBlock = requiredBlockId(fields.get("toBlock"));
+        BlockSpec fromBlock = parseBlockSpec(fields.get("fromBlock"));
+        BlockSpec toBlock = parseBlockSpec(fields.get("toBlock"));
         Map<String, SchemeBlock> blocks = blockMap(read(schemeId));
         for (Map.Entry<String, SchemeBlock> entry : new ArrayList<>(blocks.entrySet())) {
             SchemeBlock block = entry.getValue();
-            if (block.blockId().equals(fromBlock)) {
-                blocks.put(entry.getKey(), new SchemeBlock(block.x(), block.y(), block.z(), toBlock, block.stageId()));
+            if (blockSpecMatches(block, fromBlock)) {
+                blocks.put(entry.getKey(), new SchemeBlock(block.x(), block.y(), block.z(), toBlock.blockId(), toBlock.states(), block.stageId()));
             }
         }
         writeBlocks(schemeId, blocks);
@@ -495,16 +496,16 @@ public final class MpbSchemeRepository {
 
     private Map<String, SchemeBlock> blockMap(String schemeJson) {
         Map<String, SchemeBlock> blocks = new LinkedHashMap<>();
-        Pattern pattern = Pattern.compile(
-                "\\{\\\"x\\\":([0-9]+),\\\"y\\\":([0-9]+),\\\"z\\\":([0-9]+),\\\"blockId\\\":\\\"((?:\\\\.|[^\\\"])*)\\\"(?:,\\\"stageId\\\":\\\"((?:\\\\.|[^\\\"])*)\\\")?\\}");
-        Matcher matcher = pattern.matcher(arrayField(schemeJson, "blocks"));
-        while (matcher.find()) {
-            int x = Integer.parseInt(matcher.group(1));
-            int y = Integer.parseInt(matcher.group(2));
-            int z = Integer.parseInt(matcher.group(3));
-            String blockId = matcher.group(4);
-            String stageId = matcher.group(5);
-            blocks.put(blockKey(x, y, z), new SchemeBlock(x, y, z, blockId, stageId));
+        for (String object : arrayObjects(arrayField(schemeJson, "blocks"))) {
+            Map<String, String> fields = MpbJson.flatFields(object);
+            String blockId = fields.get("blockId");
+            if (blockId == null || blockId.isBlank()) {
+                continue;
+            }
+            int x = Integer.parseInt(fields.getOrDefault("x", "0"));
+            int y = Integer.parseInt(fields.getOrDefault("y", "0"));
+            int z = Integer.parseInt(fields.getOrDefault("z", "0"));
+            blocks.put(blockKey(x, y, z), new SchemeBlock(x, y, z, blockId, parseJsonStates(object), fields.get("stageId")));
         }
         return blocks;
     }
@@ -535,6 +536,9 @@ public final class MpbSchemeRepository {
                 .append(block.z())
                 .append(",\"blockId\":")
                 .append(MpbJson.quote(block.blockId()));
+        if (!block.states().isEmpty()) {
+            builder.append(",\"states\":").append(encodeStates(block.states()));
+        }
         if (block.stageId() != null && !block.stageId().isBlank()) {
             builder.append(",\"stageId\":").append(MpbJson.quote(block.stageId()));
         }
@@ -544,6 +548,82 @@ public final class MpbSchemeRepository {
 
     private String blockKey(int x, int y, int z) {
         return x + "," + y + "," + z;
+    }
+
+    private BlockSpec parseBlockSpec(String raw) {
+        if (raw == null || raw.isBlank()) {
+            throw new IllegalArgumentException("Block id must be a registry id like minecraft:stone.");
+        }
+        String trimmed = raw.trim();
+        int bracket = trimmed.indexOf('[');
+        if (bracket < 0) {
+            return new BlockSpec(requiredBlockId(trimmed), Map.of());
+        }
+        if (!trimmed.endsWith("]")) {
+            throw new IllegalArgumentException("Block states must use block[property=value,...] syntax.");
+        }
+        String blockId = requiredBlockId(trimmed.substring(0, bracket));
+        String states = trimmed.substring(bracket + 1, trimmed.length() - 1).trim();
+        return new BlockSpec(blockId, parseStateList(states));
+    }
+
+    private Map<String, String> parseStateList(String raw) {
+        Map<String, String> states = new LinkedHashMap<>();
+        if (raw.isBlank()) {
+            return Map.of();
+        }
+        for (String entry : raw.split(",")) {
+            String trimmed = entry.trim();
+            int equals = trimmed.indexOf('=');
+            if (equals <= 0 || equals == trimmed.length() - 1) {
+                throw new IllegalArgumentException("Block states must use property=value entries.");
+            }
+            String property = trimmed.substring(0, equals).trim();
+            String value = trimmed.substring(equals + 1).trim();
+            if (!property.matches("[a-z0-9_]+") || !value.matches("[a-z0-9_./-]+")) {
+                throw new IllegalArgumentException("Block state names and values must use Minecraft registry-safe characters.");
+            }
+            states.put(property, value);
+        }
+        return states.isEmpty() ? Map.of() : Map.copyOf(states);
+    }
+
+    private boolean blockSpecMatches(SchemeBlock block, BlockSpec spec) {
+        if (!block.blockId().equals(spec.blockId())) {
+            return false;
+        }
+        if (spec.states().isEmpty()) {
+            return true;
+        }
+        for (Map.Entry<String, String> entry : spec.states().entrySet()) {
+            if (!entry.getValue().equals(block.states().get(entry.getKey()))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private Map<String, String> parseJsonStates(String blockObject) {
+        String statesObject = objectField(blockObject, "states");
+        if (statesObject.isBlank()) {
+            return Map.of();
+        }
+        Map<String, String> states = new LinkedHashMap<>(MpbJson.flatFields(statesObject));
+        return states.isEmpty() ? Map.of() : Map.copyOf(states);
+    }
+
+    private String encodeStates(Map<String, String> states) {
+        StringBuilder builder = new StringBuilder("{");
+        boolean first = true;
+        for (Map.Entry<String, String> entry : states.entrySet()) {
+            if (!first) {
+                builder.append(',');
+            }
+            first = false;
+            builder.append(MpbJson.quote(entry.getKey())).append(':').append(MpbJson.quote(entry.getValue()));
+        }
+        builder.append('}');
+        return builder.toString();
     }
 
     private String requiredBlockId(String raw) {
@@ -774,12 +854,8 @@ public final class MpbSchemeRepository {
     }
 
     private String arrayField(String json, String field) {
-        int nameIndex = json.indexOf("\"" + field + "\"");
-        if (nameIndex < 0) {
-            return "[]";
-        }
-        int arrayStart = json.indexOf('[', nameIndex);
-        if (arrayStart < 0) {
+        int arrayStart = MpbJson.fieldValueStart(json, field);
+        if (arrayStart < 0 || arrayStart >= json.length() || json.charAt(arrayStart) != '[') {
             return "[]";
         }
         int depth = 0;
@@ -814,15 +890,51 @@ public final class MpbSchemeRepository {
         return "[]";
     }
 
+    private String objectField(String json, String field) {
+        int objectStart = MpbJson.fieldValueStart(json, field);
+        if (objectStart < 0 || objectStart >= json.length() || json.charAt(objectStart) != '{') {
+            return "";
+        }
+        int depth = 0;
+        boolean inString = false;
+        boolean escaped = false;
+        for (int index = objectStart; index < json.length(); index++) {
+            char character = json.charAt(index);
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (character == '\\') {
+                escaped = true;
+                continue;
+            }
+            if (character == '"') {
+                inString = !inString;
+                continue;
+            }
+            if (inString) {
+                continue;
+            }
+            if (character == '{') {
+                depth++;
+            } else if (character == '}') {
+                depth--;
+                if (depth == 0) {
+                    return json.substring(objectStart, index + 1);
+                }
+            }
+        }
+        return "";
+    }
+
     private String replaceArrayField(String json, String field, String replacementArray) {
-        int nameIndex = json.indexOf("\"" + field + "\"");
-        if (nameIndex < 0) {
+        int arrayStart = MpbJson.fieldValueStart(json, field);
+        if (arrayStart < 0 || arrayStart >= json.length() || json.charAt(arrayStart) != '[') {
             int insert = json.lastIndexOf('}');
             String prefix = json.substring(0, insert).trim();
             return prefix + ",\n  \"" + field + "\": " + replacementArray + "\n}\n";
         }
         String currentArray = arrayField(json, field);
-        int arrayStart = json.indexOf(currentArray, nameIndex);
         return json.substring(0, arrayStart) + replacementArray + json.substring(arrayStart + currentArray.length());
     }
 
@@ -958,13 +1070,27 @@ public final class MpbSchemeRepository {
 
     private record Coordinate(int x, int y, int z) {}
 
-    private record SchemeBlock(int x, int y, int z, String blockId, String stageId) {
+    private record BlockSpec(String blockId, Map<String, String> states) {
+        private BlockSpec {
+            states = states == null || states.isEmpty() ? Map.of() : Map.copyOf(states);
+        }
+    }
+
+    private record SchemeBlock(int x, int y, int z, String blockId, Map<String, String> states, String stageId) {
+        private SchemeBlock(int x, int y, int z, String blockId, String stageId) {
+            this(x, y, z, blockId, Map.of(), stageId);
+        }
+
+        private SchemeBlock {
+            states = states == null || states.isEmpty() ? Map.of() : Map.copyOf(states);
+        }
+
         SchemeBlock withPosition(int x, int y, int z) {
-            return new SchemeBlock(x, y, z, blockId, stageId);
+            return new SchemeBlock(x, y, z, blockId, states, stageId);
         }
 
         SchemeBlock withStage(String stageId) {
-            return new SchemeBlock(x, y, z, blockId, stageId);
+            return new SchemeBlock(x, y, z, blockId, states, stageId);
         }
     }
 

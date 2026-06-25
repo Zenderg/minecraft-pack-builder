@@ -28,6 +28,10 @@ public final class MpbClientRuntime implements MpbRuntimeContract {
         return Optional.ofNullable(active);
     }
 
+    public synchronized void setBlockRegistry(MpbBlockRegistry blockRegistry) {
+        mcpServer.setBlockRegistry(blockRegistry);
+    }
+
     @Override
     public void onClientMainMenuReady() {
         paths.prepare();
@@ -59,6 +63,11 @@ public final class MpbClientRuntime implements MpbRuntimeContract {
         MpbRuntimeConfig.load(paths.configFile()).withLanMode(enabled).save(paths.configFile());
         mcpServer.stop();
         mcpServer.start();
+    }
+
+    public synchronized void setLanguage(String language) {
+        MpbRuntimeConfig.load(paths.configFile()).withLanguage(language).save(paths.configFile());
+        mcpServer.reloadConfig();
     }
 
     @Override

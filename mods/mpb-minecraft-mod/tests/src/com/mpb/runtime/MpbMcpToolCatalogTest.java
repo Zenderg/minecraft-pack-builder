@@ -12,6 +12,7 @@ public final class MpbMcpToolCatalogTest {
         mutatesStagesAndRegions();
         mutatesGeometry();
         mutatesAdvancedGeometry();
+        preservesStatefulBlocksAcrossRepositoryOperations();
         assignsAndReordersStages();
         tracksGuideStateAndLoadsRenderableScheme();
         importsAndExportsManagerFiles();
@@ -47,8 +48,8 @@ public final class MpbMcpToolCatalogTest {
 
         MpbManagerSnapshot snapshot = MpbManagerSnapshot.load(paths, "Fabric", "1.20.1");
 
-        if (!snapshot.endpoint().equals("http://0.0.0.0:47392/mcp")) {
-            throw new AssertionError("LAN endpoint was not reflected in snapshot: " + snapshot.endpoint());
+        if (snapshot.endpoint().contains("0.0.0.0") || !snapshot.endpoint().endsWith(":47392/mcp")) {
+            throw new AssertionError("LAN endpoint was not reflected as a reachable URL in snapshot: " + snapshot.endpoint());
         }
         if (snapshot.schemes().size() != 1) {
             throw new AssertionError("Expected one scheme in manager snapshot.");
@@ -215,6 +216,44 @@ public final class MpbMcpToolCatalogTest {
         String rotated = repository.read(schemeId);
         if (!rotated.contains("\"z\":3") || !rotated.contains("\"z\":0")) {
             throw new AssertionError("rotateScheme did not rotate X span into Z span: " + rotated);
+        }
+    }
+
+    private static void preservesStatefulBlocksAcrossRepositoryOperations() throws Exception {
+        Path schemes = Files.createTempDirectory("mpb-stateful-block-test");
+        MpbSchemeRepository repository = new MpbSchemeRepository(schemes);
+        String scheme = repository.create("Stateful Block Test");
+        String schemeId = MpbJson.flatFields(scheme).get("schemeId");
+
+        repository.batchPointEdits(Map.of(
+                "schemeId", schemeId,
+                "edits", "0,0,0=minecraft:wall_torch[facing=east]"));
+        String edited = repository.read(schemeId);
+        if (!edited.contains("\"blockId\":\"minecraft:wall_torch\"") || !edited.contains("\"states\":{\"facing\":\"east\"}")) {
+            throw new AssertionError("batchPointEdits did not persist stateful block properties: " + edited);
+        }
+
+        String clipboard = repository.copyRegion(Map.of(
+                "schemeId", schemeId,
+                "minX", "0",
+                "minY", "0",
+                "minZ", "0",
+                "maxX", "0",
+                "maxY", "0",
+                "maxZ", "0"));
+        repository.pasteRegion(Map.of("schemeId", schemeId, "clipboard", clipboard, "originX", "1", "originY", "0", "originZ", "0"));
+        String pasted = repository.read(schemeId);
+        if (countOccurrences(pasted, "\"states\":{\"facing\":\"east\"}") != 2) {
+            throw new AssertionError("copy/paste did not preserve stateful block properties: " + pasted);
+        }
+
+        repository.replaceBlocks(Map.of(
+                "schemeId", schemeId,
+                "fromBlock", "minecraft:wall_torch[facing=east]",
+                "toBlock", "minecraft:wall_torch[facing=west]"));
+        String replaced = repository.read(schemeId);
+        if (countOccurrences(replaced, "\"states\":{\"facing\":\"west\"}") != 2) {
+            throw new AssertionError("replaceBlocks did not preserve replacement state properties: " + replaced);
         }
     }
 

@@ -134,6 +134,22 @@ pub fn evaluate_mpb_patch(instance: &PrismInstanceDescriptor) -> MpbPatchEvaluat
             managed_files,
         };
     }
+    if let Ok(expected_bytes) = mod_artifact_bytes(instance) {
+        let expected_checksum = checksum(&expected_bytes);
+        let managed_mod_is_current = manifest.files.iter().any(|file| {
+            file.owner == MpbFileOwner::Managed
+                && file.path == MPB_MOD_FILE
+                && file.checksum == expected_checksum
+        });
+        if !managed_mod_is_current {
+            return MpbPatchEvaluation {
+                status: MpbPatchStatus::NeedsUpdate,
+                reason: Some("Bundled MPB mod artifact has changed.".to_string()),
+                manifest_path,
+                managed_files,
+            };
+        }
+    }
     for file in &manifest.files {
         if file.owner != MpbFileOwner::Managed {
             continue;

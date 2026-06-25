@@ -15,7 +15,7 @@ tasks.withType(JavaCompile).configureEach {
 sourceSets {
     main {
         java {
-            srcDirs = ['../common/src/main/java', 'src/main/java']
+            srcDirs = ['../common/src/main/java', '../client-common/src/main/java', 'src/main/java']
         }
         resources {
             srcDirs = ['src/main/resources']

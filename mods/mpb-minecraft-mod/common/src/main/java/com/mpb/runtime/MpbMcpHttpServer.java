@@ -11,11 +11,17 @@ import java.util.concurrent.Executors;
 
 public final class MpbMcpHttpServer {
     private final MpbRuntimePaths paths;
+    private volatile MpbBlockRegistry blockRegistry;
     private HttpServer server;
     private MpbRuntimeConfig config;
 
     public MpbMcpHttpServer(MpbRuntimePaths paths) {
+        this(paths, MpbBlockRegistry.fallback());
+    }
+
+    public MpbMcpHttpServer(MpbRuntimePaths paths, MpbBlockRegistry blockRegistry) {
         this.paths = paths;
+        this.blockRegistry = blockRegistry == null ? MpbBlockRegistry.fallback() : blockRegistry;
     }
 
     public synchronized void start() {
@@ -35,7 +41,7 @@ public final class MpbMcpHttpServer {
                 return thread;
             }));
             server.start();
-            System.out.println("[MPB] MCP server listening on http://" + config.bindAddress() + ":" + config.port() + "/mcp");
+            System.out.println("[MPB] MCP server listening on " + config.endpoint());
         } catch (IOException error) {
             server = null;
             System.err.println("[MPB] Failed to start MCP server: " + error.getMessage());
@@ -49,13 +55,21 @@ public final class MpbMcpHttpServer {
         }
     }
 
+    public synchronized void reloadConfig() {
+        config = MpbRuntimeConfig.load(paths.configFile());
+    }
+
+    public void setBlockRegistry(MpbBlockRegistry blockRegistry) {
+        this.blockRegistry = blockRegistry == null ? MpbBlockRegistry.fallback() : blockRegistry;
+    }
+
     private void handleStatus(HttpExchange exchange) throws IOException {
         if (!"GET".equals(exchange.getRequestMethod())) {
             respond(exchange, 405, "{\"error\":\"method_not_allowed\"}");
             return;
         }
         String body = "{\"status\":\"ready\",\"endpoint\":"
-                + MpbJson.quote("http://" + config.bindAddress() + ":" + config.port() + "/mcp")
+                + MpbJson.quote(config.endpoint())
                 + ",\"prompt\":"
                 + MpbJson.quote(MpbAgentPrompt.build(config))
                 + "}";
@@ -75,15 +89,23 @@ public final class MpbMcpHttpServer {
         try (InputStream input = exchange.getRequestBody()) {
             body = new String(input.readAllBytes(), StandardCharsets.UTF_8);
         }
-        respond(exchange, 200, dispatch(body));
+        String response = dispatch(body);
+        if (response == null) {
+            respond(exchange, 202, "");
+        } else {
+            respond(exchange, 200, response);
+        }
     }
 
     private String dispatch(String body) {
         Map<String, String> fields = MpbJson.flatFields(body);
-        String id = fields.getOrDefault("id", "null");
+        String id = MpbJson.idLiteral(body);
         String method = fields.getOrDefault("method", "");
         MpbSchemeRepository repository = new MpbSchemeRepository(paths.schemesDirectory());
         try {
+            if (id == null && method.startsWith("notifications/")) {
+                return null;
+            }
             return switch (method) {
                 case "initialize" -> MpbJson.response(
                         id,
@@ -112,10 +134,8 @@ public final class MpbMcpHttpServer {
             case "mpb_update_scheme" -> textResult(repository.update(fields.get("schemeId"), fields.get("schemeJson")));
             case "mpb_rename_scheme" -> textResult(repository.rename(fields.get("schemeId"), fields.get("schemeName")));
             case "mpb_validate_scheme" -> textResult(repository.validate(fields.get("schemeId")));
-            case "mpb_list_block_registry_ids" -> textResult("[\"minecraft:air\",\"minecraft:stone\",\"minecraft:dirt\",\"minecraft:oak_planks\",\"minecraft:glass\"]");
-            case "mpb_describe_block_states" -> textResult("{\"registryId\":\""
-                    + fields.getOrDefault("registryId", "minecraft:air")
-                    + "\",\"properties\":[]}");
+            case "mpb_list_block_registry_ids" -> textResult(blockRegistryIdsJson());
+            case "mpb_describe_block_states" -> textResult(blockRegistry.describeBlockStates(fields.getOrDefault("registryId", "minecraft:air")));
             case "mpb_batch_point_edits" -> textResult(repository.batchPointEdits(fields));
             case "mpb_fill_region" -> textResult(repository.fillRegion(fields));
             case "mpb_clear_region" -> textResult(repository.clearRegion(fields));
@@ -142,6 +162,20 @@ public final class MpbMcpHttpServer {
 
     private String textResult(String text) {
         return "{\"content\":[{\"type\":\"text\",\"text\":" + MpbJson.quote(text) + "}]}";
+    }
+
+    private String blockRegistryIdsJson() {
+        StringBuilder builder = new StringBuilder("[");
+        boolean first = true;
+        for (String id : blockRegistry.blockRegistryIds()) {
+            if (!first) {
+                builder.append(',');
+            }
+            first = false;
+            builder.append(MpbJson.quote(id));
+        }
+        builder.append(']');
+        return builder.toString();
     }
 
     private void respond(HttpExchange exchange, int status, String body) throws IOException {

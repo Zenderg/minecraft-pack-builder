@@ -134,12 +134,8 @@ public record MpbManagerSnapshot(
     }
 
     private static String arrayField(String json, String field) {
-        int nameIndex = json.indexOf("\"" + field + "\"");
-        if (nameIndex < 0) {
-            return "[]";
-        }
-        int arrayStart = json.indexOf('[', nameIndex);
-        if (arrayStart < 0) {
+        int arrayStart = MpbJson.fieldValueStart(json, field);
+        if (arrayStart < 0 || arrayStart >= json.length() || json.charAt(arrayStart) != '[') {
             return "[]";
         }
         int depth = 0;
