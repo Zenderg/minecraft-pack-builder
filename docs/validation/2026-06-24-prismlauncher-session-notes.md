@@ -72,7 +72,7 @@ This file captures the practical product and engineering decisions from the Pris
 - Construction stages are complete only when every block has a known `stageId`; creating stages alone is not a staged build plan. Agents must call `mpb_assign_blocks_to_stage` after creating stages.
 - Scheme JSON helpers must locate actual JSON field keys rather than searching raw string occurrences. Names or ids can legally equal `blocks`, `stages`, or `regions`; simple `indexOf` parsing can read the wrong array. Regions must support negative coordinates.
 - Useful local validation commands from this hardening pass:
-  - `MPB_GRADLE=/Users/koshmarus/.gradle/wrapper/dists/gradle-8.14.3-all/10utluxaxniiv4wxiphsi49nj/gradle-8.14.3/bin/gradle ./mods/mpb-minecraft-mod/build.sh`
+  - `./mods/mpb-minecraft-mod/build.sh` when `gradle` is available in `PATH`, or `MPB_GRADLE=/path/to/gradle ./mods/mpb-minecraft-mod/build.sh` when using a local Gradle distribution.
   - `CARGO_NET_OFFLINE=true cargo test --workspace`
   - `./node_modules/.bin/vitest run`
   - `./node_modules/.bin/tsc`
