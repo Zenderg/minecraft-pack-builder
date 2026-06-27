@@ -476,7 +476,7 @@ public final class MpbInWorldGuide {
     private record GhostBufferSource(MultiBufferSource delegate, int alpha) implements MultiBufferSource {
         @Override
         public VertexConsumer getBuffer(RenderType renderType) {
-            return new AlphaVertexConsumer(delegate.getBuffer(RenderType.translucent()), alpha);
+            return new AlphaVertexConsumer(delegate.getBuffer(renderType), alpha);
         }
     }
 

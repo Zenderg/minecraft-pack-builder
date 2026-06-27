@@ -32,6 +32,7 @@ The patcher ships real loader-specific jars generated from this source tree. Loa
 - `shutdown`
 
 Ghost rendering must use Minecraft client rendering for ordinary block states and reject unsupported orientation rotation instead of saving partial mutations.
+Ghost rendering must preserve the `RenderType` requested by Minecraft's renderer and may only wrap the returned `VertexConsumer` for guide alpha. Forcing every block through a generic translucent render type breaks texture/material lookup for vanilla block-entity-style blocks such as chests and for modded special renderers.
 
 The current runtime is self-contained and does not require a separate managed dependency jar. It starts a local Streamable HTTP-compatible MCP endpoint at `/mcp`, creates instance-local MPB folders/config on startup, exposes core scheme management tools over JSON-RPC, and registers a real `/mpb` client command plus an unbound `key.mpb.open_manager` keybinding in each loader build.
 
