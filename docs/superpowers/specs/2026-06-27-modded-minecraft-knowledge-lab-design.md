@@ -33,7 +33,7 @@ This matters because a one-modpack target allows an offline knowledge-production
 - build a reusable knowledge pack;
 - ship or consume that knowledge later during scheme generation.
 
-The user-facing flow should not be "launch a model on any modpack and wait while it discovers everything." The more credible flow is "MPB uses prepared knowledge packs and can optionally run bounded local checks for the currently selected environment."
+The user-facing flow should not be "launch a model on any modpack and wait while it discovers everything." The more credible flow is "MPB uses prepared knowledge packs for the currently selected environment."
 
 ### 2.3 Knowledge Packs Are The Product Asset
 
@@ -101,6 +101,12 @@ large external orchestrator
 The orchestrator remains responsible for high-level planning, trade-off reasoning, user communication, and final scheme design. It should not read an entire large modpack directly. It should query the local knowledge system, request experiments, and consume compact evidence-backed facts.
 
 Small local models should act as cheap workers, not as the main designer. They can process many small tasks that would be too expensive to send repeatedly to a large model.
+
+### 4.1.1 Developer-Side Only
+
+Small local model workers and knowledge-generation tooling are developer-side infrastructure. They are used to create and review knowledge packs before those packs become part of the product.
+
+The end-user MPB runtime must not require local model inference, local fine-tuning, or local knowledge generation. There is no optional advanced end-user mode for launching a model to study an unsupported modpack in this direction. Unsupported or unknown mechanics should be reported as unsupported or unknown until a prepared knowledge pack covers them.
 
 ### 4.2 Small Model Worker Tasks
 
@@ -191,7 +197,7 @@ A more honest user-facing flow:
 1. The user selects a patched Prism instance.
 2. MPB detects whether a compatible knowledge pack exists for that modpack context.
 3. If knowledge exists, the agent uses it during scheme design.
-4. If knowledge is incomplete, MPB may run bounded local checks or explain that a mechanic is not verified.
+4. If knowledge is incomplete, MPB explains that a mechanic is not verified or is unsupported by the current knowledge pack.
 5. The generated scheme includes an in-game ghost guide, materials, and a confidence/evidence report.
 
 Example report categories:
