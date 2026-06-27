@@ -16,6 +16,7 @@ public final class MpbMcpCompatibilityTest {
         preservesJsonRpcIdTypesAndAcceptsInitializedNotification();
         exposesConcreteToolSchemas();
         listsRuntimeBlockRegistryIds();
+        reportsUnknownRuntimeBlockRegistryIds();
         handlesLargeBatchPointEditsWithoutRegexOverflow();
     }
 
@@ -112,6 +113,25 @@ public final class MpbMcpCompatibilityTest {
             }
             if (!response.body().contains("create:cogwheel")) {
                 throw new AssertionError("mpb_list_block_registry_ids did not expose runtime mod blocks: " + response.body());
+            }
+        } finally {
+            server.stop();
+        }
+    }
+
+    private static void reportsUnknownRuntimeBlockRegistryIds() throws Exception {
+        TestServer server = TestServer.start(new MpbBlockRegistry.Static(List.of(
+                "minecraft:air",
+                "minecraft:stone",
+                "create:cogwheel")));
+        try {
+            String body = "{\"jsonrpc\":\"2.0\",\"id\":\"registry-missing\",\"method\":\"tools/call\",\"params\":{\"name\":\"mpb_describe_block_states\",\"arguments\":{\"registryId\":\"create:not_a_real_block\"}}}";
+            HttpResponse<String> response = post(HttpClient.newHttpClient(), server.endpoint(), body);
+            if (response.statusCode() != 200 || response.body().contains("\"error\"")) {
+                throw new AssertionError("mpb_describe_block_states transport failed: " + response.statusCode() + " " + response.body());
+            }
+            if (!response.body().contains("\\\"error\\\":\\\"unknown block\\\"")) {
+                throw new AssertionError("mpb_describe_block_states masked an unknown block id: " + response.body());
             }
         } finally {
             server.stop();

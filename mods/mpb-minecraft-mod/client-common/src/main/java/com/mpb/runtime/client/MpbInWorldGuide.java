@@ -10,6 +10,7 @@ import java.util.Comparator;
 import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -18,12 +19,18 @@ import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.resources.model.BakedModel;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.item.ItemDisplayContext;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.world.phys.AABB;
@@ -43,6 +50,7 @@ public final class MpbInWorldGuide {
     private static final int GHOST_ALPHA = 96;
 
     private static final MpbRuntimePaths PATHS = MpbRuntimePaths.discover();
+    private static final Set<String> DIAGNOSTIC_LOG_KEYS = ConcurrentHashMap.newKeySet();
 
     private MpbInWorldGuide() {}
 
@@ -183,12 +191,67 @@ public final class MpbInWorldGuide {
     private static void renderGhostBlock(Minecraft client, PoseStack poseStack, MultiBufferSource consumers, Vec3 camera, BlockPos target, MpbGuideScheme.Block guideBlock, int alpha) {
         BlockState state = blockStateFromGuideBlock(guideBlock);
         if (state == null || client.getBlockRenderer() == null) {
+            logOnce("skip-render:" + guideBlock.blockId() + guideBlock.states(), "[MPB] Skipping ghost block render for " + guideBlock.blockId() + " because its block state could not be resolved.");
             return;
+        }
+        boolean modded = !guideBlock.blockId().startsWith("minecraft:");
+        boolean itemFallback = modded && shouldRenderItemFallback(client, state);
+        if (modded) {
+            logOnce(
+                    "render-modded:" + guideBlock.blockId() + guideBlock.states(),
+                    "[MPB] Rendering modded ghost block " + guideBlock.blockId()
+                            + " with states " + guideBlock.states()
+                            + " (shape=" + state.getRenderShape()
+                            + ", quads=" + modelQuadCount(client, state)
+                            + ", itemFallback=" + itemFallback + ").");
         }
         poseStack.pushPose();
         poseStack.translate(target.getX() - camera.x, target.getY() - camera.y, target.getZ() - camera.z);
         client.getBlockRenderer().renderSingleBlock(state, poseStack, new GhostBufferSource(consumers, alpha), LightTexture.FULL_BRIGHT, OverlayTexture.NO_OVERLAY);
+        if (itemFallback) {
+            renderItemFallback(client, poseStack, consumers, state, alpha);
+        }
         poseStack.popPose();
+    }
+
+    private static boolean shouldRenderItemFallback(Minecraft client, BlockState state) {
+        if (state.getRenderShape() != RenderShape.MODEL || state.hasBlockEntity()) {
+            return true;
+        }
+        BakedModel model = client.getBlockRenderer().getBlockModel(state);
+        return model == null || model.isCustomRenderer() || modelQuadCount(client, state) == 0;
+    }
+
+    private static int modelQuadCount(Minecraft client, BlockState state) {
+        BakedModel model = client.getBlockRenderer().getBlockModel(state);
+        if (model == null) {
+            return 0;
+        }
+        try {
+            int count = model.getQuads(state, null, RandomSource.create(42L)).size();
+            for (Direction direction : Direction.values()) {
+                count += model.getQuads(state, direction, RandomSource.create(42L)).size();
+            }
+            return count;
+        } catch (RuntimeException error) {
+            return 0;
+        }
+    }
+
+    private static void renderItemFallback(Minecraft client, PoseStack poseStack, MultiBufferSource consumers, BlockState state, int alpha) {
+        ItemStack stack = new ItemStack(state.getBlock());
+        if (stack.isEmpty() || client.getItemRenderer() == null) {
+            return;
+        }
+        client.getItemRenderer().renderStatic(
+                stack,
+                ItemDisplayContext.NONE,
+                LightTexture.FULL_BRIGHT,
+                OverlayTexture.NO_OVERLAY,
+                poseStack,
+                new GhostBufferSource(consumers, alpha),
+                client.level,
+                0);
     }
 
     @SuppressWarnings("deprecation")
@@ -298,21 +361,45 @@ public final class MpbInWorldGuide {
     }
 
     private static boolean blockMatches(Minecraft client, BlockPos target, MpbGuideScheme.Block guideBlock) {
-        Block block = blockFromId(guideBlock.blockId());
-        return block != null && client.level != null && client.level.getBlockState(target).is(block);
+        BlockState expected = blockStateFromGuideBlock(guideBlock);
+        if (expected == null || client.level == null) {
+            return false;
+        }
+        BlockState actual = client.level.getBlockState(target);
+        if (!actual.is(expected.getBlock())) {
+            return false;
+        }
+        if (guideBlock.states().isEmpty()) {
+            return true;
+        }
+        for (Map.Entry<String, String> entry : guideBlock.states().entrySet()) {
+            Property<?> property = propertyByName(actual, entry.getKey());
+            if (property == null || !propertyValueMatches(actual, property, entry.getValue())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static BlockState blockStateFromGuideBlock(MpbGuideScheme.Block guideBlock) {
         Block block = blockFromId(guideBlock.blockId());
         if (block == null) {
+            logOnce("unknown-block:" + guideBlock.blockId(), "[MPB] Unknown guide block id " + guideBlock.blockId() + "; ghost block will not render.");
             return null;
         }
         BlockState state = block.defaultBlockState();
         for (Map.Entry<String, String> entry : guideBlock.states().entrySet()) {
             Property<?> property = propertyByName(state, entry.getKey());
-            if (property != null) {
-                state = withPropertyValue(state, property, entry.getValue());
+            if (property == null) {
+                logOnce("unknown-state:" + guideBlock.blockId() + ":" + entry.getKey(), "[MPB] Unknown guide block state " + entry.getKey() + " for " + guideBlock.blockId() + ".");
+                return null;
             }
+            BlockState updated = withPropertyValue(state, property, entry.getValue());
+            if (updated == state && !propertyValueMatches(state, property, entry.getValue())) {
+                logOnce("invalid-state-value:" + guideBlock.blockId() + ":" + entry.getKey() + "=" + entry.getValue(), "[MPB] Invalid guide block state " + entry.getKey() + "=" + entry.getValue() + " for " + guideBlock.blockId() + ".");
+                return null;
+            }
+            state = updated;
         }
         return state;
     }
@@ -333,10 +420,26 @@ public final class MpbInWorldGuide {
                 .orElse(state);
     }
 
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static boolean propertyValueMatches(BlockState state, Property property, String value) {
+        return (boolean) property.getValue(value)
+                .map(parsed -> state.getValue(property).equals((Comparable) parsed))
+                .orElse(false);
+    }
+
     @SuppressWarnings("deprecation")
     private static Block blockFromId(String blockId) {
         ResourceLocation location = ResourceLocation.tryParse(blockId);
-        return location == null ? null : BuiltInRegistries.BLOCK.get(location);
+        if (location == null || !BuiltInRegistries.BLOCK.keySet().contains(location)) {
+            return null;
+        }
+        return BuiltInRegistries.BLOCK.get(location);
+    }
+
+    private static void logOnce(String key, String message) {
+        if (DIAGNOSTIC_LOG_KEYS.add(key)) {
+            System.out.println(message);
+        }
     }
 
     @SuppressWarnings("deprecation")

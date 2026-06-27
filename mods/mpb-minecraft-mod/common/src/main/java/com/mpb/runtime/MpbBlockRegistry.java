@@ -8,8 +8,14 @@ public interface MpbBlockRegistry {
     List<String> blockRegistryIds();
 
     default String describeBlockStates(String registryId) {
+        String normalized = registryId == null ? "minecraft:air" : registryId;
+        if (!blockRegistryIds().contains(normalized)) {
+            return "{\"registryId\":"
+                    + MpbJson.quote(normalized)
+                    + ",\"properties\":[],\"error\":\"unknown block\"}";
+        }
         return "{\"registryId\":"
-                + MpbJson.quote(registryId == null ? "minecraft:air" : registryId)
+                + MpbJson.quote(normalized)
                 + ",\"properties\":[]}";
     }
 

@@ -26,12 +26,12 @@ public final class MpbMinecraftBlockRegistry implements MpbBlockRegistry {
     @SuppressWarnings("deprecation")
     public String describeBlockStates(String registryId) {
         ResourceLocation location = ResourceLocation.tryParse(registryId == null ? "minecraft:air" : registryId);
-        Block block = location == null ? null : BuiltInRegistries.BLOCK.get(location);
-        if (block == null) {
+        if (location == null || !BuiltInRegistries.BLOCK.keySet().contains(location)) {
             return "{\"registryId\":"
                     + MpbJson.quote(registryId)
                     + ",\"properties\":[],\"error\":\"unknown block\"}";
         }
+        Block block = BuiltInRegistries.BLOCK.get(location);
         StringBuilder builder = new StringBuilder("{\"registryId\":")
                 .append(MpbJson.quote(location.toString()))
                 .append(",\"properties\":[");
