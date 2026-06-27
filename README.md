@@ -1,9 +1,13 @@
 # Minecraft Pack Builder
 
+Minecraft Pack Builder is a tool layer for AI-assisted building in modded Minecraft. It patches a PrismLauncher instance with an in-game MPB runtime so an external AI agent can create build schemes, while Minecraft remains the real visual and mechanical environment.
+
 Minecraft Pack Builder now centers on two pieces:
 
 - **MPB Patcher:** a Tauri desktop GUI that discovers PrismLauncher Launcher Roots, lists Prism instances, and applies/repairs/removes the managed MPB Minecraft mod patch.
 - **MPB Minecraft Mod:** buildable client-only Fabric, Forge, and NeoForge jars for Minecraft 1.20+, with instance-local schemes and MCP on `/mcp`.
+
+The long-term modded direction is first-party curated knowledge packs: MPB developers can ship evidence-backed knowledge for exact supported modpack fingerprints so connected agents can reason about modded blocks, items, recipes, and mechanics without guessing.
 
 Minecraft itself is the visual environment. The old desktop 3D viewer and global SQLite scheme library have been removed from the active project.
 
