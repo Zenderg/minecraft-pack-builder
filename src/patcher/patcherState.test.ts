@@ -19,10 +19,12 @@ describe("patcher state", () => {
   });
 
   it("returns localized next steps after patch success", () => {
-    expect(getNextStepText("en")).toContain("start the instance in PrismLauncher");
-    expect(getNextStepText("en")).toContain("/mpb");
-    expect(getNextStepText("ru")).toContain("запусти инстанс в PrismLauncher");
-    expect(getNextStepText("ru")).toContain("/mpb");
+    expect(getNextStepText("en", "installed")).toContain("curated knowledge is available");
+    expect(getNextStepText("en", "unavailable")).toContain("curated modpack knowledge is unsupported");
+    expect(getNextStepText("en", "installed")).toContain("/mpb");
+    expect(getNextStepText("ru", "installed")).toContain("кураторская база знаний доступна");
+    expect(getNextStepText("ru", "unavailable")).toContain("кураторская база знаний не поддерживается");
+    expect(getNextStepText("ru", "installed")).toContain("/mpb");
   });
 
   it("tracks operation progress and refreshes instances after completion", () => {
@@ -56,12 +58,16 @@ describe("patcher state", () => {
           loaderVersion: "0.16.9",
           patchStatus: "patched",
           patchReason: null,
+          knowledgeStatus: "installed",
+          knowledgePackId: "fixture-minimal",
+          knowledgeReason: null,
         },
       ],
     });
 
     expect(completed.operation).toBeNull();
     expect(completed.instances[0].patchStatus).toBe("patched");
+    expect(completed.instances[0].knowledgeStatus).toBe("installed");
     expect(completed.message).toBe("Patched");
   });
 });

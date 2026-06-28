@@ -3,8 +3,8 @@ use std::io::Read;
 use std::path::Path;
 
 use mpb_assets::{
-    apply_mpb_patch, evaluate_mpb_patch, remove_mpb_patch, validate_prism_root, MpbPatchAction,
-    MpbPatchStatus,
+    apply_mpb_patch, evaluate_mpb_patch, remove_mpb_patch, validate_prism_root, MpbKnowledgeStatus,
+    MpbPatchAction, MpbPatchManifest, MpbPatchStatus,
 };
 use tempfile::tempdir;
 
@@ -166,6 +166,151 @@ fn applies_repairs_and_removes_managed_patch_files() {
         .join("mpb/patch-manifest.json")
         .exists());
     assert!(instance.instance_path.join("mpb/schemes").is_dir());
+}
+
+#[test]
+fn installs_repairs_and_removes_matching_curated_knowledge_bundle() {
+    let temp = tempdir().expect("temp dir");
+    let root = temp.path();
+    write_fixture_knowledge_instance(root);
+    let instance = validate_prism_root(root).expect("root").instances[0].clone();
+
+    let pending = evaluate_mpb_patch(&instance);
+    assert_eq!(pending.status, MpbPatchStatus::NotPatched);
+    assert_eq!(pending.knowledge.status, MpbKnowledgeStatus::Available);
+    assert_eq!(
+        pending.knowledge.pack_id.as_deref(),
+        Some("fixture-minimal")
+    );
+
+    let applied = apply_mpb_patch(&instance, MpbPatchAction::Apply).expect("apply");
+
+    assert_eq!(applied.status, MpbPatchStatus::Patched);
+    let bundle_path = instance
+        .instance_path
+        .join("mpb/knowledge/fixture-minimal/knowledge-index.json");
+    assert!(bundle_path.is_file());
+    let manifest = read_patch_manifest(&instance.instance_path);
+    assert_eq!(
+        manifest.knowledge_pack_id.as_deref(),
+        Some("fixture-minimal")
+    );
+    assert_eq!(
+        manifest.knowledge_fingerprint.as_deref(),
+        Some("58ef12bb4c001755")
+    );
+    assert_eq!(
+        manifest.knowledge_schema_version.as_deref(),
+        Some("mpb-knowledge-v1")
+    );
+    assert!(manifest.files.iter().any(|file| {
+        file.path == "mpb/knowledge/fixture-minimal/knowledge-index.json"
+            && file.owner == mpb_assets::MpbFileOwner::Managed
+    }));
+    let patched = evaluate_mpb_patch(&instance);
+    assert_eq!(patched.status, MpbPatchStatus::Patched);
+    assert_eq!(patched.knowledge.status, MpbKnowledgeStatus::Installed);
+
+    fs::write(&bundle_path, b"damaged knowledge bundle").expect("damage knowledge");
+    let damaged = evaluate_mpb_patch(&instance);
+    assert_eq!(damaged.status, MpbPatchStatus::NeedsRepair);
+    assert!(damaged
+        .reason
+        .expect("repair reason")
+        .contains("Managed file changed"));
+
+    apply_mpb_patch(&instance, MpbPatchAction::Repair).expect("repair");
+    assert_eq!(
+        evaluate_mpb_patch(&instance).status,
+        MpbPatchStatus::Patched
+    );
+
+    let scheme_dir = instance.instance_path.join("mpb/schemes");
+    fs::create_dir_all(&scheme_dir).expect("scheme dir");
+    fs::write(scheme_dir.join("user-scheme.json"), b"{}").expect("scheme");
+    remove_mpb_patch(&instance, false).expect("remove");
+    assert!(!bundle_path.exists());
+    assert!(scheme_dir.join("user-scheme.json").is_file());
+}
+
+#[test]
+fn matching_knowledge_metadata_changes_require_update() {
+    let temp = tempdir().expect("temp dir");
+    let root = temp.path();
+    write_fixture_knowledge_instance(root);
+    let instance = validate_prism_root(root).expect("root").instances[0].clone();
+    apply_mpb_patch(&instance, MpbPatchAction::Apply).expect("apply");
+
+    let mut manifest = read_patch_manifest(&instance.instance_path);
+    manifest.knowledge_fingerprint = Some("old-fingerprint".to_string());
+    write_patch_manifest(&instance.instance_path, &manifest);
+
+    let status = evaluate_mpb_patch(&instance);
+    assert_eq!(status.status, MpbPatchStatus::NeedsUpdate);
+    assert!(status
+        .reason
+        .expect("update reason")
+        .contains("Curated MPB knowledge artifact has changed"));
+}
+
+#[test]
+fn existing_unmanaged_knowledge_bundle_blocks_matching_install() {
+    let temp = tempdir().expect("temp dir");
+    let root = temp.path();
+    write_fixture_knowledge_instance(root);
+    let instance = validate_prism_root(root).expect("root").instances[0].clone();
+    let unmanaged = instance
+        .instance_path
+        .join("mpb/knowledge/fixture-minimal/knowledge-index.json");
+    fs::create_dir_all(unmanaged.parent().expect("knowledge parent")).expect("knowledge dir");
+    fs::write(&unmanaged, b"user knowledge").expect("knowledge");
+
+    let status = evaluate_mpb_patch(&instance);
+
+    assert_eq!(status.status, MpbPatchStatus::Conflict);
+    assert!(status.reason.expect("reason").contains("not managed"));
+    assert!(apply_mpb_patch(&instance, MpbPatchAction::Apply).is_err());
+}
+
+#[test]
+fn mismatched_knowledge_fingerprint_installs_base_mod_without_curated_pack() {
+    let temp = tempdir().expect("temp dir");
+    let root = temp.path();
+    write_instance(
+        root,
+        "NeoForge Pack",
+        r#"{
+          "components": [
+            { "uid": "net.minecraft", "version": "1.21.1" },
+            { "uid": "net.neoforged", "version": "21.1.233" }
+          ]
+        }"#,
+    );
+    let instance = validate_prism_root(root).expect("root").instances[0].clone();
+
+    let pending = evaluate_mpb_patch(&instance);
+    assert_eq!(pending.status, MpbPatchStatus::NotPatched);
+    assert_eq!(pending.knowledge.status, MpbKnowledgeStatus::Unavailable);
+    assert!(pending
+        .knowledge
+        .reason
+        .as_deref()
+        .expect("knowledge reason")
+        .contains("No first-party curated knowledge bundle matches"));
+
+    apply_mpb_patch(&instance, MpbPatchAction::Apply).expect("apply");
+
+    assert!(instance
+        .minecraft_dir
+        .join("mods/mpb-minecraft-mod.jar")
+        .is_file());
+    assert!(!instance.instance_path.join("mpb/knowledge").exists());
+    let manifest = read_patch_manifest(&instance.instance_path);
+    assert_eq!(manifest.knowledge_pack_id, None);
+    assert_eq!(
+        evaluate_mpb_patch(&instance).knowledge.status,
+        MpbKnowledgeStatus::Unavailable
+    );
 }
 
 #[test]
@@ -377,4 +522,34 @@ fn write_instance(root: &Path, folder: &str, mmc_pack: &str) {
     )
     .expect("cfg");
     fs::write(instance_dir.join("mmc-pack.json"), mmc_pack).expect("pack");
+}
+
+fn write_fixture_knowledge_instance(root: &Path) {
+    let instance_dir = root.join("instances").join("Fixture Knowledge Pack");
+    fs::create_dir_all(instance_dir.join(".minecraft/mods")).expect("minecraft dir");
+    fs::write(
+        instance_dir.join("instance.cfg"),
+        "name=fixture-pack\nManagedPackVersionName=1.0.0\n",
+    )
+    .expect("cfg");
+    fs::write(
+        instance_dir.join("mmc-pack.json"),
+        "{\"components\":[{\"uid\":\"net.minecraft\",\"version\":\"1.21.1\"},{\"uid\":\"net.neoforged\",\"version\":\"21.1.233\"}]}\n",
+    )
+    .expect("pack");
+}
+
+fn read_patch_manifest(instance_path: &Path) -> MpbPatchManifest {
+    serde_json::from_str(
+        &fs::read_to_string(instance_path.join("mpb/patch-manifest.json")).expect("manifest"),
+    )
+    .expect("manifest json")
+}
+
+fn write_patch_manifest(instance_path: &Path, manifest: &MpbPatchManifest) {
+    fs::write(
+        instance_path.join("mpb/patch-manifest.json"),
+        serde_json::to_vec_pretty(manifest).expect("manifest json"),
+    )
+    .expect("write manifest");
 }

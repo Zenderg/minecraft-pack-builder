@@ -1,5 +1,6 @@
 //! PrismLauncher discovery and MPB patch management helpers.
 
+mod knowledge_bundle;
 mod patcher;
 mod prism;
 
@@ -8,6 +9,7 @@ use std::sync::{
     Arc,
 };
 
+pub use knowledge_bundle::{MpbKnowledgeCompatibility, MpbKnowledgeEvaluation, MpbKnowledgeStatus};
 pub use patcher::{
     apply_mpb_patch, evaluate_mpb_patch, remove_mpb_patch, MpbFileOwner, MpbManagedFile,
     MpbPatchAction, MpbPatchEvaluation, MpbPatchManifest, MpbPatchOperationResult,

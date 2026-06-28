@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use mpb_assets::{
-    apply_mpb_patch, evaluate_mpb_patch, remove_mpb_patch, validate_prism_root, MpbPatchAction,
-    MpbPatchOperationResult, MpbPatchStatus, PrismInstanceDescriptor,
+    apply_mpb_patch, evaluate_mpb_patch, remove_mpb_patch, validate_prism_root, MpbKnowledgeStatus,
+    MpbPatchAction, MpbPatchOperationResult, MpbPatchStatus, PrismInstanceDescriptor,
 };
 use serde::Serialize;
 
@@ -18,6 +18,9 @@ pub struct PatcherInstanceSummary {
     pub loader_version: Option<String>,
     pub patch_status: String,
     pub patch_reason: Option<String>,
+    pub knowledge_status: String,
+    pub knowledge_pack_id: Option<String>,
+    pub knowledge_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -103,6 +106,9 @@ fn instance_summary(instance: &PrismInstanceDescriptor) -> PatcherInstanceSummar
         loader_version: instance.loader_version.clone(),
         patch_status: status_name(evaluation.status).to_string(),
         patch_reason: evaluation.reason,
+        knowledge_status: knowledge_status_name(evaluation.knowledge.status).to_string(),
+        knowledge_pack_id: evaluation.knowledge.pack_id,
+        knowledge_reason: evaluation.knowledge.reason,
     }
 }
 
@@ -159,5 +165,13 @@ fn status_name(status: MpbPatchStatus) -> &'static str {
         MpbPatchStatus::Conflict => "conflict",
         MpbPatchStatus::Unsupported => "unsupported",
         MpbPatchStatus::InstanceRunning => "instanceRunning",
+    }
+}
+
+fn knowledge_status_name(status: MpbKnowledgeStatus) -> &'static str {
+    match status {
+        MpbKnowledgeStatus::Available => "available",
+        MpbKnowledgeStatus::Installed => "installed",
+        MpbKnowledgeStatus::Unavailable => "unavailable",
     }
 }

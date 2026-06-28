@@ -34,6 +34,9 @@ const copy = {
     loader: "Loader",
     path: "Path",
     reason: "Reason",
+    knowledge: "Curated knowledge",
+    knowledgeAvailable: "Available",
+    knowledgeUnavailable: "Unsupported",
     next: "Next step",
     remove: "Remove patch",
     deleteSchemes: "Delete MPB schemes from this instance",
@@ -57,6 +60,9 @@ const copy = {
     loader: "Лоадер",
     path: "Путь",
     reason: "Причина",
+    knowledge: "Кураторская база знаний",
+    knowledgeAvailable: "Доступна",
+    knowledgeUnavailable: "Не поддерживается",
     next: "Следующий шаг",
     remove: "Удалить патч",
     deleteSchemes: "Удалить MPB-схемы из этого инстанса",
@@ -296,6 +302,20 @@ function InstanceDetails({
             <dd>{instance.patchReason}</dd>
           </div>
         ) : null}
+        <div>
+          <dt>{t.knowledge}</dt>
+          <dd>
+            {instance.knowledgeStatus === "available" || instance.knowledgeStatus === "installed"
+              ? `${t.knowledgeAvailable}${instance.knowledgePackId ? `: ${instance.knowledgePackId}` : ""}`
+              : t.knowledgeUnavailable}
+          </dd>
+        </div>
+        {instance.knowledgeReason ? (
+          <div>
+            <dt>{t.reason}</dt>
+            <dd>{instance.knowledgeReason}</dd>
+          </div>
+        ) : null}
       </dl>
 
       {action ? (
@@ -310,7 +330,7 @@ function InstanceDetails({
       {instance.patchStatus === "patched" ? (
         <section className="patcher-next">
           <h3>{t.next}</h3>
-          <p>{getNextStepText(language)}</p>
+          <p>{getNextStepText(language, instance.knowledgeStatus)}</p>
         </section>
       ) : null}
 

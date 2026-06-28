@@ -25,6 +25,12 @@ fn patcher_instances_include_patch_statuses_for_root() {
     assert_eq!(instances.len(), 1);
     assert_eq!(instances[0].display_name, "Fabric Pack");
     assert_eq!(instances[0].patch_status, "notPatched");
+    assert_eq!(instances[0].knowledge_status, "unavailable");
+    assert!(instances[0]
+        .knowledge_reason
+        .as_deref()
+        .unwrap_or_default()
+        .contains("No first-party curated knowledge bundle matches"));
     assert_eq!(instances[0].loader.as_deref(), Some("Fabric"));
     assert_eq!(instances[0].minecraft_version.as_deref(), Some("1.20.1"));
 }

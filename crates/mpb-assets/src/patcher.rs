@@ -5,6 +5,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+use crate::knowledge_bundle::{
+    bundled_knowledge_for_instance, installed_knowledge_evaluation,
+    knowledge_unavailable_for_instance, MpbKnowledgeCompatibility, MpbKnowledgeEvaluation,
+    MpbKnowledgeStatus,
+};
 use crate::{AssetError, PrismInstanceDescriptor};
 
 const PATCH_SCHEMA_VERSION: u32 = 1;
@@ -41,6 +46,7 @@ pub struct MpbPatchEvaluation {
     pub reason: Option<String>,
     pub manifest_path: PathBuf,
     pub managed_files: Vec<PathBuf>,
+    pub knowledge: MpbKnowledgeEvaluation,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -66,6 +72,14 @@ pub struct MpbPatchManifest {
     pub loader: String,
     pub minecraft_version: String,
     pub installed_at: String,
+    #[serde(default)]
+    pub knowledge_pack_id: Option<String>,
+    #[serde(default)]
+    pub knowledge_fingerprint: Option<String>,
+    #[serde(default)]
+    pub knowledge_schema_version: Option<String>,
+    #[serde(default)]
+    pub knowledge_compatibility: MpbKnowledgeCompatibility,
     pub files: Vec<MpbManagedFile>,
 }
 
@@ -86,12 +100,15 @@ pub enum MpbFileOwner {
 
 pub fn evaluate_mpb_patch(instance: &PrismInstanceDescriptor) -> MpbPatchEvaluation {
     let manifest_path = manifest_path(instance);
+    let unavailable_knowledge =
+        || MpbKnowledgeEvaluation::unavailable("Curated MPB knowledge is unavailable.");
     if let Some(reason) = unsupported_reason(instance) {
         return MpbPatchEvaluation {
             status: MpbPatchStatus::Unsupported,
             reason: Some(reason),
             manifest_path,
             managed_files: Vec::new(),
+            knowledge: unavailable_knowledge(),
         };
     }
     if let Some(reason) = running_instance_reason(instance) {
@@ -100,6 +117,7 @@ pub fn evaluate_mpb_patch(instance: &PrismInstanceDescriptor) -> MpbPatchEvaluat
             reason: Some(reason),
             manifest_path,
             managed_files: Vec::new(),
+            knowledge: unavailable_knowledge(),
         };
     }
     if let Some(reason) = unmanaged_mod_conflict_reason(instance) {
@@ -108,7 +126,22 @@ pub fn evaluate_mpb_patch(instance: &PrismInstanceDescriptor) -> MpbPatchEvaluat
             reason: Some(reason),
             manifest_path,
             managed_files: Vec::new(),
+            knowledge: knowledge_unavailable_for_instance(instance),
         };
+    }
+    let knowledge_plan = bundled_knowledge_for_instance(instance);
+    if let Ok((Some(artifact), _)) = &knowledge_plan {
+        if let Some(reason) =
+            unmanaged_knowledge_conflict_reason(instance, artifact.relative_path, &artifact.bytes)
+        {
+            return MpbPatchEvaluation {
+                status: MpbPatchStatus::Conflict,
+                reason: Some(reason),
+                manifest_path,
+                managed_files: Vec::new(),
+                knowledge: knowledge_unavailable_for_instance(instance),
+            };
+        }
     }
     let Some(manifest) = read_manifest(instance).ok() else {
         return MpbPatchEvaluation {
@@ -116,6 +149,7 @@ pub fn evaluate_mpb_patch(instance: &PrismInstanceDescriptor) -> MpbPatchEvaluat
             reason: None,
             manifest_path,
             managed_files: Vec::new(),
+            knowledge: knowledge_unavailable_for_instance(instance),
         };
     };
     let managed_files = manifest
@@ -132,6 +166,7 @@ pub fn evaluate_mpb_patch(instance: &PrismInstanceDescriptor) -> MpbPatchEvaluat
             reason: Some("MPB patch manifest was created by another patcher version.".to_string()),
             manifest_path,
             managed_files,
+            knowledge: knowledge_from_manifest_or_plan(&manifest, instance),
         };
     }
     if let Ok(expected_bytes) = mod_artifact_bytes(instance) {
@@ -147,6 +182,52 @@ pub fn evaluate_mpb_patch(instance: &PrismInstanceDescriptor) -> MpbPatchEvaluat
                 reason: Some("Bundled MPB mod artifact has changed.".to_string()),
                 manifest_path,
                 managed_files,
+                knowledge: knowledge_from_manifest_or_plan(&manifest, instance),
+            };
+        }
+    }
+    match &knowledge_plan {
+        Ok((Some(artifact), _)) => {
+            let knowledge_file_is_current = manifest.files.iter().any(|file| {
+                file.owner == MpbFileOwner::Managed
+                    && file.path == artifact.relative_path
+                    && file.checksum == checksum(&artifact.bytes)
+            });
+            if manifest.knowledge_pack_id.as_deref() != Some(artifact.pack_id)
+                || manifest.knowledge_fingerprint.as_deref() != Some(artifact.exact_fingerprint)
+                || manifest.knowledge_schema_version.as_deref() != Some(artifact.schema_version)
+                || !knowledge_file_is_current
+            {
+                return MpbPatchEvaluation {
+                    status: MpbPatchStatus::NeedsUpdate,
+                    reason: Some("Curated MPB knowledge artifact has changed.".to_string()),
+                    manifest_path,
+                    managed_files,
+                    knowledge: knowledge_from_manifest_or_plan(&manifest, instance),
+                };
+            }
+        }
+        Ok((None, _)) => {
+            if manifest.knowledge_pack_id.is_some() {
+                return MpbPatchEvaluation {
+                    status: MpbPatchStatus::NeedsUpdate,
+                    reason: Some(
+                        "Installed curated MPB knowledge no longer matches this instance."
+                            .to_string(),
+                    ),
+                    manifest_path,
+                    managed_files,
+                    knowledge: knowledge_from_manifest_or_plan(&manifest, instance),
+                };
+            }
+        }
+        Err(error) => {
+            return MpbPatchEvaluation {
+                status: MpbPatchStatus::NeedsUpdate,
+                reason: Some(error.to_string()),
+                manifest_path,
+                managed_files,
+                knowledge: knowledge_from_manifest_or_plan(&manifest, instance),
             };
         }
     }
@@ -161,6 +242,7 @@ pub fn evaluate_mpb_patch(instance: &PrismInstanceDescriptor) -> MpbPatchEvaluat
                 reason: Some(format!("Managed file is missing: {}", file.path)),
                 manifest_path,
                 managed_files,
+                knowledge: knowledge_from_manifest_or_plan(&manifest, instance),
             };
         };
         if checksum(&bytes) != file.checksum {
@@ -169,6 +251,7 @@ pub fn evaluate_mpb_patch(instance: &PrismInstanceDescriptor) -> MpbPatchEvaluat
                 reason: Some(format!("Managed file changed: {}", file.path)),
                 manifest_path,
                 managed_files,
+                knowledge: knowledge_from_manifest_or_plan(&manifest, instance),
             };
         }
     }
@@ -177,6 +260,7 @@ pub fn evaluate_mpb_patch(instance: &PrismInstanceDescriptor) -> MpbPatchEvaluat
         reason: None,
         manifest_path,
         managed_files,
+        knowledge: knowledge_from_manifest_or_plan(&manifest, instance),
     }
 }
 
@@ -203,6 +287,29 @@ pub fn apply_mpb_patch(
     let mod_bytes = mod_artifact_bytes(instance)?;
     write_managed_file(instance, MPB_MOD_FILE, &mod_bytes)?;
     steps.push(done("Installed MPB Minecraft mod"));
+    let (knowledge_artifact, knowledge_compatibility) = bundled_knowledge_for_instance(instance)?;
+    let mut files = vec![MpbManagedFile {
+        path: MPB_MOD_FILE.to_string(),
+        checksum: checksum(&mod_bytes),
+        owner: MpbFileOwner::Managed,
+    }];
+    let (knowledge_pack_id, knowledge_fingerprint, knowledge_schema_version) =
+        if let Some(artifact) = knowledge_artifact {
+            write_managed_file(instance, artifact.relative_path, &artifact.bytes)?;
+            steps.push(done("Installed MPB curated knowledge bundle"));
+            files.push(MpbManagedFile {
+                path: artifact.relative_path.to_string(),
+                checksum: checksum(&artifact.bytes),
+                owner: MpbFileOwner::Managed,
+            });
+            (
+                Some(artifact.pack_id.to_string()),
+                Some(artifact.exact_fingerprint.to_string()),
+                Some(artifact.schema_version.to_string()),
+            )
+        } else {
+            (None, None, None)
+        };
 
     let manifest = MpbPatchManifest {
         schema_version: PATCH_SCHEMA_VERSION,
@@ -211,12 +318,13 @@ pub fn apply_mpb_patch(
         loader: instance.loader.clone().unwrap_or_default(),
         minecraft_version: instance.minecraft_version.clone().unwrap_or_default(),
         installed_at: timestamp_string(),
-        files: vec![MpbManagedFile {
-            path: MPB_MOD_FILE.to_string(),
-            checksum: checksum(&mod_bytes),
-            owner: MpbFileOwner::Managed,
-        }],
+        knowledge_pack_id,
+        knowledge_fingerprint,
+        knowledge_schema_version,
+        knowledge_compatibility,
+        files,
     };
+    remove_stale_managed_files(instance, &manifest.files)?;
     write_manifest(instance, &manifest)?;
     steps.push(done("Wrote MPB patch manifest"));
 
@@ -320,6 +428,57 @@ fn unmanaged_mod_conflict_reason(instance: &PrismInstanceDescriptor) -> Option<S
             "Existing mod {} is not managed by MPB and will not be overwritten.",
             mod_path.display()
         ))
+    }
+}
+
+fn unmanaged_knowledge_conflict_reason(
+    instance: &PrismInstanceDescriptor,
+    relative_path: &str,
+    expected_bytes: &[u8],
+) -> Option<String> {
+    if manifest_path(instance).is_file() {
+        return None;
+    }
+    let path = instance_root_path(instance, relative_path);
+    if !path.is_file() {
+        return None;
+    }
+    let bytes = fs::read(&path).ok()?;
+    if checksum(&bytes) == checksum(expected_bytes) {
+        None
+    } else {
+        Some(format!(
+            "Existing knowledge bundle {} is not managed by MPB and will not be overwritten.",
+            path.display()
+        ))
+    }
+}
+
+fn knowledge_from_manifest_or_plan(
+    manifest: &MpbPatchManifest,
+    instance: &PrismInstanceDescriptor,
+) -> MpbKnowledgeEvaluation {
+    let fallback = knowledge_unavailable_for_instance(instance);
+    match fallback.status {
+        MpbKnowledgeStatus::Available => installed_knowledge_evaluation(
+            manifest.knowledge_pack_id.as_deref(),
+            manifest.knowledge_fingerprint.as_deref(),
+            manifest.knowledge_schema_version.as_deref(),
+            fallback,
+        ),
+        MpbKnowledgeStatus::Unavailable => {
+            if manifest.knowledge_pack_id.is_some() {
+                installed_knowledge_evaluation(
+                    manifest.knowledge_pack_id.as_deref(),
+                    manifest.knowledge_fingerprint.as_deref(),
+                    manifest.knowledge_schema_version.as_deref(),
+                    fallback,
+                )
+            } else {
+                fallback
+            }
+        }
+        MpbKnowledgeStatus::Installed => fallback,
     }
 }
 
@@ -444,6 +603,27 @@ fn write_managed_file(
         fs::create_dir_all(parent)?;
     }
     fs::write(path, bytes)?;
+    Ok(())
+}
+
+fn remove_stale_managed_files(
+    instance: &PrismInstanceDescriptor,
+    new_files: &[MpbManagedFile],
+) -> Result<(), AssetError> {
+    let Ok(old_manifest) = read_manifest(instance) else {
+        return Ok(());
+    };
+    for old_file in old_manifest.files {
+        if old_file.owner != MpbFileOwner::Managed {
+            continue;
+        }
+        let still_managed = new_files.iter().any(|new_file| {
+            new_file.owner == MpbFileOwner::Managed && new_file.path == old_file.path
+        });
+        if !still_managed {
+            remove_file_if_exists(&instance_root_path(instance, &old_file.path))?;
+        }
+    }
     Ok(())
 }
 

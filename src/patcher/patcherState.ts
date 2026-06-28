@@ -1,4 +1,4 @@
-import type { Language } from "../i18n";
+import { textForLanguage, type Language } from "../i18n";
 
 export type PatchStatus =
   | "notPatched"
@@ -10,6 +10,7 @@ export type PatchStatus =
   | "instanceRunning";
 
 export type PatchAction = "apply" | "update" | "repair";
+export type KnowledgeStatus = "available" | "installed" | "unavailable";
 
 export type PatcherInstance = {
   instanceId: string;
@@ -21,6 +22,9 @@ export type PatcherInstance = {
   loaderVersion: string | null;
   patchStatus: PatchStatus;
   patchReason: string | null;
+  knowledgeStatus: KnowledgeStatus;
+  knowledgePackId: string | null;
+  knowledgeReason: string | null;
 };
 
 export type PatcherOperation = {
@@ -134,9 +138,22 @@ export type PatcherLabelKey =
   | "patcher.repair"
   | "patcher.remove";
 
-export function getNextStepText(language: Language): string {
-  if (language === "ru") {
-    return "Готово. Теперь запусти инстанс в PrismLauncher, открой MPB Manager в Minecraft через /mpb или назначенные клавиши, затем скопируй prompt для агента из MPB Manager.";
-  }
-  return "Done. Next, start the instance in PrismLauncher, open MPB Manager in Minecraft with /mpb or assigned keybindings, then copy the agent prompt from MPB Manager.";
+export function getNextStepText(
+  language: Language,
+  knowledgeStatus: KnowledgeStatus = "unavailable",
+): string {
+  const hasKnowledge = knowledgeStatus === "available" || knowledgeStatus === "installed";
+  const knowledgeText = hasKnowledge
+    ? textForLanguage(language, {
+        en: "curated knowledge is available for this instance",
+        ru: "кураторская база знаний доступна для этого инстанса",
+      })
+    : textForLanguage(language, {
+        en: "curated modpack knowledge is unsupported for this instance",
+        ru: "кураторская база знаний не поддерживается для этого инстанса",
+      });
+  return textForLanguage(language, {
+    en: `Done. Next, start the instance in PrismLauncher, open MPB Manager in Minecraft with /mpb or assigned keybindings, then copy the agent prompt from MPB Manager; ${knowledgeText}.`,
+    ru: `Готово. Теперь запусти инстанс в PrismLauncher, открой MPB Manager в Minecraft через /mpb или назначенные клавиши, затем скопируй prompt для агента из MPB Manager; ${knowledgeText}.`,
+  });
 }

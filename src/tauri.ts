@@ -32,6 +32,9 @@ let browserPatcherInstances: PatcherInstance[] = [
     loaderVersion: "0.16.9",
     patchStatus: "notPatched",
     patchReason: null,
+    knowledgeStatus: "unavailable",
+    knowledgePackId: null,
+    knowledgeReason: "Browser preview does not evaluate Prism fingerprints.",
   },
 ];
 

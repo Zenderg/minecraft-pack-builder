@@ -89,6 +89,7 @@ describe("MPB patcher app", () => {
     );
     expect(container.textContent).toContain("Patched");
     expect(container.textContent).toContain("start the instance in PrismLauncher");
+    expect(container.textContent).toContain("curated knowledge is available");
     expect(container.textContent).toContain("/mpb");
   });
 });
@@ -104,6 +105,12 @@ function fabricInstance(patchStatus: "notPatched" | "patched") {
     loaderVersion: "0.16.9",
     patchStatus,
     patchReason: null,
+    knowledgeStatus: patchStatus === "patched" ? "installed" : "unavailable",
+    knowledgePackId: patchStatus === "patched" ? "fixture-minimal" : null,
+    knowledgeReason:
+      patchStatus === "patched"
+        ? null
+        : "No first-party curated knowledge bundle matches exact fingerprint.",
   };
 }
 
