@@ -18,11 +18,11 @@ Automated checks completed:
 Full Minecraft mod production build status:
 
 - `gradle` was not available in the login shell `PATH`.
-- A usable Gradle distribution was available at `/Users/koshmarus/.gradle/wrapper/dists/gradle-8.14.3-all/10utluxaxniiv4wxiphsi49nj/gradle-8.14.3/bin/gradle`.
+- A usable Gradle distribution was available from the local Gradle wrapper cache.
 - `/usr/libexec/java_home -V` reported only JDK 21.0.1, but the production mod build completed successfully on that JDK.
 - `mods/mpb-minecraft-mod/build.sh` passed when invoked with `MPB_GRADLE` pointing to the cached Gradle 8.14.3 binary and refreshed `crates/mpb-assets/src/mpb_mod_*_jar.hex`.
 
 ```bash
-MPB_GRADLE=/Users/koshmarus/.gradle/wrapper/dists/gradle-8.14.3-all/10utluxaxniiv4wxiphsi49nj/gradle-8.14.3/bin/gradle \
+MPB_GRADLE=<local-gradle-8.14.3-bin>/gradle \
 mods/mpb-minecraft-mod/build.sh
 ```

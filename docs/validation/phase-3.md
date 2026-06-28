@@ -2,7 +2,7 @@
 
 ## Artifact
 
-- Rendered workspace screenshot: `/Users/koshmarus/Projects/minecraft-pack-builder/docs/validation/media/phase-3-library.png`
+- Rendered workspace screenshot: `docs/validation/media/phase-3-library.png`
 - Desktop/dev entry point: `pnpm dev`, then open `http://127.0.0.1:5173/`
 - SQLite app data file in the desktop app: `<app data dir>/library.sqlite3`
 

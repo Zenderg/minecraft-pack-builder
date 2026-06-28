@@ -22,6 +22,7 @@ Use this checklist before shipping any first-party curated knowledge pack or rel
 
 - [ ] `cargo run -p mpb-knowledge --bin mpb-knowledge -- build-bundle <pack>/source <pack>/bundle` regenerates `knowledge-index.json` from validated source.
 - [ ] `cargo run -p mpb-knowledge --bin mpb-knowledge -- inspect-bundle <pack>/bundle/knowledge-index.json` reports the expected pack id, schema version, entity count, and evidence count.
+- [ ] Large production `knowledge-index.json` files are treated as regenerated local artifacts and are not committed; only reviewable source records and intentionally embedded compressed artifacts are tracked.
 - [ ] Bundle indexes cover entity lookup by id, localized name, tag, use case, mechanic, interface, recipe/dependency graph, mechanic details, evidence, and claims.
 - [ ] The runtime bundle contains no raw lab logs, screenshots, saves, notebooks, local worker traces, or generation-only tooling artifacts.
 - [ ] Any compressed or embedded bundle artifact checksums match the uncompressed runtime `knowledge-index.json` that the patcher installs.

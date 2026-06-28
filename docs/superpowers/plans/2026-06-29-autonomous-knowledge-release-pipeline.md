@@ -216,7 +216,7 @@ Do not publish a release from this pipeline until every phase has a persisted su
 - [ ] Update the validation note with lab/adapter tests and Java compile command results when available.
 - [ ] Run: `cargo test -p mpb-knowledge experiments`
 - [ ] Run: `cargo test -p mpb-knowledge adapter_plan`
-- [ ] Run: `javac --release 17 -encoding UTF-8 -d /private/tmp/mpb-knowledge-lab-classes mods/mpb-knowledge-lab/common/src/main/java/com/mpb/lab/*.java`
+- [ ] Run: `javac --release 17 -encoding UTF-8 -d <tmpdir>/mpb-knowledge-lab-classes mods/mpb-knowledge-lab/common/src/main/java/com/mpb/lab/*.java`
 - [ ] Commit with message `feat: plan runtime lab experiment batches`.
 
 ### Task 8: Bundle Embedding And Product Validation Phase
@@ -278,7 +278,7 @@ Do not publish a release from this pipeline until every phase has a persisted su
 - Modify: `knowledge/packs/all-of-create-aeronautics/source/recipes.jsonl`
 - Modify: `knowledge/packs/all-of-create-aeronautics/source/relationships.jsonl`
 - Modify: `knowledge/packs/all-of-create-aeronautics/source/overlays.jsonl`
-- Modify: `knowledge/packs/all-of-create-aeronautics/bundle/knowledge-index.json`
+- Generate locally: `knowledge/packs/all-of-create-aeronautics/bundle/knowledge-index.json`
 - Modify: `knowledge/packs/all-of-create-aeronautics/bundle/knowledge-index.json.gz`
 - Modify: `crates/mpb-assets/src/knowledge_bundle.rs`
 - Create: `docs/validation/2026-06-29-aoca-autonomous-release-run.md`

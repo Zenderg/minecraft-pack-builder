@@ -12,4 +12,6 @@ mods/mpb-knowledge-lab/build/
 mods/mpb-knowledge-lab/.gradle/
 knowledge/lab-artifacts/
 knowledge/worker-decisions/local/
+knowledge/packs/*/bundle/knowledge-index.json
+!knowledge/packs/fixtures/*/bundle/knowledge-index.json
 .DS_Store

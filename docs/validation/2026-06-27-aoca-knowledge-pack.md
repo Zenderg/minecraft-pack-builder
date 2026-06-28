@@ -4,7 +4,7 @@ Date: 2026-06-28
 
 ## Target
 
-- Prism instance: `/Users/koshmarus/Library/Application Support/PrismLauncher/instances/All of Create - Aeronautics`
+- Prism instance: local developer PrismLauncher instance named `All of Create - Aeronautics`
 - Modpack identity: `All of Create - Aeronautics`
 - Modpack version: `v2.0`
 - Minecraft version: `1.21.1`
@@ -43,7 +43,7 @@ Raw local artifacts, screenshots, logs, saves, and worker traces were not commit
 
 ```sh
 cargo test -p mpb-knowledge --test cli fingerprint_command_prints_exact_fingerprint_document_summary
-cargo run -p mpb-knowledge --bin mpb-knowledge -- fingerprint "/Users/koshmarus/Library/Application Support/PrismLauncher/instances/All of Create - Aeronautics" mpb-knowledge-0.1.0 mpb-lab-0.1.0 mpb-knowledge-v1
+cargo run -p mpb-knowledge --bin mpb-knowledge -- fingerprint "<local-prism-instance>/All of Create - Aeronautics" mpb-knowledge-0.1.0 mpb-lab-0.1.0 mpb-knowledge-v1
 cargo run -p mpb-knowledge --bin mpb-knowledge -- validate-source knowledge/packs/all-of-create-aeronautics/source
 cargo run -p mpb-knowledge --bin mpb-knowledge -- build-bundle knowledge/packs/all-of-create-aeronautics/source knowledge/packs/all-of-create-aeronautics/bundle
 cargo run -p mpb-knowledge --bin mpb-knowledge -- inspect-bundle knowledge/packs/all-of-create-aeronautics/bundle/knowledge-index.json
@@ -58,7 +58,8 @@ pnpm tauri build --bundles app
 ## Results
 
 - `validate-source` passed with zero validation failures.
-- `build-bundle` produced `knowledge/packs/all-of-create-aeronautics/bundle/knowledge-index.json`.
+- `build-bundle` produced the local generated runtime bundle
+  `knowledge/packs/all-of-create-aeronautics/bundle/knowledge-index.json`.
 - `inspect-bundle` reported `all-of-create-aeronautics mpb-knowledge-v1 entities=35096 evidence=6`.
 - The exact plan command `cargo test -p mpb-assets patcher` exited successfully, but it filtered to
   0 tests because current patcher test names do not include the literal string `patcher`; run
@@ -74,13 +75,13 @@ User-facing validation was performed through the release Tauri bundle, not throu
 knowledge collection flow. The application path was:
 
 ```text
-/Users/koshmarus/Projects/minecraft-pack-builder/target/release/bundle/macos/Minecraft Pack Builder.app
+target/release/bundle/macos/Minecraft Pack Builder.app
 ```
 
 The app patched the selected AOC Prism instance and installed:
 
 ```text
-/Users/koshmarus/Library/Application Support/PrismLauncher/instances/All of Create - Aeronautics/mpb/knowledge/all-of-create-aeronautics/knowledge-index.json
+<local-prism-instance>/All of Create - Aeronautics/mpb/knowledge/all-of-create-aeronautics/knowledge-index.json
 ```
 
 The installed knowledge bundle remained the production JSON payload, about 89 MB on disk, with pack

@@ -1,8 +1,8 @@
 # All of Create - Aeronautics Knowledge Pack
 
-First-party curated knowledge pack for the local PrismLauncher instance:
+First-party curated knowledge pack for the selected local PrismLauncher instance:
 
-- Instance: `/Users/koshmarus/Library/Application Support/PrismLauncher/instances/All of Create - Aeronautics`
+- Instance: local developer PrismLauncher instance selected during validation
 - Modpack version: `v2.0`
 - Minecraft: `1.21.1`
 - Loader: `NeoForge 21.1.233`
@@ -31,7 +31,9 @@ Runtime lab experiments and real Prism client validation are release gates for b
 This static production run does not mark worker output as trusted and does not include raw local lab
 artifacts.
 
-The source-of-truth release bundle is `bundle/knowledge-index.json`. The Tauri patcher embeds
+The source of truth is the reviewable `source/` directory. The uncompressed runtime
+`bundle/knowledge-index.json` is a generated local artifact rebuilt from source for inspection and
+validation; it is not committed for large production packs. The Tauri patcher embeds
 `bundle/knowledge-index.json.gz` to keep the app binary small, then writes the JSON bundle into the
 managed Prism instance when the selected patch target matches the exact fingerprint.
 

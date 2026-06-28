@@ -1,6 +1,6 @@
 # Curated Knowledge Packs
 
-MPB first-party knowledge packs are reviewable source records plus a generated read-only runtime bundle. Source records live under `knowledge/packs/<pack-id>/source/`; generated bundles live under `knowledge/packs/<pack-id>/bundle/`.
+MPB first-party knowledge packs are reviewable source records plus generated read-only runtime bundles. Source records live under `knowledge/packs/<pack-id>/source/`; generated bundles are rebuilt under `knowledge/packs/<pack-id>/bundle/`. Large uncompressed generated bundles are local artifacts and should not be committed; compressed embedded artifacts may be committed when the patcher includes them directly.
 
 The production contract is strict:
 
@@ -50,7 +50,7 @@ End users do not manage source records or lab artifacts. Their flow is: download
 No first-party pack is trusted or shipped until all of these gates pass:
 
 - `cargo run -p mpb-knowledge --bin mpb-knowledge -- validate-source <pack>/source` passes with zero unresolved coverage, placeholders, stale fingerprints, incomplete overlays, incomplete dependency chains, behavioral claims without runtime evidence, trusted worker-only claims, missing manifest metadata, or runtime bundle query gaps.
-- `cargo run -p mpb-knowledge --bin mpb-knowledge -- build-bundle <pack>/source <pack>/bundle` produces the runtime bundle from validated source records.
+- `cargo run -p mpb-knowledge --bin mpb-knowledge -- build-bundle <pack>/source <pack>/bundle` produces the local runtime bundle from validated source records.
 - `cargo run -p mpb-knowledge --bin mpb-knowledge -- inspect-bundle <pack>/bundle/knowledge-index.json` confirms the expected pack id, schema version, coverage counts, and query indexes.
 - Patcher validation covers install, repair, update, unpatch, unsupported fingerprint behavior, and unmanaged-file conflict handling.
 - Java runtime validation covers bundle loading, checksum and metadata rejection, knowledge MCP tool schemas, successful read-only query responses, unsupported responses, and prompt text for active and inactive packs.

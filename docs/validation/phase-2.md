@@ -4,7 +4,7 @@
 
 - Local web preview: run `pnpm dev`, then open `http://127.0.0.1:5173/`.
 - Desktop preview: run `pnpm tauri dev` and use the same flow in the Tauri window.
-- Onboarding screenshot: `/Users/koshmarus/Projects/minecraft-pack-builder/docs/validation/media/phase-2-onboarding.png`.
+- Onboarding screenshot: `docs/validation/media/phase-2-onboarding.png`.
 
 ## What Changed
 

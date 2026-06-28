@@ -7,8 +7,8 @@ Date: 2026-06-23
 - Desktop app dev command: `pnpm tauri dev`
 - Frontend production artifact: `dist/index.html`
 - Workspace screenshot: `docs/validation/media/phase-1-workspace.png`
-- macOS app data folder: `/Users/koshmarus/Library/Application Support/com.mpb.minecraft-pack-builder`
-- macOS diagnostics folder: `/Users/koshmarus/Library/Application Support/com.mpb.minecraft-pack-builder/diagnostics`
+- macOS app data folder: `<macos-application-support>/com.mpb.minecraft-pack-builder`
+- macOS diagnostics folder: `<macos-application-support>/com.mpb.minecraft-pack-builder/diagnostics`
 
 ## What To Open
 
