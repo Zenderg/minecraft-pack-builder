@@ -8,4 +8,7 @@ mods/mpb-minecraft-mod/fabric/build/
 mods/mpb-minecraft-mod/forge/build/
 mods/mpb-minecraft-mod/neoforge/build/
 mods/mpb-minecraft-mod/artifacts/generated/
+mods/mpb-knowledge-lab/build/
+mods/mpb-knowledge-lab/.gradle/
+knowledge/lab-artifacts/
 .DS_Store

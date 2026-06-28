@@ -3,6 +3,7 @@
 mod bundle;
 mod extract;
 mod fingerprint;
+mod lab;
 mod schema;
 mod validation;
 
@@ -16,6 +17,11 @@ pub use extract::{
 pub use fingerprint::{
     collect_fingerprint_document, compute_target_fingerprint, FingerprintDocument,
     FingerprintInput, TargetFingerprint,
+};
+pub use lab::{
+    convert_lab_observation_to_evidence, validate_lab_batch_report, LabBatchReport,
+    LabBatchReportSummary, LabExperimentOperation, LabExperimentStatus, LabObservation,
+    LabObservationError, LabObservedState,
 };
 pub use schema::{
     ClaimKind, ClaimRecord, CoverageSummary, EntityKind, EntityRecord, EvidenceKind,
