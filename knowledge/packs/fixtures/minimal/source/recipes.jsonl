@@ -1,0 +1,1 @@
+{"id":"recipe-stone-to-cobble","outputEntityId":"minecraft:cobblestone","inputEntityIds":["minecraft:stone"],"mechanic":"mining","evidenceIds":["ev-runtime-drop"]}

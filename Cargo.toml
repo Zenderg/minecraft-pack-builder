@@ -3,6 +3,7 @@ members = [
   "crates/mpb-assets",
   "crates/mpb-core",
   "crates/mpb-export",
+  "crates/mpb-knowledge",
   "crates/mpb-storage",
   "src-tauri",
 ]

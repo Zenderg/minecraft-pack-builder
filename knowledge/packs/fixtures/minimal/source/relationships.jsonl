@@ -1,0 +1,1 @@
+{"id":"rel-stone-cobble","fromEntityId":"minecraft:stone","toEntityId":"minecraft:cobblestone","relationshipType":"drops","evidenceIds":["ev-runtime-drop"]}

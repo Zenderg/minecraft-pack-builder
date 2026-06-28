@@ -1,0 +1,2 @@
+{"id":"minecraft:stone","kind":"block","localizedNames":{"en_us":"Stone"},"tags":["minecraft:mineable/pickaxe"],"useCases":["build foundations"],"interfaces":["solid_block"],"mechanics":["mining"],"covered":true}
+{"id":"minecraft:cobblestone","kind":"block","localizedNames":{"en_us":"Cobblestone"},"tags":["minecraft:mineable/pickaxe"],"useCases":["craft stone tools"],"interfaces":["solid_block"],"mechanics":["mining"],"covered":true}

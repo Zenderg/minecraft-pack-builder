@@ -1,0 +1,14 @@
+{
+  "packId": "fixture-minimal",
+  "packVersion": "1.0.0",
+  "schemaVersion": "mpb-knowledge-v1",
+  "modpackId": "fixture-pack",
+  "modpackVersion": "1.0.0",
+  "minecraftVersion": "1.21.1",
+  "loader": "NeoForge",
+  "loaderVersion": "21.1.233",
+  "targetFingerprint": "fingerprint-fixture",
+  "computedFingerprint": "fingerprint-fixture",
+  "builderVersion": "mpb-knowledge-test",
+  "labVersion": "mpb-lab-test"
+}

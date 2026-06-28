@@ -1,0 +1,264 @@
+{
+  "manifest": {
+    "packId": "fixture-minimal",
+    "packVersion": "1.0.0",
+    "exactFingerprint": "fingerprint-fixture",
+    "schemaVersion": "mpb-knowledge-v1",
+    "builderVersion": "mpb-knowledge-test",
+    "labVersion": "mpb-lab-test",
+    "validationCommand": "mpb-knowledge validate-source knowledge/packs/fixtures/minimal/source",
+    "validationTimestamp": "unix:1782642459",
+    "coverage": {
+      "expectedEntityIds": [
+        "minecraft:stone",
+        "minecraft:cobblestone"
+      ],
+      "coveredEntityIds": [
+        "minecraft:stone",
+        "minecraft:cobblestone"
+      ],
+      "runtimeBundleQueryIndexes": [
+        "entity_id",
+        "localized_name",
+        "tag",
+        "use_case",
+        "mechanic",
+        "interface",
+        "recipe_graph",
+        "mechanic_details",
+        "evidence"
+      ]
+    }
+  },
+  "indexes": {
+    "entitiesById": {
+      "minecraft:cobblestone": {
+        "id": "minecraft:cobblestone",
+        "kind": "block",
+        "localizedNames": {
+          "en_us": "Cobblestone"
+        },
+        "tags": [
+          "minecraft:mineable/pickaxe"
+        ],
+        "useCases": [
+          "craft stone tools"
+        ],
+        "interfaces": [
+          "solid_block"
+        ],
+        "mechanics": [
+          "mining"
+        ],
+        "covered": true
+      },
+      "minecraft:stone": {
+        "id": "minecraft:stone",
+        "kind": "block",
+        "localizedNames": {
+          "en_us": "Stone"
+        },
+        "tags": [
+          "minecraft:mineable/pickaxe"
+        ],
+        "useCases": [
+          "build foundations"
+        ],
+        "interfaces": [
+          "solid_block"
+        ],
+        "mechanics": [
+          "mining"
+        ],
+        "covered": true
+      }
+    },
+    "entitiesByLocalizedName": {
+      "cobblestone": [
+        "minecraft:cobblestone"
+      ],
+      "stone": [
+        "minecraft:stone"
+      ]
+    },
+    "entitiesByTag": {
+      "minecraft:mineable/pickaxe": [
+        "minecraft:stone",
+        "minecraft:cobblestone"
+      ]
+    },
+    "entitiesByUseCase": {
+      "build foundations": [
+        "minecraft:stone"
+      ],
+      "craft stone tools": [
+        "minecraft:cobblestone"
+      ]
+    },
+    "entitiesByMechanic": {
+      "mining": [
+        "minecraft:stone",
+        "minecraft:cobblestone"
+      ]
+    },
+    "entitiesByInterface": {
+      "solid_block": [
+        "minecraft:stone",
+        "minecraft:cobblestone"
+      ]
+    },
+    "recipeGraphs": {
+      "minecraft:cobblestone": {
+        "entityId": "minecraft:cobblestone",
+        "recipes": [
+          {
+            "id": "recipe-stone-to-cobble",
+            "outputEntityId": "minecraft:cobblestone",
+            "inputEntityIds": [
+              "minecraft:stone"
+            ],
+            "mechanic": "mining",
+            "evidenceIds": [
+              "ev-runtime-drop"
+            ]
+          }
+        ],
+        "relationships": [
+          {
+            "id": "rel-stone-cobble",
+            "fromEntityId": "minecraft:stone",
+            "toEntityId": "minecraft:cobblestone",
+            "relationshipType": "drops",
+            "evidenceIds": [
+              "ev-runtime-drop"
+            ]
+          }
+        ]
+      },
+      "minecraft:stone": {
+        "entityId": "minecraft:stone",
+        "recipes": [
+          {
+            "id": "recipe-stone-to-cobble",
+            "outputEntityId": "minecraft:cobblestone",
+            "inputEntityIds": [
+              "minecraft:stone"
+            ],
+            "mechanic": "mining",
+            "evidenceIds": [
+              "ev-runtime-drop"
+            ]
+          }
+        ],
+        "relationships": [
+          {
+            "id": "rel-stone-cobble",
+            "fromEntityId": "minecraft:stone",
+            "toEntityId": "minecraft:cobblestone",
+            "relationshipType": "drops",
+            "evidenceIds": [
+              "ev-runtime-drop"
+            ]
+          }
+        ]
+      }
+    },
+    "mechanicDetails": {
+      "mining": {
+        "id": "mining",
+        "entityIds": [
+          "minecraft:stone",
+          "minecraft:cobblestone"
+        ],
+        "traits": [
+          {
+            "id": "drops",
+            "name": "Drop behavior",
+            "evidenceIds": [
+              "ev-runtime-drop"
+            ],
+            "complete": true
+          }
+        ],
+        "evidenceIds": [
+          "ev-runtime-drop"
+        ],
+        "complete": true
+      }
+    },
+    "evidenceById": {
+      "ev-runtime-drop": {
+        "id": "ev-runtime-drop",
+        "kind": "runtime_observation",
+        "summary": "Lab observation mined stone and observed cobblestone output.",
+        "fingerprint": "fingerprint-fixture",
+        "accepted": true
+      },
+      "ev-static-stone": {
+        "id": "ev-static-stone",
+        "kind": "deterministic_source",
+        "summary": "Registry and language extraction identify minecraft:stone as Stone.",
+        "fingerprint": "fingerprint-fixture",
+        "accepted": true
+      }
+    },
+    "claimsByEntityId": {
+      "minecraft:stone": [
+        {
+          "id": "claim-stone-static",
+          "entityId": "minecraft:stone",
+          "kind": "static",
+          "statement": "Stone is a solid block.",
+          "evidenceIds": [
+            "ev-static-stone"
+          ],
+          "workerDecisionIds": []
+        },
+        {
+          "id": "claim-stone-drops-cobble",
+          "entityId": "minecraft:stone",
+          "kind": "behavioral",
+          "statement": "Mining stone without Silk Touch drops cobblestone.",
+          "evidenceIds": [
+            "ev-runtime-drop"
+          ],
+          "workerDecisionIds": []
+        }
+      ]
+    }
+  },
+  "checksums": [
+    {
+      "path": "source/manifest.json",
+      "checksum": "fdc23920588e09f0"
+    },
+    {
+      "path": "source/entities.jsonl",
+      "checksum": "92e7136de9d60ebb"
+    },
+    {
+      "path": "source/claims.jsonl",
+      "checksum": "4180c3604acf18af"
+    },
+    {
+      "path": "source/evidence.jsonl",
+      "checksum": "050c1828181a3fbd"
+    },
+    {
+      "path": "source/recipes.jsonl",
+      "checksum": "9d534b4e461f28a0"
+    },
+    {
+      "path": "source/overlays.jsonl",
+      "checksum": "22cf06cc8c6bba7a"
+    },
+    {
+      "path": "source/relationships.jsonl",
+      "checksum": "a62780859931a644"
+    },
+    {
+      "path": "knowledge-index.json",
+      "checksum": "a255db82a80b8df3"
+    }
+  ]
+}

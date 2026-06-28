@@ -1,0 +1,2 @@
+{"id":"claim-stone-static","entityId":"minecraft:stone","kind":"static","statement":"Stone is a solid block.","evidenceIds":["ev-static-stone"],"workerDecisionIds":[]}
+{"id":"claim-stone-drops-cobble","entityId":"minecraft:stone","kind":"behavioral","statement":"Mining stone without Silk Touch drops cobblestone.","evidenceIds":["ev-runtime-drop"],"workerDecisionIds":[]}

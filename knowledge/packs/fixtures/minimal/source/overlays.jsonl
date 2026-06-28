@@ -1,0 +1,1 @@
+{"id":"mining","entityIds":["minecraft:stone","minecraft:cobblestone"],"traits":[{"id":"drops","name":"Drop behavior","evidenceIds":["ev-runtime-drop"],"complete":true}],"evidenceIds":["ev-runtime-drop"],"complete":true}

@@ -246,18 +246,21 @@ fn stable_identity_input(
 
 fn stable_content_input(identity_input: &str, instance_path: &Path) -> Result<String, AssetError> {
     let mut lines = vec![identity_input.to_string()];
+    let minecraft_dir = minecraft_dir_for_instance(instance_path);
     collect_file_fingerprints(&instance_path.join("instance.cfg"), &mut lines)?;
     collect_file_fingerprints(&instance_path.join("mmc-pack.json"), &mut lines)?;
-    collect_dir_fingerprints(
-        &instance_path.join(".minecraft").join("mods"),
-        "mods",
-        &mut lines,
-    )?;
-    collect_dir_fingerprints(
-        &instance_path.join(".minecraft").join("resourcepacks"),
-        "resourcepacks",
-        &mut lines,
-    )?;
+    for (label, relative) in [
+        ("mods", "mods"),
+        ("config", "config"),
+        ("datapacks", "datapacks"),
+        ("kubejs", "kubejs"),
+        ("scripts", "scripts"),
+        ("resourcepacks", "resourcepacks"),
+        ("resourcepacks", "texturepacks"),
+        ("resourcepacks", "shaderpacks"),
+    ] {
+        collect_dir_fingerprints(&minecraft_dir.join(relative), label, &mut lines)?;
+    }
     lines.sort();
     Ok(lines.join("\n"))
 }

@@ -118,6 +118,53 @@ fn identity_fingerprint_survives_folder_move_but_content_fingerprint_tracks_mod_
     assert_ne!(changed.content_fingerprint, first.content_fingerprint);
 }
 
+#[test]
+fn content_fingerprint_tracks_pack_affecting_config_and_script_folders() {
+    let temp = tempdir().expect("temp dir");
+    let root = temp.path();
+    let instance_dir = write_instance(root, "Scripted Pack", "name=Scripted Pack\n", "");
+    let minecraft = instance_dir.join(".minecraft");
+    fs::create_dir_all(minecraft.join("config")).expect("config");
+    fs::create_dir_all(minecraft.join("datapacks")).expect("datapacks");
+    fs::create_dir_all(minecraft.join("kubejs").join("server_scripts")).expect("kubejs");
+    fs::create_dir_all(minecraft.join("scripts")).expect("scripts");
+    fs::create_dir_all(minecraft.join("resourcepacks")).expect("resourcepacks");
+    fs::write(minecraft.join("config").join("pack.toml"), b"first").expect("config");
+    fs::write(minecraft.join("datapacks").join("data.zip"), b"data").expect("datapack");
+    fs::write(
+        minecraft
+            .join("kubejs")
+            .join("server_scripts")
+            .join("recipes.js"),
+        b"kube",
+    )
+    .expect("kubejs");
+    fs::write(minecraft.join("scripts").join("recipes.zs"), b"script").expect("script");
+    fs::write(minecraft.join("resourcepacks").join("guide.zip"), b"guide").expect("resourcepack");
+
+    let first = validate_prism_root(root).expect("validate root").instances[0].clone();
+    fs::write(minecraft.join("config").join("pack.toml"), b"changed").expect("config changed");
+    let changed_config = validate_prism_root(root).expect("validate root").instances[0].clone();
+    fs::write(
+        minecraft
+            .join("kubejs")
+            .join("server_scripts")
+            .join("recipes.js"),
+        b"kube changed",
+    )
+    .expect("kube changed");
+    let changed_script = validate_prism_root(root).expect("validate root").instances[0].clone();
+
+    assert_ne!(
+        changed_config.content_fingerprint,
+        first.content_fingerprint
+    );
+    assert_ne!(
+        changed_script.content_fingerprint,
+        changed_config.content_fingerprint
+    );
+}
+
 fn write_instance(root: &Path, folder: &str, cfg: &str, mmc_pack: &str) -> std::path::PathBuf {
     let instance_dir = root.join("instances").join(folder);
     fs::create_dir_all(instance_dir.join(".minecraft")).expect("minecraft dir");
