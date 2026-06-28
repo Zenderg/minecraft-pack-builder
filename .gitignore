@@ -11,4 +11,5 @@ mods/mpb-minecraft-mod/artifacts/generated/
 mods/mpb-knowledge-lab/build/
 mods/mpb-knowledge-lab/.gradle/
 knowledge/lab-artifacts/
+knowledge/worker-decisions/local/
 .DS_Store

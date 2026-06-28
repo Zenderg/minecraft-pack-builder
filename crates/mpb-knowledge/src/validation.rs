@@ -232,6 +232,19 @@ fn check_claims(pack: &KnowledgePackSource, failures: &mut Vec<ValidationFailure
                 message: format!("claim {} references missing or rejected evidence", claim.id),
             });
         }
+
+        if !claim.evidence_ids.is_empty()
+            && !claim
+                .evidence_ids
+                .iter()
+                .filter_map(|id| evidence_by_id(pack, id))
+                .any(|evidence| evidence.accepted && evidence.kind != EvidenceKind::WorkerOutput)
+        {
+            failures.push(ValidationFailure {
+                code: ValidationCode::TrustedWorkerOutput,
+                message: format!("claim {} is backed only by worker output", claim.id),
+            });
+        }
     }
 }
 
@@ -308,7 +321,7 @@ fn check_workers(pack: &KnowledgePackSource, failures: &mut Vec<ValidationFailur
         if decision
             .converted_evidence_ids
             .iter()
-            .any(|id| !all_evidence_accepted(pack, std::slice::from_ref(id)))
+            .any(|id| !evidence_accepted_non_worker(pack, id))
         {
             failures.push(ValidationFailure {
                 code: ValidationCode::IncompleteDependencyChains,
@@ -357,4 +370,9 @@ fn all_evidence_accepted(pack: &KnowledgePackSource, ids: &[String]) -> bool {
         && ids
             .iter()
             .all(|id| evidence_by_id(pack, id).is_some_and(|evidence| evidence.accepted))
+}
+
+fn evidence_accepted_non_worker(pack: &KnowledgePackSource, id: &str) -> bool {
+    evidence_by_id(pack, id)
+        .is_some_and(|evidence| evidence.accepted && evidence.kind != EvidenceKind::WorkerOutput)
 }

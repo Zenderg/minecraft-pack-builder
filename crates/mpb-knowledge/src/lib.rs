@@ -6,6 +6,7 @@ mod fingerprint;
 mod lab;
 mod schema;
 mod validation;
+mod workers;
 
 pub use bundle::{
     build_runtime_bundle, load_source_pack, read_runtime_bundle, validate_source_dir,
@@ -31,4 +32,7 @@ pub use schema::{
 pub use validation::{
     validate_source_pack, KnowledgeValidationError, ValidationCode, ValidationFailure,
     ValidationReport,
+};
+pub use workers::{
+    FineTuningDecision, WorkerOutputEnvelope, WorkerOutputEnvelopeError, WorkerTaskKind,
 };
