@@ -1,0 +1,14 @@
+{
+  "packId": "all-of-create-aeronautics",
+  "packVersion": "2026.06.28+static.1",
+  "schemaVersion": "mpb-knowledge-v1",
+  "modpackId": "all-of-create-aeronautics",
+  "modpackVersion": "v2.0",
+  "minecraftVersion": "1.21.1",
+  "loader": "NeoForge",
+  "loaderVersion": "21.1.233",
+  "targetFingerprint": "4cdf224f36c11b8a",
+  "computedFingerprint": "4cdf224f36c11b8a",
+  "builderVersion": "mpb-knowledge-0.1.0",
+  "labVersion": "mpb-lab-0.1.0"
+}

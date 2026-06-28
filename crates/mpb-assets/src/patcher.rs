@@ -132,7 +132,7 @@ pub fn evaluate_mpb_patch(instance: &PrismInstanceDescriptor) -> MpbPatchEvaluat
     let knowledge_plan = bundled_knowledge_for_instance(instance);
     if let Ok((Some(artifact), _)) = &knowledge_plan {
         if let Some(reason) =
-            unmanaged_knowledge_conflict_reason(instance, artifact.relative_path, &artifact.bytes)
+            unmanaged_knowledge_conflict_reason(instance, artifact.relative_path, artifact.checksum)
         {
             return MpbPatchEvaluation {
                 status: MpbPatchStatus::Conflict,
@@ -191,7 +191,7 @@ pub fn evaluate_mpb_patch(instance: &PrismInstanceDescriptor) -> MpbPatchEvaluat
             let knowledge_file_is_current = manifest.files.iter().any(|file| {
                 file.owner == MpbFileOwner::Managed
                     && file.path == artifact.relative_path
-                    && file.checksum == checksum(&artifact.bytes)
+                    && file.checksum == artifact.checksum
             });
             if manifest.knowledge_pack_id.as_deref() != Some(artifact.pack_id)
                 || manifest.knowledge_fingerprint.as_deref() != Some(artifact.exact_fingerprint)
@@ -295,11 +295,12 @@ pub fn apply_mpb_patch(
     }];
     let (knowledge_pack_id, knowledge_fingerprint, knowledge_schema_version) =
         if let Some(artifact) = knowledge_artifact {
-            write_managed_file(instance, artifact.relative_path, &artifact.bytes)?;
+            let artifact_bytes = artifact.bytes()?;
+            write_managed_file(instance, artifact.relative_path, &artifact_bytes)?;
             steps.push(done("Installed MPB curated knowledge bundle"));
             files.push(MpbManagedFile {
                 path: artifact.relative_path.to_string(),
-                checksum: checksum(&artifact.bytes),
+                checksum: artifact.checksum.to_string(),
                 owner: MpbFileOwner::Managed,
             });
             (
@@ -434,7 +435,7 @@ fn unmanaged_mod_conflict_reason(instance: &PrismInstanceDescriptor) -> Option<S
 fn unmanaged_knowledge_conflict_reason(
     instance: &PrismInstanceDescriptor,
     relative_path: &str,
-    expected_bytes: &[u8],
+    expected_checksum: &str,
 ) -> Option<String> {
     if manifest_path(instance).is_file() {
         return None;
@@ -444,7 +445,7 @@ fn unmanaged_knowledge_conflict_reason(
         return None;
     }
     let bytes = fs::read(&path).ok()?;
-    if checksum(&bytes) == checksum(expected_bytes) {
+    if checksum(&bytes) == expected_checksum {
         None
     } else {
         Some(format!(

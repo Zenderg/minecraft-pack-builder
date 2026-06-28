@@ -1,0 +1,22 @@
+{
+  "claim_count": 6,
+  "entity_count": 35096,
+  "evidence_count": 6,
+  "fingerprint": "4cdf224f36c11b8a",
+  "mod_jar_count": 205,
+  "overlay_count": 15,
+  "patch_target_excluded_inputs": [
+    "mods/mpb-minecraft-mod.jar"
+  ],
+  "recipe_count": 12701,
+  "relationship_count": 33905,
+  "source_counts": {
+    "blocks": 7024,
+    "config_files": 464,
+    "datapack_files": 34,
+    "items": 8850,
+    "recipes": 12756,
+    "resource_pack_files": 1840,
+    "tags": 5886
+  }
+}

@@ -1,11 +1,16 @@
 use std::hash::Hasher;
+use std::io::Read;
 
+use flate2::read::GzDecoder;
 use mpb_knowledge::collect_fingerprint_document;
 use serde::{Deserialize, Serialize};
 
 use crate::{AssetError, PrismInstanceDescriptor};
 
 const FIXTURE_BUNDLE_HEX: &str = include_str!("mpb_knowledge_fixture_bundle.hex");
+const AOCA_BUNDLE_GZIP: &[u8] = include_bytes!(
+    "../../../knowledge/packs/all-of-create-aeronautics/bundle/knowledge-index.json.gz"
+);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct KnowledgeBundleArtifact {
@@ -17,7 +22,23 @@ pub(crate) struct KnowledgeBundleArtifact {
     pub loader: &'static str,
     pub minecraft_version: &'static str,
     pub relative_path: &'static str,
-    pub bytes: Vec<u8>,
+    pub checksum: &'static str,
+    payload: KnowledgeBundlePayload,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum KnowledgeBundlePayload {
+    Hex(&'static str),
+    Gzip(&'static [u8]),
+}
+
+impl KnowledgeBundleArtifact {
+    pub(crate) fn bytes(&self) -> Result<Vec<u8>, AssetError> {
+        match self.payload {
+            KnowledgeBundlePayload::Hex(hex) => decode_hex(hex),
+            KnowledgeBundlePayload::Gzip(gzip) => decode_gzip_bundle(gzip),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,38 +96,53 @@ impl MpbKnowledgeEvaluation {
 pub(crate) fn bundled_knowledge_for_instance(
     instance: &PrismInstanceDescriptor,
 ) -> Result<(Option<KnowledgeBundleArtifact>, MpbKnowledgeCompatibility), AssetError> {
-    let fixture = fixture_artifact()?;
-    let computed = compute_patch_target_fingerprint(
-        &instance.instance_path,
-        fixture.builder_version,
-        fixture.lab_version,
-        fixture.schema_version,
-    )
-    .map_err(|error| AssetError::Patch(format!("Knowledge fingerprint failed: {error}")))?;
     let target_loader = instance.loader.clone();
     let target_minecraft_version = instance.minecraft_version.clone();
-    let matched = computed == fixture.exact_fingerprint
-        && target_loader
-            .as_deref()
-            .map(|loader| loader.eq_ignore_ascii_case(fixture.loader))
-            .unwrap_or(false)
-        && target_minecraft_version.as_deref() == Some(fixture.minecraft_version);
-    let reason = if matched {
-        None
-    } else {
-        Some(format!(
-            "No first-party curated knowledge bundle matches exact fingerprint {}.",
-            computed
-        ))
-    };
-    let compatibility = MpbKnowledgeCompatibility {
-        target_fingerprint: Some(computed),
-        target_loader,
-        target_minecraft_version,
-        matched,
-        reason,
-    };
-    Ok((matched.then_some(fixture), compatibility))
+    let mut last_computed = None;
+
+    for artifact in bundled_artifacts()? {
+        let computed = compute_patch_target_fingerprint(
+            &instance.instance_path,
+            artifact.builder_version,
+            artifact.lab_version,
+            artifact.schema_version,
+        )
+        .map_err(|error| AssetError::Patch(format!("Knowledge fingerprint failed: {error}")))?;
+        let matched = computed == artifact.exact_fingerprint
+            && target_loader
+                .as_deref()
+                .map(|loader| loader.eq_ignore_ascii_case(artifact.loader))
+                .unwrap_or(false)
+            && target_minecraft_version.as_deref() == Some(artifact.minecraft_version);
+        if matched {
+            return Ok((
+                Some(artifact),
+                MpbKnowledgeCompatibility {
+                    target_fingerprint: Some(computed),
+                    target_loader,
+                    target_minecraft_version,
+                    matched: true,
+                    reason: None,
+                },
+            ));
+        }
+        last_computed = Some(computed);
+    }
+
+    let computed = last_computed.unwrap_or_else(|| "none".to_string());
+    Ok((
+        None,
+        MpbKnowledgeCompatibility {
+            target_fingerprint: Some(computed.clone()),
+            target_loader,
+            target_minecraft_version,
+            matched: false,
+            reason: Some(format!(
+                "No first-party curated knowledge bundle matches exact fingerprint {}.",
+                computed
+            )),
+        },
+    ))
 }
 
 pub(crate) fn knowledge_unavailable_for_instance(
@@ -147,6 +183,10 @@ pub(crate) fn installed_knowledge_evaluation(
     }
 }
 
+fn bundled_artifacts() -> Result<Vec<KnowledgeBundleArtifact>, AssetError> {
+    Ok(vec![fixture_artifact()?, aoca_artifact()?])
+}
+
 fn fixture_artifact() -> Result<KnowledgeBundleArtifact, AssetError> {
     Ok(KnowledgeBundleArtifact {
         pack_id: "fixture-minimal",
@@ -157,8 +197,29 @@ fn fixture_artifact() -> Result<KnowledgeBundleArtifact, AssetError> {
         loader: "NeoForge",
         minecraft_version: "1.21.1",
         relative_path: "mpb/knowledge/fixture-minimal/knowledge-index.json",
-        bytes: decode_hex(FIXTURE_BUNDLE_HEX)?,
+        checksum: "3f7ed3918a41d958",
+        payload: KnowledgeBundlePayload::Hex(FIXTURE_BUNDLE_HEX),
     })
+}
+
+fn aoca_artifact() -> Result<KnowledgeBundleArtifact, AssetError> {
+    Ok(KnowledgeBundleArtifact {
+        pack_id: "all-of-create-aeronautics",
+        exact_fingerprint: "4cdf224f36c11b8a",
+        schema_version: "mpb-knowledge-v1",
+        builder_version: "mpb-knowledge-0.1.0",
+        lab_version: "mpb-lab-0.1.0",
+        loader: "NeoForge",
+        minecraft_version: "1.21.1",
+        relative_path: "mpb/knowledge/all-of-create-aeronautics/knowledge-index.json",
+        checksum: "d440d9c4b2dce383",
+        payload: KnowledgeBundlePayload::Gzip(AOCA_BUNDLE_GZIP),
+    })
+}
+
+#[cfg(test)]
+fn aoca_compressed_len() -> usize {
+    AOCA_BUNDLE_GZIP.len()
 }
 
 fn compute_patch_target_fingerprint(
@@ -229,6 +290,22 @@ fn decode_hex(hex: &str) -> Result<Vec<u8>, AssetError> {
     Ok(bytes)
 }
 
+fn decode_gzip_bundle(gzip_bytes: &[u8]) -> Result<Vec<u8>, AssetError> {
+    let mut decoder = GzDecoder::new(gzip_bytes);
+    let mut bytes = Vec::new();
+    decoder.read_to_end(&mut bytes).map_err(|error| {
+        AssetError::Patch(format!(
+            "Bundled MPB knowledge artifact gzip decode failed: {error}"
+        ))
+    })?;
+    if !bytes.starts_with(b"{") {
+        return Err(AssetError::Patch(
+            "Bundled MPB knowledge artifact is not a JSON bundle.".to_string(),
+        ));
+    }
+    Ok(bytes)
+}
+
 fn hex_value(byte: u8) -> Result<u8, AssetError> {
     match byte {
         b'0'..=b'9' => Ok(byte - b'0'),
@@ -237,5 +314,22 @@ fn hex_value(byte: u8) -> Result<u8, AssetError> {
         _ => Err(AssetError::Patch(
             "Bundled MPB knowledge artifact contains invalid hexadecimal data.".to_string(),
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn aoca_artifact_is_stored_compressed_and_decodes_to_json_bundle() {
+        let artifact = aoca_artifact().expect("aoca artifact");
+        let bytes = artifact.bytes().expect("decoded aoca bundle");
+
+        assert!(aoca_compressed_len() < bytes.len() / 4);
+        assert!(bytes.starts_with(b"{"));
+        assert_eq!(artifact.pack_id, "all-of-create-aeronautics");
+        assert_eq!(artifact.exact_fingerprint, "4cdf224f36c11b8a");
+        assert_eq!(artifact.checksum, stable_checksum(&bytes));
     }
 }
