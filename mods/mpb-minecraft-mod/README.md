@@ -15,10 +15,13 @@ This module is the source tree for the MPB client-only Minecraft runtime.
   - `<instance>/mpb/schemes/*.mpb.json`
   - `<instance>/mpb/cache/`
   - `<instance>/mpb/patch-manifest.json`
+  - `<instance>/mpb/knowledge/<pack-id>/knowledge-index.json`
 - Opens MPB Manager through `/mpb`, loader config entry when available, or an unbound keybinding assigned by the user.
 - Provides an unbound keybinding for Build/View mode.
 - Does not place blocks, use server commands, require a server mod, or expose player world position/progress through MCP.
 - Import/export of `.litematic` and `.schem` is a Minecraft UI action, not an MCP tool.
+- Loads first-party curated knowledge only when the patch manifest and runtime bundle metadata agree on pack id, exact fingerprint, schema version, and checksum.
+- If no exact curated knowledge pack is active, the agent prompt says curated modpack knowledge is unsupported and read-only knowledge tools return unsupported/unavailable instead of falling back to guesses.
 
 ## Runtime Implementation Notes
 
@@ -37,6 +40,21 @@ Modded blocks can still produce no visible ghost pixels even when their registry
 Runtime block registry lookups must check explicit registry membership before reading `BuiltInRegistries.BLOCK.get(...)`; otherwise missing modded ids can be masked by Minecraft's fallback block and MCP clients receive a false "known block with no properties" response.
 
 The current runtime is self-contained and does not require a separate managed dependency jar. It starts a local Streamable HTTP-compatible MCP endpoint at `/mcp`, creates instance-local MPB folders/config on startup, exposes core scheme management tools over JSON-RPC, and registers a real `/mpb` client command plus an unbound `key.mpb.open_manager` keybinding in each loader build.
+
+## Curated Knowledge MCP Tools
+
+The runtime exposes first-party knowledge as read-only MCP tools separate from scheme mutation tools:
+
+- `mpb_knowledge_status`: reports whether an exact curated pack is active and returns pack metadata when available.
+- `mpb_search_entities`: searches active curated entities by id, localized name, tag, use case, mechanic, or interface.
+- `mpb_get_entity_card`: returns one curated entity card.
+- `mpb_get_recipe_graph`: returns one recipe or dependency graph slice.
+- `mpb_get_mechanic_details`: returns one curated mechanic overlay.
+- `mpb_get_evidence`: returns one accepted evidence summary.
+
+These tools never generate knowledge, inspect raw lab artifacts, or trust model output at runtime. They only read the installed `knowledge-index.json` bundle. If the selected Prism instance is compatible with the base MPB mod but does not exactly match a bundled first-party knowledge fingerprint, the patcher may still install the base mod; the runtime keeps curated knowledge inactive, `mpb_knowledge_status` explains why it is unavailable, and all other knowledge tools return an unsupported response.
+
+MPB Manager copies an agent prompt that mirrors this state. With an active pack, the prompt instructs the agent to call `mpb_knowledge_status` and the read-only knowledge tools for supported modpack questions. Without an exact active pack, the prompt explicitly tells the agent not to claim curated modpack support.
 
 ## Build
 

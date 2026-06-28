@@ -18,7 +18,25 @@ Runtime data lives in each Prism instance:
 <instance>/mpb/schemes/*.mpb.json
 <instance>/mpb/cache/
 <instance>/mpb/patch-manifest.json
+<instance>/mpb/knowledge/<pack-id>/knowledge-index.json
 ```
+
+## End-User Flow
+
+MPB ships as one desktop patcher. The supported flow is:
+
+1. Download and open the MPB Patcher.
+2. Select a PrismLauncher instance.
+3. Install or repair the managed MPB Minecraft mod patch.
+4. If the selected instance exactly matches a first-party knowledge-pack fingerprint, the patcher also installs the managed read-only knowledge bundle under `<instance>/mpb/knowledge/<pack-id>/`.
+5. Start the instance in PrismLauncher.
+6. Open MPB Manager in Minecraft with `/mpb`, the loader config entry when available, or the user-assigned keybinding.
+7. Copy the MCP endpoint and agent prompt from MPB Manager.
+8. Connect the external agent to the Streamable HTTP MCP endpoint.
+
+Curated first-party knowledge is exact-match only. When the Minecraft version, loader, mod list, configs, datapacks, scripts, resource packs, schema version, builder version, or lab tooling version do not match the bundled fingerprint, the base MPB mod may still install if compatible, but curated knowledge is unavailable. In that state the runtime disables the knowledge tools, `mpb_knowledge_status` reports unsupported/unavailable, and the copied agent prompt tells the agent not to claim curated modpack support.
+
+Trusted packs are release-blocked until strict validation passes with zero unresolved coverage, placeholders, query gaps, stale fingerprints, incomplete overlays, incomplete dependency chains, trusted worker-only output, or behavioral claims without accepted runtime evidence. Runtime bundles are generated artifacts; raw lab logs, notebooks, screenshots, saves, and worker traces are local developer artifacts and are not shipped.
 
 ## Development
 
