@@ -1,5 +1,6 @@
 package com.mpb.runtime;
 
+import com.mpb.runtime.knowledge.MpbKnowledgeRepository;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
@@ -21,21 +22,26 @@ public record MpbManagerSnapshot(
         String loaderName,
         String minecraftVersion,
         String patchManifestVersion,
+        String knowledgeStatus,
+        String knowledgePackId,
         String protocolVersion) {
     public static final String MCP_PROTOCOL_VERSION = "2025-06-18";
 
     public static MpbManagerSnapshot load(MpbRuntimePaths paths, String loaderName, String minecraftVersion) {
         paths.prepare();
         MpbRuntimeConfig config = MpbRuntimeConfig.load(paths.configFile());
+        MpbKnowledgeRepository knowledgeRepository = MpbKnowledgeRepository.load(paths);
         return new MpbManagerSnapshot(
                 loadSchemes(paths.schemesDirectory()),
                 config.lanMode(),
                 config.endpoint(),
-                MpbAgentPrompt.build(config),
+                MpbAgentPrompt.build(config, knowledgeRepository),
                 MpbRuntimeConfig.MOD_VERSION,
                 loaderName == null ? "Unknown" : loaderName,
                 minecraftVersion == null ? "Unknown" : minecraftVersion,
                 patchManifestVersion(paths.instanceRoot().resolve("mpb/patch-manifest.json")),
+                knowledgeRepository.available() ? "available" : "unavailable",
+                knowledgeRepository.activePackId(),
                 MCP_PROTOCOL_VERSION);
     }
 

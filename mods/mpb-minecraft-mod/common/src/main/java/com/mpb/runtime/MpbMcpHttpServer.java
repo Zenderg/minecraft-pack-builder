@@ -1,5 +1,7 @@
 package com.mpb.runtime;
 
+import com.mpb.runtime.knowledge.MpbKnowledgeQuery;
+import com.mpb.runtime.knowledge.MpbKnowledgeRepository;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -71,7 +73,7 @@ public final class MpbMcpHttpServer {
         String body = "{\"status\":\"ready\",\"endpoint\":"
                 + MpbJson.quote(config.endpoint())
                 + ",\"prompt\":"
-                + MpbJson.quote(MpbAgentPrompt.build(config))
+                + MpbJson.quote(MpbAgentPrompt.build(config, MpbKnowledgeRepository.load(paths)))
                 + "}";
         respond(exchange, 200, body);
     }
@@ -97,7 +99,7 @@ public final class MpbMcpHttpServer {
         }
     }
 
-    private String dispatch(String body) {
+    String dispatch(String body) {
         Map<String, String> fields = MpbJson.flatFields(body);
         String id = MpbJson.idLiteral(body);
         String method = fields.getOrDefault("method", "");
@@ -124,6 +126,7 @@ public final class MpbMcpHttpServer {
 
     private String callTool(Map<String, String> fields, MpbSchemeRepository repository) {
         String toolName = fields.getOrDefault("name", "");
+        MpbKnowledgeQuery knowledgeQuery = new MpbKnowledgeQuery(MpbKnowledgeRepository.load(paths));
         return switch (toolName) {
             case "mpb_list_schemes" -> "{\"content\":[{\"type\":\"text\",\"text\":"
                     + MpbJson.quote(repository.listAsJson())
@@ -136,6 +139,12 @@ public final class MpbMcpHttpServer {
             case "mpb_validate_scheme" -> textResult(repository.validate(fields.get("schemeId")));
             case "mpb_list_block_registry_ids" -> textResult(blockRegistryIdsJson());
             case "mpb_describe_block_states" -> textResult(blockRegistry.describeBlockStates(fields.getOrDefault("registryId", "minecraft:air")));
+            case "mpb_knowledge_status" -> textResult(knowledgeQuery.status());
+            case "mpb_search_entities" -> textResult(knowledgeQuery.searchEntities(fields));
+            case "mpb_get_entity_card" -> textResult(knowledgeQuery.entityCard(fields));
+            case "mpb_get_recipe_graph" -> textResult(knowledgeQuery.recipeGraph(fields));
+            case "mpb_get_mechanic_details" -> textResult(knowledgeQuery.mechanicDetails(fields));
+            case "mpb_get_evidence" -> textResult(knowledgeQuery.evidence(fields));
             case "mpb_batch_point_edits" -> textResult(repository.batchPointEdits(fields));
             case "mpb_fill_region" -> textResult(repository.fillRegion(fields));
             case "mpb_clear_region" -> textResult(repository.clearRegion(fields));

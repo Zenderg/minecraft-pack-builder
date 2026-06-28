@@ -51,6 +51,7 @@ while IFS= read -r source; do
 done < <(find "$ROOT/common/src/main/java" "$ROOT/tests/src" -name '*.java' | sort)
 javac --release 17 -encoding UTF-8 -d "$test_classes_dir" "${test_sources[@]}"
 java -cp "$test_classes_dir" com.mpb.runtime.MpbMcpToolCatalogTest
+java -cp "$test_classes_dir" com.mpb.runtime.MpbKnowledgeRuntimeTest
 java -cp "$test_classes_dir" com.mpb.runtime.MpbMcpCompatibilityTest
 java -cp "$test_classes_dir" com.mpb.runtime.MpbRuntimeConfigTest
 java -cp "$test_classes_dir" com.mpb.runtime.MpbGuideSchemeTest

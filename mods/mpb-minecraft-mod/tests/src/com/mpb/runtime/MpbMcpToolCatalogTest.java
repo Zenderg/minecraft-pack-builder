@@ -94,11 +94,21 @@ public final class MpbMcpToolCatalogTest {
             "mpb_create_region",
             "mpb_update_region",
             "mpb_delete_region",
-            "mpb_list_regions"
+            "mpb_list_regions",
+            "mpb_knowledge_status",
+            "mpb_search_entities",
+            "mpb_get_entity_card",
+            "mpb_get_recipe_graph",
+            "mpb_get_mechanic_details",
+            "mpb_get_evidence"
         }) {
             if (!names.contains(expected)) {
                 throw new AssertionError("Missing MCP tool: " + expected);
             }
+        }
+        String schema = MpbMcpToolCatalog.toolsListJson();
+        if (!schema.contains("\"entityId\"") || !schema.contains("\"evidenceId\"")) {
+            throw new AssertionError("Knowledge tool schemas are missing query fields: " + schema);
         }
     }
 

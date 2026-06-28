@@ -47,6 +47,12 @@ public final class MpbMcpToolCatalog {
         tools.add("mpb_validate_scheme", "Validate one MPB scheme file.", schemeIdSchema());
         tools.add("mpb_list_block_registry_ids", "List known Minecraft block registry ids.", schema());
         tools.add("mpb_describe_block_states", "Describe allowed properties for one block registry id.", schema(str("registryId", "Minecraft block registry id like minecraft:stone."), req("registryId")));
+        tools.add("mpb_knowledge_status", "Report whether an exact first-party curated knowledge pack is active.", schema());
+        tools.add("mpb_search_entities", "Search active curated knowledge entities by id, localized name, tag, use case, mechanic, or interface.", schema(str("query", "Search text such as stone, mining, or minecraft:mineable/pickaxe."), req("query")));
+        tools.add("mpb_get_entity_card", "Read one curated knowledge entity card.", schema(str("entityId", "Entity id like minecraft:stone."), req("entityId")));
+        tools.add("mpb_get_recipe_graph", "Read one curated recipe/dependency graph slice.", schema(str("entityId", "Entity id whose recipe/dependency graph should be returned."), req("entityId")));
+        tools.add("mpb_get_mechanic_details", "Read curated mechanic details.", schema(str("mechanic", "Mechanic id such as mining."), req("mechanic")));
+        tools.add("mpb_get_evidence", "Read one curated evidence summary.", schema(str("evidenceId", "Evidence id from a curated knowledge response."), req("evidenceId")));
         tools.add("mpb_batch_point_edits", "Apply sparse point edits to a scheme atomically.", schema(str("schemeId", "MPB scheme id."), str("edits", "Semicolon-separated x,y,z=blockId edits. Use air to clear. Stateful blocks may use minecraft:wall_torch[facing=east]."), req("schemeId", "edits")));
         tools.add("mpb_fill_region", "Fill a cuboid region in a scheme.", schema(selectionProperties(str("blockId", "Minecraft block registry id to fill. Stateful blocks may use minecraft:oak_stairs[facing=north,half=top].")), req("schemeId", "minX", "minY", "minZ", "maxX", "maxY", "maxZ", "blockId")));
         tools.add("mpb_clear_region", "Clear a cuboid region in a scheme.", schema(selectionProperties(), req("schemeId")));

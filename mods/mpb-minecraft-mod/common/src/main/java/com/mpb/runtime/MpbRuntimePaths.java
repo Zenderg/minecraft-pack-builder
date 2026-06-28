@@ -4,7 +4,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
-public record MpbRuntimePaths(Path instanceRoot, Path mpbDirectory, Path schemesDirectory, Path cacheDirectory, Path configFile, Path runtimePidFile) {
+public record MpbRuntimePaths(
+        Path instanceRoot,
+        Path mpbDirectory,
+        Path schemesDirectory,
+        Path cacheDirectory,
+        Path knowledgeDirectory,
+        Path configFile,
+        Path runtimePidFile) {
     public static MpbRuntimePaths discover() {
         Path workingDirectory = Paths.get("").toAbsolutePath().normalize();
         Path instanceRoot = inferInstanceRoot(workingDirectory);
@@ -18,6 +25,7 @@ public record MpbRuntimePaths(Path instanceRoot, Path mpbDirectory, Path schemes
                 mpbDirectory,
                 mpbDirectory.resolve("schemes"),
                 mpbDirectory.resolve("cache"),
+                mpbDirectory.resolve("knowledge"),
                 mpbDirectory.resolve("config.json"),
                 mpbDirectory.resolve("runtime.pid"));
     }
