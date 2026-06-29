@@ -86,3 +86,58 @@ cargo test -p mpb-knowledge
 ```
 
 Observed result: passed. The full `mpb-knowledge` suite ran 31 integration tests plus crate/doc test targets with no failures.
+
+## 2026-06-29 Task 4: Resumable Orchestrator State Machine
+
+Red phase:
+
+```text
+cargo test -p mpb-knowledge orchestrator_resume
+```
+
+Observed result: failed to compile because `KnowledgePhaseRunner`, `KnowledgeReleaseOrchestrator`, `OrchestratorError`, `PhaseRunContext`, and `PhaseRunStatus` were not yet exported.
+
+Green phase:
+
+```text
+cargo test -p mpb-knowledge --test orchestrator_resume
+```
+
+Observed result: passed. The command ran 3 integration tests covering phase-order resume after simulated interruptions at `Preflight`, `Clone`, and `RuntimeVerification`; `release start` intake/preflight persistence and missing-`LongRun` blocking report generation; and `release resume` idempotency for an existing disposable clone artifact.
+
+Post-review regression expansion:
+
+```text
+cargo test -p mpb-knowledge --test orchestrator_resume
+```
+
+Observed result: passed. The command now runs 7 integration tests, adding coverage for durable failed checkpoints/events when a phase runner returns an error, `Fingerprint` resume from a durable `target-original` artifact without touching the original instance, `Preflight` rebuilding a missing report artifact instead of treating artifact metadata as the report, `Clone` blocking when the source instance fingerprint changes after the `Fingerprint` phase, and `release status` suggesting `release resume` after a historical approval blocker has been satisfied.
+
+```text
+cargo fmt --check
+```
+
+Observed result: passed after formatting the new orchestrator module, CLI additions, and tests.
+
+```text
+cargo test -p mpb-knowledge
+```
+
+Observed result: passed. The full `mpb-knowledge` suite ran 35 integration tests plus crate/doc test targets with no failures.
+
+Sample `release status` shape after `release start` blocks at the approval gate:
+
+```json
+{
+  "latestSuccessfulPhase": "Preflight",
+  "nextPhase": "Approvals",
+  "blockers": [
+    {
+      "code": "MISSING_LONG_RUN_APPROVAL"
+    }
+  ],
+  "nextCommand": "mpb-knowledge approve <run-id> LongRun --artifact-root <artifact-root> --reason <text>"
+}
+```
+
+Durable implementation note: the orchestrator computes progress by scanning successful checkpoints in the stable phase order. It intentionally does not use the newest successful checkpoint row as the source of truth, because launch probes or other diagnostics may append a later checkpoint for an earlier phase.

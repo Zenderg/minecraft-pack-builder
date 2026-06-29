@@ -30,6 +30,55 @@ Rows include the `run_id`, a `created_at` timestamp, JSON details with enough co
 
 The stable phase order is: `Intake`, `Preflight`, `Approvals`, `Fingerprint`, `Clone`, `Extraction`, `Drafting`, `ExperimentPlanning`, `AdapterExpansion`, `RuntimeVerification`, `Validation`, `Bundle`, `PatcherIntegration`, `ProductValidation`, `Release`, `Report`.
 
+## Release Orchestrator
+
+The release orchestrator advances durable runs one required phase at a time. It determines progress by scanning successful checkpoints in the stable phase order above, not by trusting the most recent checkpoint row. That keeps resume behavior stable when a later command records additional diagnostic checkpoints for an earlier phase.
+
+Start a release run with:
+
+```text
+cargo run -p mpb-knowledge --bin mpb-knowledge -- release start <instance-path> --pack-id <pack-id> --artifact-root knowledge
+```
+
+`release start` creates a run id, records the `Intake` checkpoint, writes the `Preflight` report, and stops at `Approvals` until `LongRun` approval is explicitly recorded. The command prints an `OrchestratorOutcome` JSON object with these status names:
+
+- `PhaseSucceeded`
+- `Blocked`
+- `Complete`
+
+Resume the next required phase with:
+
+```text
+cargo run -p mpb-knowledge --bin mpb-knowledge -- release resume <run-id> --artifact-root knowledge
+```
+
+Inspect durable state with:
+
+```text
+cargo run -p mpb-knowledge --bin mpb-knowledge -- release status <run-id> --artifact-root knowledge
+```
+
+Status output includes `latestSuccessfulPhase`, `nextPhase`, blockers, approval status, artifact references, and the next command to run. CLI phase names match the stable Rust phase variants verbatim:
+
+- `Intake`
+- `Preflight`
+- `Approvals`
+- `Fingerprint`
+- `Clone`
+- `Extraction`
+- `Drafting`
+- `ExperimentPlanning`
+- `AdapterExpansion`
+- `RuntimeVerification`
+- `Validation`
+- `Bundle`
+- `PatcherIntegration`
+- `ProductValidation`
+- `Release`
+- `Report`
+
+Implemented phases are idempotent. Preflight reuses an existing `preflight-report` artifact, clone resume reuses an existing `target-clone` artifact instead of deleting and recreating the disposable clone, and unsupported future phases create a blocking report under `knowledge/runs/<run-id>/reports/` rather than pretending the release is complete.
+
 ## Preflight
 
 Run preflight before any long-running or mutating pipeline work:
@@ -59,13 +108,19 @@ Approvals are required even when the orchestrator is otherwise autonomous. The s
 - `ProjectCodeChange`
 - `GitHubReleasePublication`
 
-Record an approval with:
+Record a fingerprint-scoped approval with:
 
 ```text
 cargo run -p mpb-knowledge --bin mpb-knowledge -- approve <run-id> LongRun --artifact-root knowledge --target-fingerprint <fingerprint> --reason "operator approved the local long-running release"
 ```
 
 Approval rows are append-only and fingerprint-aware. A later denial or approval is a new event; historical rows are not overwritten. Gate checks use the newest matching approval row for the exact approval kind and target fingerprint.
+
+For `release start` / `release resume`, approve the initial long-running local work before fingerprinting with a run-scoped approval:
+
+```text
+cargo run -p mpb-knowledge --bin mpb-knowledge -- approve <run-id> LongRun --artifact-root knowledge --reason "operator approved the local long-running release"
+```
 
 ## Target Clone And Launch Checkpoints
 

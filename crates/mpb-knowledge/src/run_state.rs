@@ -366,6 +366,27 @@ impl KnowledgeRunStore {
             .transpose()
     }
 
+    pub fn phase_checkpoints(&self) -> Result<Vec<PhaseCheckpoint>, RunStateError> {
+        let mut statement = self.conn.prepare(
+            "SELECT id, run_id, phase, status, target_fingerprint, created_at, detail_json
+             FROM phase_checkpoints
+             WHERE run_id = ?1
+             ORDER BY id ASC",
+        )?;
+        let rows = statement.query_map(params![self.run_id], |row| {
+            Ok(CheckpointRow {
+                id: row.get(0)?,
+                run_id: row.get(1)?,
+                phase: row.get(2)?,
+                status: row.get(3)?,
+                target_fingerprint: row.get(4)?,
+                created_at: row.get(5)?,
+                detail_json: row.get(6)?,
+            })
+        })?;
+        rows.map(|row| checkpoint_from_row(row?)).collect()
+    }
+
     pub fn record_blocker(&self, input: RunBlockerInput) -> Result<RunBlocker, RunStateError> {
         let created_at = now_rfc3339()?;
         self.conn.execute(

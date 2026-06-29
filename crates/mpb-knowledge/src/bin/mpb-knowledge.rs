@@ -6,8 +6,8 @@ use std::str::FromStr;
 
 use mpb_knowledge::{
     build_runtime_bundle, compute_target_fingerprint, read_runtime_bundle, run_preflight,
-    validate_source_dir, ApprovalKind, KnowledgeRunPhase, KnowledgeRunStore, PhaseCheckpointStatus,
-    TargetManager,
+    validate_source_dir, ApprovalKind, KnowledgeReleaseOrchestrator, KnowledgeRunPhase,
+    KnowledgeRunStore, PhaseCheckpointStatus, TargetManager,
 };
 use serde_json::json;
 
@@ -175,11 +175,60 @@ fn run() -> Result<(), String> {
             }
             _ => Err(
                 "usage: mpb-knowledge target <clone RUN INSTANCE|probe-launch RUN> [--artifact-root PATH]"
+                .to_string(),
+            ),
+        },
+        Some("release") => match args.next().as_deref() {
+            Some("start") => {
+                let instance_path = args.next().ok_or("release start requires <instance-path>")?;
+                let options = parse_release_start_options(args.collect())?;
+                let pack_id = options
+                    .pack_id
+                    .as_deref()
+                    .ok_or("release start requires --pack-id <pack-id>")?;
+                let orchestrator = KnowledgeReleaseOrchestrator::new(&options.artifact_root);
+                let outcome = orchestrator
+                    .start_release(&instance_path, pack_id)
+                    .map_err(|error| error.to_string())?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&outcome).map_err(|error| error.to_string())?
+                );
+                Ok(())
+            }
+            Some("resume") => {
+                let run_id = args.next().ok_or("release resume requires <run-id>")?;
+                let options = parse_release_options(args.collect())?;
+                let orchestrator = KnowledgeReleaseOrchestrator::new(&options.artifact_root);
+                let outcome = orchestrator
+                    .run_next_required_phase(&run_id)
+                    .map_err(|error| error.to_string())?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&outcome).map_err(|error| error.to_string())?
+                );
+                Ok(())
+            }
+            Some("status") => {
+                let run_id = args.next().ok_or("release status requires <run-id>")?;
+                let options = parse_release_options(args.collect())?;
+                let orchestrator = KnowledgeReleaseOrchestrator::new(&options.artifact_root);
+                let status = orchestrator
+                    .status(&run_id)
+                    .map_err(|error| error.to_string())?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&status).map_err(|error| error.to_string())?
+                );
+                Ok(())
+            }
+            _ => Err(
+                "usage: mpb-knowledge release <start INSTANCE --pack-id PACK|resume RUN|status RUN> [--artifact-root PATH]"
                     .to_string(),
             ),
         },
         _ => Err(
-            "usage: mpb-knowledge <validate-source SOURCE|build-bundle SOURCE OUTPUT|inspect-bundle BUNDLE|fingerprint INSTANCE BUILDER LAB SCHEMA|preflight INSTANCE [--artifact-root PATH] [--run-id RUN]|approve RUN APPROVAL_KIND --reason TEXT [--artifact-root PATH] [--target-fingerprint FINGERPRINT]|target clone RUN INSTANCE [--artifact-root PATH]|target probe-launch RUN [--artifact-root PATH]>"
+            "usage: mpb-knowledge <validate-source SOURCE|build-bundle SOURCE OUTPUT|inspect-bundle BUNDLE|fingerprint INSTANCE BUILDER LAB SCHEMA|preflight INSTANCE [--artifact-root PATH] [--run-id RUN]|approve RUN APPROVAL_KIND --reason TEXT [--artifact-root PATH] [--target-fingerprint FINGERPRINT]|target clone RUN INSTANCE [--artifact-root PATH]|target probe-launch RUN [--artifact-root PATH]|release start INSTANCE --pack-id PACK [--artifact-root PATH]|release resume RUN [--artifact-root PATH]|release status RUN [--artifact-root PATH]>"
                 .to_string(),
         ),
     }
@@ -197,6 +246,15 @@ struct ApproveOptions {
 }
 
 struct TargetOptions {
+    artifact_root: PathBuf,
+}
+
+struct ReleaseStartOptions {
+    artifact_root: PathBuf,
+    pack_id: Option<String>,
+}
+
+struct ReleaseOptions {
     artifact_root: PathBuf,
 }
 
@@ -271,6 +329,50 @@ fn parse_target_options(args: Vec<String>) -> Result<TargetOptions, String> {
                 options.artifact_root = PathBuf::from(value);
             }
             other => return Err(format!("unknown target option: {other}")),
+        }
+        index += 1;
+    }
+    Ok(options)
+}
+
+fn parse_release_start_options(args: Vec<String>) -> Result<ReleaseStartOptions, String> {
+    let mut options = ReleaseStartOptions {
+        artifact_root: PathBuf::from("knowledge"),
+        pack_id: None,
+    };
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--artifact-root" => {
+                index += 1;
+                let value = args.get(index).ok_or("--artifact-root requires <path>")?;
+                options.artifact_root = PathBuf::from(value);
+            }
+            "--pack-id" => {
+                index += 1;
+                let value = args.get(index).ok_or("--pack-id requires <pack-id>")?;
+                options.pack_id = Some(value.clone());
+            }
+            other => return Err(format!("unknown release start option: {other}")),
+        }
+        index += 1;
+    }
+    Ok(options)
+}
+
+fn parse_release_options(args: Vec<String>) -> Result<ReleaseOptions, String> {
+    let mut options = ReleaseOptions {
+        artifact_root: PathBuf::from("knowledge"),
+    };
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--artifact-root" => {
+                index += 1;
+                let value = args.get(index).ok_or("--artifact-root requires <path>")?;
+                options.artifact_root = PathBuf::from(value);
+            }
+            other => return Err(format!("unknown release option: {other}")),
         }
         index += 1;
     }

@@ -5,6 +5,7 @@ mod bundle;
 mod extract;
 mod fingerprint;
 mod lab;
+mod orchestrator;
 mod preflight;
 mod run_state;
 mod schema;
@@ -28,6 +29,11 @@ pub use lab::{
     convert_lab_observation_to_evidence, validate_lab_batch_report, LabBatchReport,
     LabBatchReportSummary, LabExperimentOperation, LabExperimentStatus, LabObservation,
     LabObservationError, LabObservedState,
+};
+pub use orchestrator::{
+    ApprovalStatus, DefaultPhaseRunner, KnowledgePhaseRunner, KnowledgeReleaseOrchestrator,
+    OrchestratorError, OrchestratorOutcome, OrchestratorRunStatus, PhaseRunContext, PhaseRunStatus,
+    ReleaseStatus,
 };
 pub use preflight::{
     run_preflight, DiskFreeEstimate, ExtractionScaleEstimate, HardwareFit, KeepAwakeAvailability,
