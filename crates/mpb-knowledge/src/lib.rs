@@ -4,6 +4,7 @@ mod bundle;
 mod extract;
 mod fingerprint;
 mod lab;
+mod run_state;
 mod schema;
 mod validation;
 mod workers;
@@ -23,6 +24,10 @@ pub use lab::{
     convert_lab_observation_to_evidence, validate_lab_batch_report, LabBatchReport,
     LabBatchReportSummary, LabExperimentOperation, LabExperimentStatus, LabObservation,
     LabObservationError, LabObservedState,
+};
+pub use run_state::{
+    ArtifactRef, EventRecord, KnowledgeRun, KnowledgeRunPhase, KnowledgeRunStore, PhaseCheckpoint,
+    PhaseCheckpointStatus, RunBlocker, RunBlockerInput, RunStateError,
 };
 pub use schema::{
     ClaimKind, ClaimRecord, CoverageSummary, EntityKind, EntityRecord, EvidenceKind,

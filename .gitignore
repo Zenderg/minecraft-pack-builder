@@ -11,6 +11,10 @@ mods/mpb-minecraft-mod/artifacts/generated/
 mods/mpb-knowledge-lab/build/
 mods/mpb-knowledge-lab/.gradle/
 knowledge/lab-artifacts/
+knowledge/runs/
+knowledge/model-cache/
+knowledge/model-datasets/
+knowledge/prism-clones/
 knowledge/worker-decisions/local/
 knowledge/packs/*/bundle/knowledge-index.json
 !knowledge/packs/fixtures/*/bundle/knowledge-index.json
