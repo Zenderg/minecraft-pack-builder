@@ -233,6 +233,10 @@ impl KnowledgeRunStore {
         &self.run_id
     }
 
+    pub(crate) fn connection(&self) -> &Connection {
+        &self.conn
+    }
+
     pub fn run_dir(&self) -> &Path {
         &self.run_dir
     }

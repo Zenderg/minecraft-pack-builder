@@ -1,14 +1,17 @@
 //! First-party curated modded-Minecraft knowledge pack schema and tooling.
 
+mod approvals;
 mod bundle;
 mod extract;
 mod fingerprint;
 mod lab;
+mod preflight;
 mod run_state;
 mod schema;
 mod validation;
 mod workers;
 
+pub use approvals::{ApprovalError, ApprovalGateError, ApprovalKind, ApprovalRecord};
 pub use bundle::{
     build_runtime_bundle, load_source_pack, read_runtime_bundle, validate_source_dir,
     BundleBuildError, RuntimeBundle, RuntimeBundleManifest, RuntimeBundleQuery,
@@ -24,6 +27,11 @@ pub use lab::{
     convert_lab_observation_to_evidence, validate_lab_batch_report, LabBatchReport,
     LabBatchReportSummary, LabExperimentOperation, LabExperimentStatus, LabObservation,
     LabObservationError, LabObservedState,
+};
+pub use preflight::{
+    run_preflight, DiskFreeEstimate, ExtractionScaleEstimate, HardwareFit, KeepAwakeAvailability,
+    ModelCacheStatus, ModelNeed, PhaseDurationEstimate, PreflightError, PreflightReport,
+    PrismInstanceReadiness, RuntimeMode, ToolAvailability,
 };
 pub use run_state::{
     ArtifactRef, EventRecord, KnowledgeRun, KnowledgeRunPhase, KnowledgeRunStore, PhaseCheckpoint,

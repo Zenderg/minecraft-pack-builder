@@ -29,3 +29,40 @@ Each run is addressed by a stable run id. The run store applies idempotent SQLit
 Rows include the `run_id`, a `created_at` timestamp, JSON details with enough context to resume without terminal output, and a `target_fingerprint` where the row is tied to a specific pack fingerprint.
 
 The stable phase order is: `Intake`, `Preflight`, `Approvals`, `Fingerprint`, `Clone`, `Extraction`, `Drafting`, `ExperimentPlanning`, `AdapterExpansion`, `RuntimeVerification`, `Validation`, `Bundle`, `PatcherIntegration`, `ProductValidation`, `Release`, `Report`.
+
+## Preflight
+
+Run preflight before any long-running or mutating pipeline work:
+
+```text
+cargo run -p mpb-knowledge --bin mpb-knowledge -- preflight <instance-path> --artifact-root knowledge
+```
+
+To persist the JSON preflight report into a run store:
+
+```text
+cargo run -p mpb-knowledge --bin mpb-knowledge -- preflight <instance-path> --artifact-root knowledge --run-id <run-id>
+```
+
+Preflight inspects local CPU architecture, operating system, memory, disk estimates, tool availability, Prism instance readability, clone size, extraction scale, model cache status, keep-awake availability, phase duration estimates, and model needs. It never downloads models, never enables keep-awake mode, and never mutates the target Prism instance.
+
+Model planning is reported as data through `ModelNeed` records. A `ModelNeed` names the task, candidate label, expected model size, runtime mode, hardware fit, and reason; it is not permission to download or run the model.
+
+## Approval Gates
+
+Approvals are required even when the orchestrator is otherwise autonomous. The stable approval kinds are:
+
+- `LongRun`
+- `KeepAwake`
+- `ModelDownload`
+- `FineTuning`
+- `ProjectCodeChange`
+- `GitHubReleasePublication`
+
+Record an approval with:
+
+```text
+cargo run -p mpb-knowledge --bin mpb-knowledge -- approve <run-id> LongRun --artifact-root knowledge --target-fingerprint <fingerprint> --reason "operator approved the local long-running release"
+```
+
+Approval rows are append-only and fingerprint-aware. A later denial or approval is a new event; historical rows are not overwritten. Gate checks use the newest matching approval row for the exact approval kind and target fingerprint.
