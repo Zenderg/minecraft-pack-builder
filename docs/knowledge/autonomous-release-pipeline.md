@@ -66,3 +66,35 @@ cargo run -p mpb-knowledge --bin mpb-knowledge -- approve <run-id> LongRun --art
 ```
 
 Approval rows are append-only and fingerprint-aware. A later denial or approval is a new event; historical rows are not overwritten. Gate checks use the newest matching approval row for the exact approval kind and target fingerprint.
+
+## Target Clone And Launch Checkpoints
+
+The original PrismLauncher instance is read-only source input. The target manager computes the exact fingerprint from the original instance metadata and Minecraft input files, then copies the instance to:
+
+```text
+knowledge/prism-clones/<run-id>/instance
+```
+
+All destructive work, lab instrumentation, runtime probes, and cleanup operate only inside that disposable clone path. Clone creation records both `target-original` and `target-clone` artifact references in the run database and verifies that the original fingerprint is unchanged after copying.
+
+Create a clone with:
+
+```text
+cargo run -p mpb-knowledge --bin mpb-knowledge -- target clone <run-id> <instance-path> --artifact-root knowledge
+```
+
+Clone cleanup policy values are:
+
+- `KeepForDebugging`
+- `DeleteOnSuccess`
+- `DeleteAfterReport`
+
+The default policy is `DeleteAfterReport`, so artifacts remain available until the final release or blocking report has been produced.
+
+Launch probing is persisted as a resumable checkpoint:
+
+```text
+cargo run -p mpb-knowledge --bin mpb-knowledge -- target probe-launch <run-id> --artifact-root knowledge
+```
+
+Probe results are `Ready`, `ManualInterventionRequired`, `LauncherUnavailable`, or `LaunchFailed`. Manual intervention records include the operating system, launcher command attempted, observed prompt/status text when available, and an exact resume command. The CLI does not mutate or launch the original instance; it reads the clone artifact from the run store and targets only the disposable clone.

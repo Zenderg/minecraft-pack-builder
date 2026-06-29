@@ -8,6 +8,7 @@ mod lab;
 mod preflight;
 mod run_state;
 mod schema;
+mod target;
 mod validation;
 mod workers;
 
@@ -41,6 +42,10 @@ pub use schema::{
     ClaimKind, ClaimRecord, CoverageSummary, EntityKind, EntityRecord, EvidenceKind,
     EvidenceSummary, KnowledgeManifest, KnowledgePackSource, MechanicOverlay, MechanicTrait,
     RecipeRecord, RelationshipRecord, WorkerDecision,
+};
+pub use target::{
+    CleanupOutcome, CleanupPolicy, DisposableClone, LaunchProbeCheckpoint, LaunchProbeResult,
+    TargetError, TargetInspection, TargetManager, TargetMetadata,
 };
 pub use validation::{
     validate_source_pack, KnowledgeValidationError, ValidationCode, ValidationFailure,

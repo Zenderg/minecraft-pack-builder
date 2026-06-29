@@ -456,6 +456,56 @@ impl KnowledgeRunStore {
         })
     }
 
+    pub fn artifact_refs(&self) -> Result<Vec<ArtifactRef>, RunStateError> {
+        let mut statement = self.conn.prepare(
+            "SELECT id, run_id, artifact_kind, path, target_fingerprint, created_at, detail_json
+             FROM artifact_refs
+             WHERE run_id = ?1
+             ORDER BY id ASC",
+        )?;
+        let rows = statement.query_map(params![self.run_id], |row| {
+            Ok(ArtifactRefRow {
+                id: row.get(0)?,
+                run_id: row.get(1)?,
+                artifact_kind: row.get(2)?,
+                path: row.get(3)?,
+                target_fingerprint: row.get(4)?,
+                created_at: row.get(5)?,
+                detail_json: row.get(6)?,
+            })
+        })?;
+        rows.map(|row| artifact_ref_from_row(row?)).collect()
+    }
+
+    pub fn latest_artifact_ref(
+        &self,
+        artifact_kind: &str,
+    ) -> Result<Option<ArtifactRef>, RunStateError> {
+        self.conn
+            .query_row(
+                "SELECT id, run_id, artifact_kind, path, target_fingerprint, created_at, detail_json
+                 FROM artifact_refs
+                 WHERE run_id = ?1 AND artifact_kind = ?2
+                 ORDER BY id DESC
+                 LIMIT 1",
+                params![self.run_id, artifact_kind],
+                |row| {
+                    Ok(ArtifactRefRow {
+                        id: row.get(0)?,
+                        run_id: row.get(1)?,
+                        artifact_kind: row.get(2)?,
+                        path: row.get(3)?,
+                        target_fingerprint: row.get(4)?,
+                        created_at: row.get(5)?,
+                        detail_json: row.get(6)?,
+                    })
+                },
+            )
+            .optional()?
+            .map(artifact_ref_from_row)
+            .transpose()
+    }
+
     pub fn append_event(
         &self,
         event_kind: &str,
@@ -636,6 +686,16 @@ struct EventRow {
     detail_json: String,
 }
 
+struct ArtifactRefRow {
+    id: i64,
+    run_id: String,
+    artifact_kind: String,
+    path: String,
+    target_fingerprint: Option<String>,
+    created_at: String,
+    detail_json: String,
+}
+
 fn checkpoint_from_row(row: CheckpointRow) -> Result<PhaseCheckpoint, RunStateError> {
     Ok(PhaseCheckpoint {
         id: row.id,
@@ -659,6 +719,18 @@ fn blocker_from_row(row: BlockerRow) -> Result<RunBlocker, RunStateError> {
             .transpose()?,
         target_fingerprint: row.target_fingerprint,
         message: row.message,
+        created_at: row.created_at,
+        detail: serde_json::from_str(&row.detail_json)?,
+    })
+}
+
+fn artifact_ref_from_row(row: ArtifactRefRow) -> Result<ArtifactRef, RunStateError> {
+    Ok(ArtifactRef {
+        id: row.id,
+        run_id: row.run_id,
+        artifact_kind: row.artifact_kind,
+        path: row.path,
+        target_fingerprint: row.target_fingerprint,
         created_at: row.created_at,
         detail: serde_json::from_str(&row.detail_json)?,
     })

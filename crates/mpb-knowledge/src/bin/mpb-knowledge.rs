@@ -7,6 +7,7 @@ use std::str::FromStr;
 use mpb_knowledge::{
     build_runtime_bundle, compute_target_fingerprint, read_runtime_bundle, run_preflight,
     validate_source_dir, ApprovalKind, KnowledgeRunPhase, KnowledgeRunStore, PhaseCheckpointStatus,
+    TargetManager,
 };
 use serde_json::json;
 
@@ -144,8 +145,41 @@ fn run() -> Result<(), String> {
             );
             Ok(())
         }
+        Some("target") => match args.next().as_deref() {
+            Some("clone") => {
+                let run_id = args.next().ok_or("target clone requires <run-id>")?;
+                let instance_path = args.next().ok_or("target clone requires <instance-path>")?;
+                let options = parse_target_options(args.collect())?;
+                let manager = TargetManager::new(&options.artifact_root);
+                let clone = manager
+                    .create_disposable_clone(&run_id, &instance_path)
+                    .map_err(|error| error.to_string())?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&clone).map_err(|error| error.to_string())?
+                );
+                Ok(())
+            }
+            Some("probe-launch") => {
+                let run_id = args.next().ok_or("target probe-launch requires <run-id>")?;
+                let options = parse_target_options(args.collect())?;
+                let manager = TargetManager::new(&options.artifact_root);
+                let probe = manager
+                    .probe_launch(&run_id)
+                    .map_err(|error| error.to_string())?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&probe).map_err(|error| error.to_string())?
+                );
+                Ok(())
+            }
+            _ => Err(
+                "usage: mpb-knowledge target <clone RUN INSTANCE|probe-launch RUN> [--artifact-root PATH]"
+                    .to_string(),
+            ),
+        },
         _ => Err(
-            "usage: mpb-knowledge <validate-source SOURCE|build-bundle SOURCE OUTPUT|inspect-bundle BUNDLE|fingerprint INSTANCE BUILDER LAB SCHEMA|preflight INSTANCE [--artifact-root PATH] [--run-id RUN]|approve RUN APPROVAL_KIND --reason TEXT [--artifact-root PATH] [--target-fingerprint FINGERPRINT]>"
+            "usage: mpb-knowledge <validate-source SOURCE|build-bundle SOURCE OUTPUT|inspect-bundle BUNDLE|fingerprint INSTANCE BUILDER LAB SCHEMA|preflight INSTANCE [--artifact-root PATH] [--run-id RUN]|approve RUN APPROVAL_KIND --reason TEXT [--artifact-root PATH] [--target-fingerprint FINGERPRINT]|target clone RUN INSTANCE [--artifact-root PATH]|target probe-launch RUN [--artifact-root PATH]>"
                 .to_string(),
         ),
     }
@@ -160,6 +194,10 @@ struct ApproveOptions {
     artifact_root: PathBuf,
     reason: Option<String>,
     target_fingerprint: Option<String>,
+}
+
+struct TargetOptions {
+    artifact_root: PathBuf,
 }
 
 fn parse_preflight_options(args: Vec<String>) -> Result<PreflightOptions, String> {
@@ -214,6 +252,25 @@ fn parse_approve_options(args: Vec<String>) -> Result<ApproveOptions, String> {
                 options.target_fingerprint = Some(value.clone());
             }
             other => return Err(format!("unknown approve option: {other}")),
+        }
+        index += 1;
+    }
+    Ok(options)
+}
+
+fn parse_target_options(args: Vec<String>) -> Result<TargetOptions, String> {
+    let mut options = TargetOptions {
+        artifact_root: PathBuf::from("knowledge"),
+    };
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--artifact-root" => {
+                index += 1;
+                let value = args.get(index).ok_or("--artifact-root requires <path>")?;
+                options.artifact_root = PathBuf::from(value);
+            }
+            other => return Err(format!("unknown target option: {other}")),
         }
         index += 1;
     }

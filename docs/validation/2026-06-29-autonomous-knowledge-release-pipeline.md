@@ -56,3 +56,33 @@ cargo test --offline -p mpb-knowledge
 ```
 
 Observed result: passed. The full `mpb-knowledge` suite ran 27 integration tests plus crate/doc test targets with no failures.
+
+## 2026-06-29 Task 3: Target Manager, Disposable Clone, And Launch Checkpoints
+
+Red phase:
+
+```text
+cargo test -p mpb-knowledge target_manager
+```
+
+Observed result: failed to compile because `CleanupPolicy`, `LaunchProbeResult`, `TargetManager`, and artifact-reference reading on `KnowledgeRunStore` did not exist.
+
+Green phase:
+
+```text
+cargo test -p mpb-knowledge target_manager
+```
+
+Observed result: passed. The command ran 4 `target_manager_*` tests covering read-only original inspection, disposable clone creation and artifact references, clone-only instrumentation hooks, cleanup confinement, CLI clone/probe commands, and resumable manual intervention launch checkpoints.
+
+```text
+cargo fmt --check
+```
+
+Observed result: passed after formatting the new target manager module and tests.
+
+```text
+cargo test -p mpb-knowledge
+```
+
+Observed result: passed. The full `mpb-knowledge` suite ran 31 integration tests plus crate/doc test targets with no failures.
