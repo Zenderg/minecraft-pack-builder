@@ -268,3 +268,55 @@ cargo test -p mpb-knowledge adapter_plan
 ```
 
 Observed result: passed compilation, but Cargo treated the trailing names as test-name filters and ran 0 test cases. The integration test targets are verified with the explicit `--test` commands above.
+
+## 2026-06-29 Task 8: Bundle Embedding And Product Validation
+
+Red phase:
+
+```text
+cargo test -p mpb-knowledge product_validation
+```
+
+Observed result: failed to compile because product validation report/evidence types and the `Bundle`, `PatcherIntegration`, and `ProductValidation` phase implementations did not exist.
+
+Green phase:
+
+```text
+cargo test -p mpb-knowledge product_validation
+```
+
+Observed result: passed. The command ran 8 `product_validation_*` tests covering runtime bundle artifact generation with checksum and compressed size, patcher integration blocking on exact-fingerprint mismatch, patcher integration blocking without mismatch-behavior evidence, patcher integration accepting exact-fingerprint shared product evidence, stale evidence fingerprint blockers for patcher and product validation, report-level blockers for failed patcher behavior and missing MCP query coverage, and durable product validation report persistence.
+
+Additional product acceptance checks added in this slice:
+
+```text
+cargo test -p mpb-assets patcher
+```
+
+Observed result: passed compilation, but Cargo treated `patcher` as a test-name filter and ran 0 test cases.
+
+```text
+cargo test -p mpb-assets --test patcher
+```
+
+Observed result: passed. The command ran 9 patcher integration tests covering install, repair, unpatch, loader-specific artifacts, unmanaged-file conflicts, matching embedded curated knowledge, metadata update requirements, and mismatched-fingerprint base-mod-only behavior with curated knowledge unavailable.
+
+```text
+cargo test -p mpb-assets
+```
+
+Observed result: passed. The command ran 2 embedded knowledge bundle unit tests, 9 patcher tests, 5 Prism discovery tests, and doc-test targets with no failures.
+
+```text
+pnpm test src/patcher/patcherState.test.ts
+```
+
+Observed result: passed. Vitest ran 1 file with 3 patcher-state tests, including installed/available curated knowledge next-step text and unavailable curated knowledge fallback text.
+
+```text
+cargo test -p mpb-knowledge
+```
+
+Observed result: passed. The full `mpb-knowledge` suite ran 68 integration tests plus crate/doc test targets with no failures.
+
+Manual Tauri desktop launch, real Prism client launch, Minecraft runtime MCP probing, and cloned runtime smoke remain unavailable in automated tests. A release run must attach those results as explicit `product-validation-evidence` before `ProductValidation` can pass.

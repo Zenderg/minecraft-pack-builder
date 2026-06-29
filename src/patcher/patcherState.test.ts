@@ -21,9 +21,11 @@ describe("patcher state", () => {
   it("returns localized next steps after patch success", () => {
     expect(getNextStepText("en", "installed")).toContain("curated knowledge is available");
     expect(getNextStepText("en", "unavailable")).toContain("curated modpack knowledge is unsupported");
+    expect(getNextStepText("en", "available")).toContain("curated knowledge is available");
     expect(getNextStepText("en", "installed")).toContain("/mpb");
     expect(getNextStepText("ru", "installed")).toContain("кураторская база знаний доступна");
     expect(getNextStepText("ru", "unavailable")).toContain("кураторская база знаний не поддерживается");
+    expect(getNextStepText("ru", "available")).toContain("кураторская база знаний доступна");
     expect(getNextStepText("ru", "installed")).toContain("/mpb");
   });
 

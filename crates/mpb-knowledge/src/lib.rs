@@ -11,6 +11,7 @@ mod lab;
 mod orchestrator;
 mod orchestrator_phases;
 mod preflight;
+mod release;
 mod run_state;
 mod schema;
 mod target;
@@ -59,6 +60,11 @@ pub use preflight::{
     run_preflight, DiskFreeEstimate, ExtractionScaleEstimate, HardwareFit, KeepAwakeAvailability,
     ModelCacheStatus, ModelNeed, PhaseDurationEstimate, PreflightError, PreflightReport,
     PrismInstanceReadiness, RuntimeMode, ToolAvailability,
+};
+pub use release::{
+    BundleQueryResults, McpQueryValidationEvidence, PatcherValidationEvidence, ProductCheck,
+    ProductValidationBlocker, ProductValidationEvidence, ProductValidationReport,
+    ProductValidationStatus, ReleaseError, RuntimeProductValidationEvidence,
 };
 pub use run_state::{
     ArtifactRef, EventRecord, KnowledgeRun, KnowledgeRunPhase, KnowledgeRunStore, PhaseCheckpoint,

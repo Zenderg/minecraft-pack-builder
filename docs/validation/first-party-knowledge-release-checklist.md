@@ -20,6 +20,7 @@ Use this checklist before shipping any first-party curated knowledge pack or rel
 
 ## Runtime Bundle
 
+- [ ] `cargo run -p mpb-knowledge --bin mpb-knowledge -- release resume <run-id> --artifact-root knowledge` completes the `Bundle` phase and records `runtime-bundle` plus `runtime-bundle-compressed` artifacts.
 - [ ] `cargo run -p mpb-knowledge --bin mpb-knowledge -- build-bundle <pack>/source <pack>/bundle` regenerates `knowledge-index.json` from validated source.
 - [ ] `cargo run -p mpb-knowledge --bin mpb-knowledge -- inspect-bundle <pack>/bundle/knowledge-index.json` reports the expected pack id, schema version, entity count, and evidence count.
 - [ ] Large production `knowledge-index.json` files are treated as regenerated local artifacts and are not committed; only reviewable source records and intentionally embedded compressed artifacts are tracked.
@@ -29,6 +30,8 @@ Use this checklist before shipping any first-party curated knowledge pack or rel
 
 ## Patcher Behavior
 
+- [ ] `cargo run -p mpb-knowledge --bin mpb-knowledge -- release resume <run-id> --artifact-root knowledge` completes `PatcherIntegration` and records `reports/patcher-integration.json`.
+- [ ] Exact-fingerprint patcher evidence is attached before `PatcherIntegration`, either as `patcher-validation-evidence` or as the patcher section of `product-validation-evidence`; it proves exact-fingerprint metadata, base-mod-only mismatch behavior, and curated-knowledge-unavailable mismatch behavior.
 - [ ] Patcher install writes the managed mod jar and matching knowledge bundle under `<instance>/mpb/knowledge/<pack-id>/`.
 - [ ] Repair restores missing or changed managed knowledge files when the exact fingerprint still matches.
 - [ ] Update replaces stale managed knowledge metadata and files.
@@ -38,6 +41,8 @@ Use this checklist before shipping any first-party curated knowledge pack or rel
 
 ## Minecraft Runtime And MCP
 
+- [ ] A `product-validation-evidence` artifact is attached to the run before `ProductValidation`; it includes Tauri desktop, patcher, MCP query, and cloned runtime evidence.
+- [ ] `ProductValidation` writes `reports/product-validation-report.json` with zero blockers.
 - [ ] The Java runtime rejects missing, malformed, checksum-mismatched, or metadata-mismatched bundles.
 - [ ] `mpb_knowledge_status` reports active pack id, exact fingerprint, and schema version when a matching pack is installed.
 - [ ] `mpb_search_entities`, `mpb_get_entity_card`, `mpb_get_recipe_graph`, `mpb_get_mechanic_details`, and `mpb_get_evidence` return read-only responses from the installed bundle.
@@ -48,6 +53,7 @@ Use this checklist before shipping any first-party curated knowledge pack or rel
 
 ## Automated Release Commands
 
+- [ ] `cargo test -p mpb-knowledge product_validation`
 - [ ] `cargo test -p mpb-knowledge`
 - [ ] `cargo test -p mpb-assets`
 - [ ] `cargo test --workspace`

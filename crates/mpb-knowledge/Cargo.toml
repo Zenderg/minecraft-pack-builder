@@ -5,6 +5,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+flate2 = "1.1.9"
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde.workspace = true
 serde_json.workspace = true

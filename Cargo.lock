@@ -1851,6 +1851,7 @@ dependencies = [
 name = "mpb-knowledge"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "rusqlite",
  "serde",
  "serde_json",

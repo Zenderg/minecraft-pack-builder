@@ -79,6 +79,28 @@ Status output includes `latestSuccessfulPhase`, `nextPhase`, blockers, approval 
 
 Implemented phases are idempotent. Preflight reuses an existing `preflight-report` artifact, clone resume reuses an existing `target-clone` artifact instead of deleting and recreating the disposable clone, worker drafting reuses an existing `worker-output` artifact, experiment planning reuses an existing `experiment-plan` artifact, and adapter expansion reuses an existing `adapter-expansion-plan` artifact. Unsupported future phases create a blocking report under `knowledge/runs/<run-id>/reports/` rather than pretending the release is complete.
 
+## Bundle Embedding And Product Validation
+
+The `Bundle` phase runs only after strict validation has succeeded. It accepts either a persisted `knowledge-source-dir` artifact or a `knowledge-source-pack` artifact that can be materialized back into the source-record layout. The phase rebuilds `knowledge-index.json`, writes `knowledge-index.json.gz`, and records a `runtime-bundle` artifact with:
+
+- exact fingerprint;
+- pack id and schema version;
+- uncompressed checksum and size;
+- compressed artifact path and compressed size.
+
+The `PatcherIntegration` phase verifies that the runtime bundle manifest and artifact reference both point at the exact target fingerprint. If they do not, the run blocks with `PATCHER_BUNDLE_FINGERPRINT_MISMATCH`. The phase also requires exact-fingerprint patcher evidence, either as a dedicated `patcher-validation-evidence` artifact or as the patcher section of the shared `product-validation-evidence` artifact. That evidence must prove exact-match metadata and mismatched-fingerprint behavior for the current target fingerprint. A fingerprint mismatch must install only the base MPB mod and report curated knowledge unavailable; the patcher package owns that behavior and keeps it covered with `cargo test -p mpb-assets --test patcher`.
+
+The `ProductValidation` phase requires a `product-validation-evidence` artifact containing structured Tauri desktop, patcher, MCP, and cloned runtime results. It writes `reports/product-validation-report.json` and records a `product-validation-report` artifact. Browser/Vite checks may be attached as supplemental evidence, but they are never sufficient for release acceptance.
+
+The product report records:
+
+- patcher install, update, repair, unpatch, exact-fingerprint match, and mismatched-fingerprint behavior;
+- MCP knowledge status plus search/entity/recipe/mechanic/evidence query checks;
+- runtime bundle query coverage against the generated bundle indexes;
+- real cloned Prism/Minecraft runtime validation status;
+- Tauri desktop validation status;
+- release-blocking product validation findings.
+
 ## Coverage Obligations
 
 Extraction produces durable coverage obligations for discovered entities, mechanics, relationships, recipes, traits, overlays, configs, datapacks, scripts, resources, guide/manual/tooltip content, static claims, and behavioral claims. The pipeline persists the obligation summary as a `coverage-summary` artifact under `knowledge/runs/<run-id>/coverage/` and records a `coverage.summary` event in the run database.

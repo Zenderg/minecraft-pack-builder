@@ -332,4 +332,20 @@ mod tests {
         assert_eq!(artifact.exact_fingerprint, "4cdf224f36c11b8a");
         assert_eq!(artifact.checksum, stable_checksum(&bytes));
     }
+
+    #[test]
+    fn fixture_artifact_metadata_matches_embedded_bundle_manifest() {
+        let artifact = fixture_artifact().expect("fixture artifact");
+        let bytes = artifact.bytes().expect("decoded fixture bundle");
+        let bundle: mpb_knowledge::RuntimeBundle =
+            serde_json::from_slice(&bytes).expect("fixture runtime bundle");
+
+        assert_eq!(bundle.manifest.pack_id, artifact.pack_id);
+        assert_eq!(
+            bundle.manifest.exact_fingerprint,
+            artifact.exact_fingerprint
+        );
+        assert_eq!(bundle.manifest.schema_version, artifact.schema_version);
+        assert_eq!(artifact.checksum, stable_checksum(&bytes));
+    }
 }

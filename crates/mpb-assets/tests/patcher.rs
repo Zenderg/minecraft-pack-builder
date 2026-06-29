@@ -307,6 +307,13 @@ fn mismatched_knowledge_fingerprint_installs_base_mod_without_curated_pack() {
     assert!(!instance.instance_path.join("mpb/knowledge").exists());
     let manifest = read_patch_manifest(&instance.instance_path);
     assert_eq!(manifest.knowledge_pack_id, None);
+    assert!(!manifest.knowledge_compatibility.matched);
+    assert!(manifest
+        .knowledge_compatibility
+        .reason
+        .as_deref()
+        .expect("compatibility reason")
+        .contains("No first-party curated knowledge bundle matches"));
     assert_eq!(
         evaluate_mpb_patch(&instance).knowledge.status,
         MpbKnowledgeStatus::Unavailable

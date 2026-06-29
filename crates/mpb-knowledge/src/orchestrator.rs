@@ -12,9 +12,12 @@ use crate::orchestrator_phases::{
     run_adapter_expansion_phase, run_drafting_phase, run_experiment_planning_phase,
     run_runtime_verification_phase,
 };
+use crate::release::{
+    run_bundle_phase, run_patcher_integration_phase, run_product_validation_phase, ReleaseError,
+};
 use crate::{
     evaluate_extraction_coverage, persist_coverage_summary, run_preflight, validate_source_pack,
-    ApprovalError, ApprovalGateError, ApprovalKind, ArtifactRef, CoverageBlocker,
+    ApprovalError, ApprovalGateError, ApprovalKind, ArtifactRef, BundleBuildError, CoverageBlocker,
     CoverageEvaluation, ExtractionDraft, KnowledgePackSource, KnowledgeRunPhase, KnowledgeRunStore,
     PhaseCheckpoint, PhaseCheckpointStatus, PreflightError, RunBlocker, RunBlockerInput,
     RunStateError, TargetError, TargetManager, WorkerRuntimeError,
@@ -33,6 +36,10 @@ pub enum OrchestratorError {
     Target(#[from] TargetError),
     #[error("worker runtime failed: {0}")]
     WorkerRuntime(#[from] WorkerRuntimeError),
+    #[error("release operation failed: {0}")]
+    Release(#[from] ReleaseError),
+    #[error("bundle operation failed: {0}")]
+    Bundle(#[from] BundleBuildError),
     #[error("approval operation failed: {0}")]
     Approval(#[from] ApprovalError),
     #[error("approval gate failed: {0}")]
@@ -308,6 +315,9 @@ impl KnowledgePhaseRunner for DefaultPhaseRunner {
             KnowledgeRunPhase::AdapterExpansion => run_adapter_expansion_phase(context),
             KnowledgeRunPhase::RuntimeVerification => run_runtime_verification_phase(context),
             KnowledgeRunPhase::Validation => run_validation_phase(context),
+            KnowledgeRunPhase::Bundle => run_bundle_phase(context),
+            KnowledgeRunPhase::PatcherIntegration => run_patcher_integration_phase(context),
+            KnowledgeRunPhase::ProductValidation => run_product_validation_phase(context),
             _ => Ok(PhaseRunStatus::Blocked {
                 blocker: RunBlockerInput {
                     code: PHASE_NOT_IMPLEMENTED.to_string(),
