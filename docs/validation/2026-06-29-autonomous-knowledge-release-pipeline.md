@@ -320,3 +320,45 @@ cargo test -p mpb-knowledge
 Observed result: passed. The full `mpb-knowledge` suite ran 68 integration tests plus crate/doc test targets with no failures.
 
 Manual Tauri desktop launch, real Prism client launch, Minecraft runtime MCP probing, and cloned runtime smoke remain unavailable in automated tests. A release run must attach those results as explicit `product-validation-evidence` before `ProductValidation` can pass.
+
+## 2026-06-29 Task 9: Release Builder, GitHub Publication Gate, And Reports
+
+Red phase:
+
+```text
+cargo test -p mpb-knowledge release_reports
+```
+
+Observed result: failed to compile because `BlockingReport`, `ReleaseReport`, report writers, and GitHub publication preparation APIs were not exported.
+
+Green phase:
+
+```text
+cargo test -p mpb-knowledge --test release_reports
+```
+
+Observed result: passed. The command ran 5 tests covering complete blocking report fields, complete release report fields, macOS/Windows/Linux unsigned warnings, local GitHub preparation without approval while marking publication blocked, the exact-fingerprint `GitHubReleasePublication` gate, approved local GitHub preparation that writes notes and returns a `gh workflow run release.yml` command without invoking `gh`, and the `release report` CLI writing JSON/Markdown report paths.
+
+Additional filtered plan command:
+
+```text
+cargo test -p mpb-knowledge release_reports
+```
+
+Observed result: passed compilation, but Cargo treated `release_reports` as a test-name filter and ran only the matching test case in `tests/release_reports.rs`. The full integration target is verified with `--test release_reports` above.
+
+Regression check:
+
+```text
+cargo test -p mpb-knowledge
+```
+
+Observed result: passed. The command ran 73 integration tests across the `mpb-knowledge` suite plus crate and doc-test targets with no failures.
+
+Durable implementation notes:
+
+- Blocking reports and release reports are emitted as JSON plus Markdown under `knowledge/runs/<run-id>/reports/`.
+- Blocking reports now use the shared release-report contract from `crates/mpb-knowledge/src/release.rs` instead of the previous private abbreviated orchestrator struct.
+- `mpb-knowledge release report <run-id>` writes the local report pair and records a `release-report` artifact reference.
+- `mpb-knowledge release prepare-github <run-id> --tag <tag>` prepares local notes and a `gh workflow run release.yml` command even when approval or credentials are missing. It marks `publicationApproved: false` until exact-fingerprint `GitHubReleasePublication` approval exists. It does not call `gh`, create a release, dispatch a workflow, or publish notes.
+- `.github/workflows/release.yml` manual dispatch now accepts `knowledge_run_id`, `pack_id`, `fingerprint`, and `report_artifact_path`; it asserts the report artifact exists when supplied, uploads it, omits Tauri signing secrets from release builds, and writes explicit unsigned artifact warnings.

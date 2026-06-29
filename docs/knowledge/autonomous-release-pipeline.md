@@ -101,6 +101,34 @@ The product report records:
 - Tauri desktop validation status;
 - release-blocking product validation findings.
 
+## Release Reports And GitHub Preparation
+
+Generate the final local report pair with:
+
+```text
+cargo run -p mpb-knowledge --bin mpb-knowledge -- release report <run-id> --artifact-root knowledge
+```
+
+The command writes `knowledge/runs/<run-id>/reports/release-report.json` and `knowledge/runs/<run-id>/reports/release-report.md`, records a `release-report` artifact reference, and does not publish anything. Blocking phases write `blocking-<id>-<phase>.json` and `.md` through the same report contract. The JSON schemas are documented in `docs/knowledge/release-report-schema.md`.
+
+Prepare the GitHub publication command and local notes after local validation has been committed:
+
+```text
+cargo run -p mpb-knowledge --bin mpb-knowledge -- release prepare-github <run-id> --artifact-root knowledge --tag <tag>
+```
+
+`release prepare-github` writes local release notes and prints the `gh workflow run release.yml` command with the knowledge run id, pack id, fingerprint, and report artifact path. It does not invoke `gh`, create a release, dispatch the workflow, or publish release notes. Missing credentials or missing approval therefore produce a prepared local command/report rather than a failed or partial publication.
+
+Before an operator runs the prepared `gh` command or otherwise publishes release notes, record exact-fingerprint publication approval:
+
+```text
+cargo run -p mpb-knowledge --bin mpb-knowledge -- approve <run-id> GitHubReleasePublication --artifact-root knowledge --target-fingerprint <fingerprint> --reason "operator approved publishing the prepared release"
+```
+
+Prepared output includes `publicationApproved` and `missingApproval` so publication tooling can hard-stop without discarding the local release report.
+
+The release workflow accepts manual inputs for `knowledge_run_id`, `pack_id`, `fingerprint`, and `report_artifact_path`. When a report path is provided, the workflow asserts that it exists and uploads it as a release artifact. Release builds intentionally omit Tauri signing secrets and include explicit unsigned-app warning text for macOS, Windows, and Linux in release notes/artifacts.
+
 ## Coverage Obligations
 
 Extraction produces durable coverage obligations for discovered entities, mechanics, relationships, recipes, traits, overlays, configs, datapacks, scripts, resources, guide/manual/tooltip content, static claims, and behavioral claims. The pipeline persists the obligation summary as a `coverage-summary` artifact under `knowledge/runs/<run-id>/coverage/` and records a `coverage.summary` event in the run database.

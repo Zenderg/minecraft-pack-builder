@@ -6,8 +6,9 @@ use std::str::FromStr;
 
 use mpb_knowledge::{
     build_runtime_bundle, compute_target_fingerprint, read_runtime_bundle, run_preflight,
-    validate_source_dir, ApprovalKind, KnowledgeReleaseOrchestrator, KnowledgeRunPhase,
-    KnowledgeRunStore, PhaseCheckpointStatus, TargetManager,
+    validate_source_dir, write_release_report_artifacts, ApprovalKind,
+    KnowledgeReleaseOrchestrator, KnowledgeRunPhase, KnowledgeRunStore, PhaseCheckpointStatus,
+    TargetManager,
 };
 use serde_json::json;
 
@@ -222,13 +223,46 @@ fn run() -> Result<(), String> {
                 );
                 Ok(())
             }
+            Some("report") => {
+                let run_id = args.next().ok_or("release report requires <run-id>")?;
+                let options = parse_release_options(args.collect())?;
+                let store = KnowledgeRunStore::open(&options.artifact_root, &run_id)
+                    .map_err(|error| error.to_string())?;
+                let paths =
+                    write_release_report_artifacts(&store, None).map_err(|error| error.to_string())?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&paths).map_err(|error| error.to_string())?
+                );
+                Ok(())
+            }
+            Some("prepare-github") => {
+                let run_id = args
+                    .next()
+                    .ok_or("release prepare-github requires <run-id>")?;
+                let options = parse_release_prepare_github_options(args.collect())?;
+                let tag = options
+                    .tag
+                    .as_deref()
+                    .ok_or("release prepare-github requires --tag <tag>")?;
+                let store = KnowledgeRunStore::open(&options.artifact_root, &run_id)
+                    .map_err(|error| error.to_string())?;
+                let preparation = mpb_knowledge::prepare_github_release_publication(&store, tag)
+                    .map_err(|error| error.to_string())?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&preparation)
+                        .map_err(|error| error.to_string())?
+                );
+                Ok(())
+            }
             _ => Err(
-                "usage: mpb-knowledge release <start INSTANCE --pack-id PACK|resume RUN|status RUN> [--artifact-root PATH]"
+                "usage: mpb-knowledge release <start INSTANCE --pack-id PACK|resume RUN|status RUN|report RUN|prepare-github RUN --tag TAG> [--artifact-root PATH]"
                     .to_string(),
             ),
         },
         _ => Err(
-            "usage: mpb-knowledge <validate-source SOURCE|build-bundle SOURCE OUTPUT|inspect-bundle BUNDLE|fingerprint INSTANCE BUILDER LAB SCHEMA|preflight INSTANCE [--artifact-root PATH] [--run-id RUN]|approve RUN APPROVAL_KIND --reason TEXT [--artifact-root PATH] [--target-fingerprint FINGERPRINT]|target clone RUN INSTANCE [--artifact-root PATH]|target probe-launch RUN [--artifact-root PATH]|release start INSTANCE --pack-id PACK [--artifact-root PATH]|release resume RUN [--artifact-root PATH]|release status RUN [--artifact-root PATH]>"
+            "usage: mpb-knowledge <validate-source SOURCE|build-bundle SOURCE OUTPUT|inspect-bundle BUNDLE|fingerprint INSTANCE BUILDER LAB SCHEMA|preflight INSTANCE [--artifact-root PATH] [--run-id RUN]|approve RUN APPROVAL_KIND --reason TEXT [--artifact-root PATH] [--target-fingerprint FINGERPRINT]|target clone RUN INSTANCE [--artifact-root PATH]|target probe-launch RUN [--artifact-root PATH]|release start INSTANCE --pack-id PACK [--artifact-root PATH]|release resume RUN [--artifact-root PATH]|release status RUN [--artifact-root PATH]|release report RUN [--artifact-root PATH]|release prepare-github RUN --tag TAG [--artifact-root PATH]>"
                 .to_string(),
         ),
     }
@@ -256,6 +290,11 @@ struct ReleaseStartOptions {
 
 struct ReleaseOptions {
     artifact_root: PathBuf,
+}
+
+struct ReleasePrepareGithubOptions {
+    artifact_root: PathBuf,
+    tag: Option<String>,
 }
 
 fn parse_preflight_options(args: Vec<String>) -> Result<PreflightOptions, String> {
@@ -373,6 +412,33 @@ fn parse_release_options(args: Vec<String>) -> Result<ReleaseOptions, String> {
                 options.artifact_root = PathBuf::from(value);
             }
             other => return Err(format!("unknown release option: {other}")),
+        }
+        index += 1;
+    }
+    Ok(options)
+}
+
+fn parse_release_prepare_github_options(
+    args: Vec<String>,
+) -> Result<ReleasePrepareGithubOptions, String> {
+    let mut options = ReleasePrepareGithubOptions {
+        artifact_root: PathBuf::from("knowledge"),
+        tag: None,
+    };
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--artifact-root" => {
+                index += 1;
+                let value = args.get(index).ok_or("--artifact-root requires <path>")?;
+                options.artifact_root = PathBuf::from(value);
+            }
+            "--tag" => {
+                index += 1;
+                let value = args.get(index).ok_or("--tag requires <tag>")?;
+                options.tag = Some(value.clone());
+            }
+            other => return Err(format!("unknown release prepare-github option: {other}")),
         }
         index += 1;
     }

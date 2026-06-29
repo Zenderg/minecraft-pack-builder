@@ -2,6 +2,23 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      knowledge_run_id:
+        description: "Durable mpb-knowledge run id that produced the local release report"
+        required: false
+        type: string
+      pack_id:
+        description: "Knowledge pack id validated by the local release run"
+        required: false
+        type: string
+      fingerprint:
+        description: "Exact target fingerprint validated by the local release run"
+        required: false
+        type: string
+      report_artifact_path:
+        description: "Repository-relative committed release report artifact path"
+        required: false
+        type: string
   push:
     branches:
       - main
@@ -88,6 +105,31 @@ jobs:
       - name: Test Rust workspace
         run: cargo test --workspace
 
+      - name: Assert knowledge release report artifact
+        if: github.event_name == 'workflow_dispatch' && inputs.report_artifact_path != ''
+        shell: bash
+        run: |
+          test -f "${{ inputs.report_artifact_path }}"
+          test -n "${{ inputs.knowledge_run_id }}"
+          test -n "${{ inputs.pack_id }}"
+          test -n "${{ inputs.fingerprint }}"
+
+      - name: Write unsigned release warning
+        if: github.event_name == 'workflow_dispatch' || github.ref_type == 'tag'
+        shell: bash
+        run: |
+          mkdir -p target/release-notes
+          cat > target/release-notes/unsigned-warning.md <<'EOF'
+          # Minecraft Pack Builder Release
+
+          This release may include unsigned macOS, Windows, and Linux desktop artifacts. Validate checksums before distribution and expect operating-system warnings unless a separate signing and notarization process has been completed.
+
+          Knowledge run id: `${{ inputs.knowledge_run_id }}`
+          Pack id: `${{ inputs.pack_id }}`
+          Fingerprint: `${{ inputs.fingerprint }}`
+          Report artifact: `${{ inputs.report_artifact_path }}`
+          EOF
+
       - name: Build Tauri bundles for push
         if: github.event_name == 'push' && github.ref_type == 'branch'
         uses: tauri-apps/tauri-action@v0
@@ -113,14 +155,35 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Minecraft Pack Builder ${{ github.ref_name }}
+          releaseBody: |
+            This release may include unsigned macOS, Windows, and Linux desktop artifacts. Validate checksums before distribution and expect operating-system warnings unless a separate signing and notarization process has been completed.
+
+            Knowledge run id: `${{ inputs.knowledge_run_id }}`
+            Pack id: `${{ inputs.pack_id }}`
+            Fingerprint: `${{ inputs.fingerprint }}`
+            Report artifact: `${{ inputs.report_artifact_path }}`
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+      - name: Upload knowledge release report
+        if: github.event_name == 'workflow_dispatch' && inputs.report_artifact_path != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: knowledge-release-report-${{ matrix.platform }}
+          path: ${{ inputs.report_artifact_path }}
+          if-no-files-found: error
+
+      - name: Upload unsigned warning note
+        if: github.event_name == 'workflow_dispatch' || github.ref_type == 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-release-warning-${{ matrix.platform }}
+          path: target/release-notes/unsigned-warning.md
+          if-no-files-found: error
 
       - name: Upload latest.json template
         if: matrix.platform == 'linux' && (github.event_name == 'workflow_dispatch' || github.ref_type == 'tag')

@@ -15,6 +15,7 @@ use crate::orchestrator_phases::{
 use crate::release::{
     run_bundle_phase, run_patcher_integration_phase, run_product_validation_phase, ReleaseError,
 };
+use crate::reports::write_blocking_report_artifacts;
 use crate::{
     evaluate_extraction_coverage, persist_coverage_summary, run_preflight, validate_source_pack,
     ApprovalError, ApprovalGateError, ApprovalKind, ArtifactRef, BundleBuildError, CoverageBlocker,
@@ -424,16 +425,6 @@ pub struct ApprovalStatus {
     pub target_fingerprint: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct BlockingReport {
-    run_id: String,
-    failed_phase: Option<KnowledgeRunPhase>,
-    blocker: RunBlocker,
-    resume_command: String,
-    local_artifact_paths: Vec<String>,
-}
-
 fn run_preflight_phase(context: &PhaseRunContext<'_>) -> Result<PhaseRunStatus, OrchestratorError> {
     if let Some(existing) = context.store.latest_artifact_ref("preflight-report")? {
         if Path::new(&existing.path).is_file() {
@@ -728,53 +719,8 @@ fn write_blocking_report(
     store: &KnowledgeRunStore,
     blocker: &RunBlocker,
 ) -> Result<PathBuf, OrchestratorError> {
-    let report_dir = store.run_dir().join("reports");
-    fs::create_dir_all(&report_dir)?;
-    let report_path = report_dir.join(format!(
-        "blocking-{:04}-{}.json",
-        blocker.id,
-        blocker
-            .phase
-            .map(|phase| phase.as_str())
-            .unwrap_or("unknown")
-    ));
-    let artifact_paths = store
-        .artifact_refs()?
-        .into_iter()
-        .map(|artifact| artifact.path)
-        .collect::<Vec<_>>();
-    let report = BlockingReport {
-        run_id: store.run_id().to_string(),
-        failed_phase: blocker.phase,
-        blocker: blocker.clone(),
-        resume_command: format!(
-            "mpb-knowledge release resume {} --artifact-root {}",
-            store.run_id(),
-            store
-                .run_dir()
-                .parent()
-                .and_then(Path::parent)
-                .unwrap_or_else(|| Path::new("knowledge"))
-                .display()
-        ),
-        local_artifact_paths: artifact_paths,
-    };
-    fs::write(&report_path, serde_json::to_vec_pretty(&report)?)?;
-    let markdown_path = report_path.with_extension("md");
-    fs::write(
-        markdown_path,
-        format!(
-            "# Blocking Report\n\nRun: `{}`\n\nPhase: `{}`\n\nBlocker: `{}`\n\n{}\n",
-            report.run_id,
-            blocker
-                .phase
-                .map(|phase| phase.as_str())
-                .unwrap_or("unknown"),
-            blocker.code,
-            blocker.message
-        ),
-    )?;
-    Ok(report_path)
+    let paths = write_blocking_report_artifacts(store, blocker)?;
+    Ok(PathBuf::from(paths.json_path))
 }
 
 fn intake_instance_path(store: &KnowledgeRunStore) -> Result<PathBuf, OrchestratorError> {

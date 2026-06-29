@@ -36,6 +36,10 @@ pub enum ReleaseError {
     Json(#[from] serde_json::Error),
     #[error("bundle operation failed: {0}")]
     Bundle(#[from] crate::BundleBuildError),
+    #[error("run state operation failed: {0}")]
+    RunState(#[from] crate::RunStateError),
+    #[error("approval operation failed: {0}")]
+    Approval(#[from] crate::ApprovalError),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

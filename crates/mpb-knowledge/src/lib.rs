@@ -12,6 +12,7 @@ mod orchestrator;
 mod orchestrator_phases;
 mod preflight;
 mod release;
+mod reports;
 mod run_state;
 mod schema;
 mod target;
@@ -65,6 +66,11 @@ pub use release::{
     BundleQueryResults, McpQueryValidationEvidence, PatcherValidationEvidence, ProductCheck,
     ProductValidationBlocker, ProductValidationEvidence, ProductValidationReport,
     ProductValidationStatus, ReleaseError, RuntimeProductValidationEvidence,
+};
+pub use reports::{
+    prepare_github_release_publication, require_github_release_publication_approval,
+    write_blocking_report_artifacts, write_release_report_artifacts, BlockingReport,
+    GithubReleasePreparation, ReleaseReport, ReportArtifactPaths, UnsignedAppWarning,
 };
 pub use run_state::{
     ArtifactRef, EventRecord, KnowledgeRun, KnowledgeRunPhase, KnowledgeRunStore, PhaseCheckpoint,
