@@ -17,11 +17,11 @@ use crate::release::{
 };
 use crate::reports::write_blocking_report_artifacts;
 use crate::{
-    evaluate_extraction_coverage, persist_coverage_summary, run_preflight, validate_source_pack,
-    ApprovalError, ApprovalGateError, ApprovalKind, ArtifactRef, BundleBuildError, CoverageBlocker,
-    CoverageEvaluation, ExtractionDraft, KnowledgePackSource, KnowledgeRunPhase, KnowledgeRunStore,
-    PhaseCheckpoint, PhaseCheckpointStatus, PreflightError, RunBlocker, RunBlockerInput,
-    RunStateError, TargetError, TargetManager, WorkerRuntimeError,
+    evaluate_extraction_coverage, load_source_pack, persist_coverage_summary, run_preflight,
+    validate_source_pack, ApprovalError, ApprovalGateError, ApprovalKind, ArtifactRef,
+    BundleBuildError, CoverageBlocker, CoverageEvaluation, ExtractionDraft, KnowledgePackSource,
+    KnowledgeRunPhase, KnowledgeRunStore, PhaseCheckpoint, PhaseCheckpointStatus, PreflightError,
+    RunBlocker, RunBlockerInput, RunStateError, TargetError, TargetManager, WorkerRuntimeError,
 };
 
 const MISSING_LONG_RUN_APPROVAL: &str = "MISSING_LONG_RUN_APPROVAL";
@@ -645,22 +645,20 @@ fn run_validation_phase(
         });
     }
 
-    let Some(source_ref) = context.store.latest_artifact_ref("knowledge-source-pack")? else {
+    let Some((source_ref, pack)) = validation_source_pack(context.store)? else {
         return Ok(PhaseRunStatus::Blocked {
             blocker: RunBlockerInput {
                 code: "VALIDATION_SOURCE_PACK_MISSING".to_string(),
                 phase: Some(KnowledgeRunPhase::Validation),
                 target_fingerprint: Some(evaluation.target_fingerprint.clone()),
-                message: "Validation requires a persisted knowledge-source-pack artifact."
-                    .to_string(),
+                message: "Validation requires a persisted knowledge source artifact.".to_string(),
                 detail: json!({
-                    "requiredArtifactKind": "knowledge-source-pack",
+                    "acceptedArtifactKinds": ["knowledge-source-dir", "knowledge-source-pack"],
                     "coverageSummaryArtifact": summary_ref.path,
                 }),
             },
         });
     };
-    let pack: KnowledgePackSource = serde_json::from_slice(&fs::read(&source_ref.path)?)?;
     if let Err(error) = validate_source_pack(&pack) {
         let failure = error
             .failures()
@@ -691,6 +689,22 @@ fn run_validation_phase(
             "summary": evaluation.summary,
         }),
     })
+}
+
+fn validation_source_pack(
+    store: &KnowledgeRunStore,
+) -> Result<Option<(ArtifactRef, KnowledgePackSource)>, OrchestratorError> {
+    if let Some(source_dir) = store.latest_artifact_ref("knowledge-source-dir")? {
+        let path = PathBuf::from(&source_dir.path);
+        if path.is_dir() {
+            return Ok(Some((source_dir, load_source_pack(path)?)));
+        }
+    }
+    let Some(source_pack) = store.latest_artifact_ref("knowledge-source-pack")? else {
+        return Ok(None);
+    };
+    let pack: KnowledgePackSource = serde_json::from_slice(&fs::read(&source_pack.path)?)?;
+    Ok(Some((source_pack, pack)))
 }
 
 fn coverage_blocker_input(

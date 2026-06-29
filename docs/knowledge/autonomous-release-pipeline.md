@@ -77,7 +77,7 @@ Status output includes `latestSuccessfulPhase`, `nextPhase`, blockers, approval 
 - `Release`
 - `Report`
 
-Implemented phases are idempotent. Preflight reuses an existing `preflight-report` artifact, clone resume reuses an existing `target-clone` artifact instead of deleting and recreating the disposable clone, worker drafting reuses an existing `worker-output` artifact, experiment planning reuses an existing `experiment-plan` artifact, and adapter expansion reuses an existing `adapter-expansion-plan` artifact. Unsupported future phases create a blocking report under `knowledge/runs/<run-id>/reports/` rather than pretending the release is complete.
+Implemented phases are idempotent. Preflight reuses an existing `preflight-report` artifact, clone resume reuses an existing `target-clone` artifact instead of deleting and recreating the disposable clone, worker drafting reuses an existing `worker-output` artifact, experiment planning reuses an existing `experiment-plan` artifact, and adapter expansion reuses an existing `adapter-expansion-plan` artifact. Unsupported future phases create a blocking report under `knowledge/runs/<run-id>/reports/` rather than pretending the release is complete. Production runs must not skip `Drafting` just because deterministic extraction coverage is complete; the phase still requires an exact-fingerprint local `worker-model` artifact and persists worker prompt/input/output/model/evaluation/correction artifacts.
 
 ## Bundle Embedding And Product Validation
 
@@ -171,6 +171,25 @@ Worker decisions remain draft-only. Validation still blocks worker-only claims, 
 ## Runtime Experiments And Adapter Plans
 
 The `ExperimentPlanning` phase derives deterministic experiment batches from uncovered runtime coverage obligations. Each experiment records deterministic setup, bounded ticks, before/after snapshot operations, retry policy, and required observation adapters. The generic lab operation contract stays stable; mechanic-specific behavior belongs in isolated observation adapters.
+
+`RuntimeVerification` requires real cloned Prism/Minecraft runtime evidence even when the generated experiment plan contains zero experiments. Attach that exact-fingerprint evidence with:
+
+```text
+cargo run -p mpb-knowledge --bin mpb-knowledge -- release attach-runtime-evidence <run-id> <evidence-json> --artifact-root knowledge
+```
+
+The evidence JSON uses the same `ProductCheck` shape as product validation:
+
+```json
+{
+  "status": "passed",
+  "label": "real cloned Prism runtime",
+  "detail": "The disposable Prism clone launched Minecraft and reached the MPB runtime.",
+  "artifactPaths": ["knowledge/prism-clones/<run-id>/instance"]
+}
+```
+
+If this artifact is missing, has a stale fingerprint, or has any status other than `passed`, `RuntimeVerification` blocks before `Validation`. A zero-experiment plan only means no additional behavior-specific lab attempts were generated; it is not a substitute for real clone/runtime validation.
 
 Experiment attempts are durable `experiment-attempt` artifacts under `knowledge/runs/<run-id>/lab/`. Each attempt records its experiment id, attempt number, accepted/rejected/failed status, optional accepted observation, raw artifact path, and message. If all attempts are retryable failures and the retry policy is exhausted, the pipeline records `FLAKY_EXPERIMENT_RETRY_EXHAUSTED` with affected obligation ids and raw artifact paths.
 

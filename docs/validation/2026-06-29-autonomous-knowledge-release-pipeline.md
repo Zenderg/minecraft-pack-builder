@@ -319,7 +319,7 @@ cargo test -p mpb-knowledge
 
 Observed result: passed. The full `mpb-knowledge` suite ran 68 integration tests plus crate/doc test targets with no failures.
 
-Manual Tauri desktop launch, real Prism client launch, Minecraft runtime MCP probing, and cloned runtime smoke remain unavailable in automated tests. A release run must attach those results as explicit `product-validation-evidence` before `ProductValidation` can pass.
+Manual Tauri desktop launch, real Prism client launch, Minecraft runtime MCP probing, and cloned runtime smoke remain unavailable in automated tests. A release run must attach real cloned runtime evidence before `RuntimeVerification` can pass and attach full product evidence before `ProductValidation` can pass.
 
 ## 2026-06-29 Task 9: Release Builder, GitHub Publication Gate, And Reports
 
@@ -362,3 +362,99 @@ Durable implementation notes:
 - `mpb-knowledge release report <run-id>` writes the local report pair and records a `release-report` artifact reference.
 - `mpb-knowledge release prepare-github <run-id> --tag <tag>` prepares local notes and a `gh workflow run release.yml` command even when approval or credentials are missing. It marks `publicationApproved: false` until exact-fingerprint `GitHubReleasePublication` approval exists. It does not call `gh`, create a release, dispatch a workflow, or publish notes.
 - `.github/workflows/release.yml` manual dispatch now accepts `knowledge_run_id`, `pack_id`, `fingerprint`, and `report_artifact_path`; it asserts the report artifact exists when supplied, uploads it, omits Tauri signing secrets from release builds, and writes explicit unsigned artifact warnings.
+
+## 2026-06-29 Task 10: AOCA Autonomous Acceptance Run
+
+Run id: `run-f05439c9-c9f0-4506-990b-31e618e873e3`
+
+Target: local PrismLauncher instance `/Users/koshmarus/Library/Application Support/PrismLauncher/instances/All of Create - Aeronautics`
+
+Exact target fingerprint: `ccd83746388f873b`
+
+Implementation updates made during the acceptance run:
+
+- `mpb-knowledge release attach-source <run-id> <source-dir>` now validates a source directory against the run fingerprint, persists `knowledge-source-dir`, and materializes a durable `extraction-draft` artifact for the orchestrator.
+- `mpb-knowledge release attach-worker-model <run-id> <model-path>` now records a fingerprint-aware `worker-model` artifact.
+- `mpb-knowledge release attach-runtime-evidence <run-id> <evidence-json>` now records exact-fingerprint real cloned Prism/Minecraft runtime evidence before `RuntimeVerification`.
+- `mpb-knowledge release attach-product-evidence <run-id> <evidence-json>` now records exact-fingerprint product validation evidence.
+- `Drafting` no longer skips local worker/model work when deterministic extraction coverage is already complete; production runs require a selected local worker model and persisted worker artifacts.
+- `RuntimeVerification` no longer treats a zero-experiment plan as real runtime validation; production runs require passed `cloned-runtime-validation-evidence` before `Validation`.
+- `Validation` now accepts persisted `knowledge-source-dir` artifacts in addition to `knowledge-source-pack`, matching the `Bundle` phase input contract.
+- AOCA source records were updated from fingerprint `4cdf224f36c11b8a` to `ccd83746388f873b` for the selected local instance.
+- The orchestrator-built AOCA runtime bundle was copied into `knowledge/packs/all-of-create-aeronautics/bundle/knowledge-index.json` and `knowledge/packs/all-of-create-aeronautics/bundle/knowledge-index.json.gz`.
+
+Observed phase result:
+
+- `Intake` through `PatcherIntegration` succeeded.
+- `ProductValidation` blocked publication with `MCP_QUERY_COVERAGE_MISSING`, with additional product-validation report blockers `REAL_CLONED_RUNTIME_VALIDATION_MISSING` and `TAURI_DESKTOP_VALIDATION_MISSING`.
+- After the production hardening change, this AOCA run is also considered incomplete before `Validation` because it did not attach a worker model or passed cloned-runtime validation evidence.
+- No GitHub publication was attempted because `GitHubReleasePublication` approval was not recorded and product validation has blocking findings.
+
+Key artifacts:
+
+- Validation note: `docs/validation/2026-06-29-aoca-autonomous-release-run.md`
+- Blocking report: `knowledge/runs/run-f05439c9-c9f0-4506-990b-31e618e873e3/reports/blocking-0004-ProductValidation.json`
+- Product validation report: `knowledge/runs/run-f05439c9-c9f0-4506-990b-31e618e873e3/reports/product-validation-report.json`
+- Release report: `knowledge/runs/run-f05439c9-c9f0-4506-990b-31e618e873e3/reports/release-report.json`
+- Runtime bundle checksum: `ea583f7a678be744`
+- Compressed runtime bundle checksum: `af07e2715c90b70b`
+
+Targeted verification completed:
+
+```text
+cargo test -p mpb-knowledge --test cli --test worker_runtime --test coverage_obligations
+cargo run -p mpb-knowledge --bin mpb-knowledge -- validate-source knowledge/packs/all-of-create-aeronautics/source
+cargo test -p mpb-assets --test patcher
+cargo run -p mpb-knowledge --bin mpb-knowledge -- inspect-bundle knowledge/packs/all-of-create-aeronautics/bundle/knowledge-index.json
+cargo run -p mpb-knowledge --bin mpb-knowledge -- release status run-f05439c9-c9f0-4506-990b-31e618e873e3 --artifact-root knowledge
+cargo run -p mpb-knowledge --bin mpb-knowledge -- release report run-f05439c9-c9f0-4506-990b-31e618e873e3 --artifact-root knowledge
+cargo test --workspace
+pnpm test
+```
+
+## 2026-06-29 Task 11: Production Gate Hardening
+
+Problem found during follow-up review:
+
+- The previous `Drafting` phase could skip worker/model work when deterministic extraction coverage was complete.
+- The previous `RuntimeVerification` phase could succeed when the experiment plan contained zero runtime experiments.
+- That made the AOCA acceptance run look farther along than it was: no local model artifacts were produced, no worker was evaluated, and the disposable clone was not proven through real Minecraft runtime evidence before validation.
+
+Behavior changes:
+
+- `Drafting` now blocks with `WORKER_MODEL_MISSING` until a fingerprint-aware `worker-model` artifact is attached.
+- `Drafting` still persists local worker prompt, input, output, model identity, evaluation, and corrections once the model gate is satisfied.
+- `RuntimeVerification` now blocks with `CLONED_RUNTIME_VALIDATION_MISSING` until exact-fingerprint `cloned-runtime-validation-evidence` is attached with `status: "passed"`.
+- A zero-experiment plan now means only that no additional behavior-specific lab attempts were generated; it no longer substitutes for a real cloned Prism/Minecraft runtime smoke.
+- The CLI now supports `mpb-knowledge release attach-runtime-evidence <run-id> <evidence-json> --artifact-root knowledge`.
+
+Red phase:
+
+```text
+cargo test -p mpb-knowledge --test worker_runtime orchestrator_drafting_phase_requires_worker_model_even_when_deterministic_coverage_is_complete
+cargo test -p mpb-knowledge --test experiments runtime_verification
+cargo test -p mpb-knowledge --test cli release_attach_commands_persist_validated_pipeline_inputs
+```
+
+Observed result: the worker test failed because `Drafting` still returned `PhaseSucceeded`; the runtime test failed because zero experiments still returned `PhaseSucceeded`; the CLI test failed because `attach-runtime-evidence` was not implemented.
+
+Green and regression verification:
+
+```text
+cargo fmt --check
+cargo test -p mpb-knowledge --test worker_runtime --test experiments --test cli
+cargo test -p mpb-knowledge
+pnpm test
+cargo test --workspace
+pnpm build
+```
+
+Observed result: all commands passed after the hardening change. The full `mpb-knowledge` suite ran 74 integration tests plus crate/doc test targets with no failures, the workspace test suite completed with no failures, and the frontend production build completed successfully.
+
+Additional gate result:
+
+```text
+mods/mpb-minecraft-mod/build.sh
+```
+
+Observed result: blocked before build because neither `MPB_GRADLE` nor `gradle` in PATH was available, and this repository does not include a Gradle wrapper for `mods/mpb-minecraft-mod`. The script printed `MPB mod production build requires Gradle. Set MPB_GRADLE=/path/to/gradle or install gradle.`

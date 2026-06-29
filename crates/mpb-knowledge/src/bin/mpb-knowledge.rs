@@ -1,14 +1,16 @@
 use std::env;
 use std::fs;
+use std::hash::Hasher;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::str::FromStr;
 
 use mpb_knowledge::{
     build_runtime_bundle, compute_target_fingerprint, read_runtime_bundle, run_preflight,
-    validate_source_dir, write_release_report_artifacts, ApprovalKind,
+    validate_source_dir, validate_source_pack, write_release_report_artifacts, ApprovalKind,
+    ExtractedDraftRecord, ExtractionDraft, HardwareFit, KnowledgePackSource,
     KnowledgeReleaseOrchestrator, KnowledgeRunPhase, KnowledgeRunStore, PhaseCheckpointStatus,
-    TargetManager,
+    ProductCheck, ProductValidationEvidence, TargetManager,
 };
 use serde_json::json;
 
@@ -236,6 +238,205 @@ fn run() -> Result<(), String> {
                 );
                 Ok(())
             }
+            Some("attach-source") => {
+                let run_id = args.next().ok_or("release attach-source requires <run-id>")?;
+                let source_dir = args
+                    .next()
+                    .ok_or("release attach-source requires <source-dir>")?;
+                let options = parse_release_options(args.collect())?;
+                let store = KnowledgeRunStore::open(&options.artifact_root, &run_id)
+                    .map_err(|error| error.to_string())?;
+                let pack = mpb_knowledge::load_source_pack(&source_dir)
+                    .map_err(|error| error.to_string())?;
+                validate_source_pack(&pack).map_err(|error| error.to_string())?;
+                let target_fingerprint = run_target_fingerprint(&store)?;
+                ensure_pack_targets_run(&pack, &target_fingerprint)?;
+                let draft = extraction_draft_from_pack(&pack);
+                let extraction_dir = store.run_dir().join("extraction");
+                fs::create_dir_all(&extraction_dir).map_err(|error| error.to_string())?;
+                let draft_path = extraction_dir.join("extraction-draft.json");
+                fs::write(
+                    &draft_path,
+                    serde_json::to_vec_pretty(&draft).map_err(|error| error.to_string())?,
+                )
+                .map_err(|error| error.to_string())?;
+                let draft_artifact = store
+                    .record_artifact_ref(
+                        "extraction-draft",
+                        &draft_path,
+                        Some(&target_fingerprint),
+                        json!({
+                            "sourceDir": source_dir,
+                            "recordCount": draft.records.len(),
+                        }),
+                    )
+                    .map_err(|error| error.to_string())?;
+                let source_artifact = store
+                    .record_artifact_ref(
+                        "knowledge-source-dir",
+                        &source_dir,
+                        Some(&target_fingerprint),
+                        json!({
+                            "packId": pack.manifest.pack_id,
+                            "packVersion": pack.manifest.pack_version,
+                            "schemaVersion": pack.manifest.schema_version,
+                        }),
+                    )
+                    .map_err(|error| error.to_string())?;
+                store
+                    .append_event(
+                        "release.source_attached",
+                        Some(&target_fingerprint),
+                        json!({
+                            "sourceArtifactId": source_artifact.id,
+                            "extractionDraftArtifactId": draft_artifact.id,
+                            "sourceDir": source_dir,
+                        }),
+                    )
+                    .map_err(|error| error.to_string())?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({
+                        "runId": run_id,
+                        "targetFingerprint": target_fingerprint,
+                        "sourceArtifact": source_artifact,
+                        "extractionDraftArtifact": draft_artifact,
+                    }))
+                    .map_err(|error| error.to_string())?
+                );
+                Ok(())
+            }
+            Some("attach-worker-model") => {
+                let run_id = args
+                    .next()
+                    .ok_or("release attach-worker-model requires <run-id>")?;
+                let model_path = args
+                    .next()
+                    .ok_or("release attach-worker-model requires <model-path>")?;
+                let options = parse_release_attach_worker_model_options(args.collect())?;
+                let store = KnowledgeRunStore::open(&options.artifact_root, &run_id)
+                    .map_err(|error| error.to_string())?;
+                let target_fingerprint = run_target_fingerprint(&store)?;
+                let model_bytes = fs::read(&model_path).map_err(|error| {
+                    format!("worker model path must be readable before attachment: {error}")
+                })?;
+                let checksum = options
+                    .checksum
+                    .unwrap_or_else(|| stable_checksum(&model_bytes));
+                let identity = options
+                    .identity
+                    .unwrap_or_else(|| "local-worker-model".to_string());
+                let hardware_fit = options.hardware_fit.unwrap_or(HardwareFit::Unknown);
+                let artifact = store
+                    .record_artifact_ref(
+                        "worker-model",
+                        &model_path,
+                        Some(&target_fingerprint),
+                        json!({
+                            "identity": identity,
+                            "checksum": checksum,
+                            "hardwareFit": format!("{hardware_fit:?}"),
+                            "source": "mpb-knowledge release attach-worker-model",
+                        }),
+                    )
+                    .map_err(|error| error.to_string())?;
+                store
+                    .append_event(
+                        "release.worker_model_attached",
+                        Some(&target_fingerprint),
+                        json!({"artifactId": artifact.id, "modelPath": model_path}),
+                    )
+                    .map_err(|error| error.to_string())?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&artifact).map_err(|error| error.to_string())?
+                );
+                Ok(())
+            }
+            Some("attach-product-evidence") => {
+                let run_id = args
+                    .next()
+                    .ok_or("release attach-product-evidence requires <run-id>")?;
+                let evidence_path = args
+                    .next()
+                    .ok_or("release attach-product-evidence requires <evidence-json>")?;
+                let options = parse_release_options(args.collect())?;
+                let store = KnowledgeRunStore::open(&options.artifact_root, &run_id)
+                    .map_err(|error| error.to_string())?;
+                let target_fingerprint = run_target_fingerprint(&store)?;
+                let evidence: ProductValidationEvidence =
+                    serde_json::from_slice(&fs::read(&evidence_path).map_err(|error| {
+                        format!("product evidence path must be readable before attachment: {error}")
+                    })?)
+                    .map_err(|error| format!("invalid product validation evidence JSON: {error}"))?;
+                let artifact = store
+                    .record_artifact_ref(
+                        "product-validation-evidence",
+                        &evidence_path,
+                        Some(&target_fingerprint),
+                        json!({
+                            "source": "mpb-knowledge release attach-product-evidence",
+                            "patcherInstall": evidence.patcher.install.status,
+                            "runtimeClone": evidence.runtime.cloned_runtime.status,
+                            "tauriDesktop": evidence.runtime.tauri_desktop.status,
+                        }),
+                    )
+                    .map_err(|error| error.to_string())?;
+                store
+                    .append_event(
+                        "release.product_evidence_attached",
+                        Some(&target_fingerprint),
+                        json!({"artifactId": artifact.id, "evidencePath": evidence_path}),
+                    )
+                    .map_err(|error| error.to_string())?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&artifact).map_err(|error| error.to_string())?
+                );
+                Ok(())
+            }
+            Some("attach-runtime-evidence") => {
+                let run_id = args
+                    .next()
+                    .ok_or("release attach-runtime-evidence requires <run-id>")?;
+                let evidence_path = args
+                    .next()
+                    .ok_or("release attach-runtime-evidence requires <evidence-json>")?;
+                let options = parse_release_options(args.collect())?;
+                let store = KnowledgeRunStore::open(&options.artifact_root, &run_id)
+                    .map_err(|error| error.to_string())?;
+                let target_fingerprint = run_target_fingerprint(&store)?;
+                let evidence: ProductCheck =
+                    serde_json::from_slice(&fs::read(&evidence_path).map_err(|error| {
+                        format!("runtime evidence path must be readable before attachment: {error}")
+                    })?)
+                    .map_err(|error| format!("invalid cloned runtime evidence JSON: {error}"))?;
+                let artifact = store
+                    .record_artifact_ref(
+                        "cloned-runtime-validation-evidence",
+                        &evidence_path,
+                        Some(&target_fingerprint),
+                        json!({
+                            "source": "mpb-knowledge release attach-runtime-evidence",
+                            "status": evidence.status,
+                            "label": evidence.label,
+                            "artifactPaths": evidence.artifact_paths,
+                        }),
+                    )
+                    .map_err(|error| error.to_string())?;
+                store
+                    .append_event(
+                        "release.runtime_evidence_attached",
+                        Some(&target_fingerprint),
+                        json!({"artifactId": artifact.id, "evidencePath": evidence_path}),
+                    )
+                    .map_err(|error| error.to_string())?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&artifact).map_err(|error| error.to_string())?
+                );
+                Ok(())
+            }
             Some("prepare-github") => {
                 let run_id = args
                     .next()
@@ -257,12 +458,12 @@ fn run() -> Result<(), String> {
                 Ok(())
             }
             _ => Err(
-                "usage: mpb-knowledge release <start INSTANCE --pack-id PACK|resume RUN|status RUN|report RUN|prepare-github RUN --tag TAG> [--artifact-root PATH]"
+                "usage: mpb-knowledge release <start INSTANCE --pack-id PACK|resume RUN|status RUN|report RUN|attach-source RUN SOURCE_DIR|attach-worker-model RUN MODEL_PATH|attach-runtime-evidence RUN EVIDENCE_JSON|attach-product-evidence RUN EVIDENCE_JSON|prepare-github RUN --tag TAG> [--artifact-root PATH]"
                     .to_string(),
             ),
         },
         _ => Err(
-            "usage: mpb-knowledge <validate-source SOURCE|build-bundle SOURCE OUTPUT|inspect-bundle BUNDLE|fingerprint INSTANCE BUILDER LAB SCHEMA|preflight INSTANCE [--artifact-root PATH] [--run-id RUN]|approve RUN APPROVAL_KIND --reason TEXT [--artifact-root PATH] [--target-fingerprint FINGERPRINT]|target clone RUN INSTANCE [--artifact-root PATH]|target probe-launch RUN [--artifact-root PATH]|release start INSTANCE --pack-id PACK [--artifact-root PATH]|release resume RUN [--artifact-root PATH]|release status RUN [--artifact-root PATH]|release report RUN [--artifact-root PATH]|release prepare-github RUN --tag TAG [--artifact-root PATH]>"
+            "usage: mpb-knowledge <validate-source SOURCE|build-bundle SOURCE OUTPUT|inspect-bundle BUNDLE|fingerprint INSTANCE BUILDER LAB SCHEMA|preflight INSTANCE [--artifact-root PATH] [--run-id RUN]|approve RUN APPROVAL_KIND --reason TEXT [--artifact-root PATH] [--target-fingerprint FINGERPRINT]|target clone RUN INSTANCE [--artifact-root PATH]|target probe-launch RUN [--artifact-root PATH]|release start INSTANCE --pack-id PACK [--artifact-root PATH]|release resume RUN [--artifact-root PATH]|release status RUN [--artifact-root PATH]|release report RUN [--artifact-root PATH]|release attach-source RUN SOURCE_DIR [--artifact-root PATH]|release attach-worker-model RUN MODEL_PATH [--identity ID] [--checksum CHECKSUM] [--hardware-fit FIT] [--artifact-root PATH]|release attach-runtime-evidence RUN EVIDENCE_JSON [--artifact-root PATH]|release attach-product-evidence RUN EVIDENCE_JSON [--artifact-root PATH]|release prepare-github RUN --tag TAG [--artifact-root PATH]>"
                 .to_string(),
         ),
     }
@@ -295,6 +496,13 @@ struct ReleaseOptions {
 struct ReleasePrepareGithubOptions {
     artifact_root: PathBuf,
     tag: Option<String>,
+}
+
+struct ReleaseAttachWorkerModelOptions {
+    artifact_root: PathBuf,
+    identity: Option<String>,
+    checksum: Option<String>,
+    hardware_fit: Option<HardwareFit>,
 }
 
 fn parse_preflight_options(args: Vec<String>) -> Result<PreflightOptions, String> {
@@ -443,4 +651,154 @@ fn parse_release_prepare_github_options(
         index += 1;
     }
     Ok(options)
+}
+
+fn parse_release_attach_worker_model_options(
+    args: Vec<String>,
+) -> Result<ReleaseAttachWorkerModelOptions, String> {
+    let mut options = ReleaseAttachWorkerModelOptions {
+        artifact_root: PathBuf::from("knowledge"),
+        identity: None,
+        checksum: None,
+        hardware_fit: None,
+    };
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--artifact-root" => {
+                index += 1;
+                let value = args.get(index).ok_or("--artifact-root requires <path>")?;
+                options.artifact_root = PathBuf::from(value);
+            }
+            "--identity" => {
+                index += 1;
+                let value = args.get(index).ok_or("--identity requires <text>")?;
+                options.identity = Some(value.clone());
+            }
+            "--checksum" => {
+                index += 1;
+                let value = args.get(index).ok_or("--checksum requires <checksum>")?;
+                options.checksum = Some(value.clone());
+            }
+            "--hardware-fit" => {
+                index += 1;
+                let value = args.get(index).ok_or("--hardware-fit requires <fit>")?;
+                options.hardware_fit = Some(parse_hardware_fit(value)?);
+            }
+            other => {
+                return Err(format!(
+                    "unknown release attach-worker-model option: {other}"
+                ))
+            }
+        }
+        index += 1;
+    }
+    Ok(options)
+}
+
+fn run_target_fingerprint(store: &KnowledgeRunStore) -> Result<String, String> {
+    store
+        .run()
+        .map_err(|error| error.to_string())?
+        .and_then(|run| run.target_fingerprint)
+        .ok_or_else(|| {
+            "run must complete the Fingerprint phase before attaching artifacts".to_string()
+        })
+}
+
+fn ensure_pack_targets_run(
+    pack: &KnowledgePackSource,
+    target_fingerprint: &str,
+) -> Result<(), String> {
+    if pack.manifest.target_fingerprint != target_fingerprint {
+        return Err(format!(
+            "source pack fingerprint {} does not match run target fingerprint {}",
+            pack.manifest.target_fingerprint, target_fingerprint
+        ));
+    }
+    if pack.manifest.computed_fingerprint != target_fingerprint {
+        return Err(format!(
+            "source pack computed fingerprint {} does not match run target fingerprint {}",
+            pack.manifest.computed_fingerprint, target_fingerprint
+        ));
+    }
+    Ok(())
+}
+
+fn extraction_draft_from_pack(pack: &KnowledgePackSource) -> ExtractionDraft {
+    let mut records = Vec::new();
+    records.extend(
+        pack.evidence
+            .iter()
+            .cloned()
+            .map(ExtractedDraftRecord::Evidence),
+    );
+    records.extend(
+        pack.entities
+            .iter()
+            .cloned()
+            .map(ExtractedDraftRecord::Entity),
+    );
+    records.extend(pack.claims.iter().cloned().map(ExtractedDraftRecord::Claim));
+    records.extend(
+        pack.recipes
+            .iter()
+            .cloned()
+            .map(ExtractedDraftRecord::Recipe),
+    );
+    records.extend(
+        pack.relationships
+            .iter()
+            .cloned()
+            .map(ExtractedDraftRecord::Relationship),
+    );
+    records.extend(
+        pack.overlays
+            .iter()
+            .cloned()
+            .map(ExtractedDraftRecord::Overlay),
+    );
+    ExtractionDraft {
+        records,
+        diagnostics: Vec::new(),
+    }
+}
+
+fn parse_hardware_fit(value: &str) -> Result<HardwareFit, String> {
+    match value {
+        "Fits" | "fits" => Ok(HardwareFit::Fits),
+        "Constrained" | "constrained" => Ok(HardwareFit::Constrained),
+        "Insufficient" | "insufficient" => Ok(HardwareFit::Insufficient),
+        "Unknown" | "unknown" => Ok(HardwareFit::Unknown),
+        other => Err(format!(
+            "unknown hardware fit {other}; expected Fits, Constrained, Insufficient, or Unknown"
+        )),
+    }
+}
+
+fn stable_checksum(bytes: &[u8]) -> String {
+    let mut hasher = Fnv1a64::default();
+    hasher.write(bytes);
+    format!("{:016x}", hasher.finish())
+}
+
+struct Fnv1a64(u64);
+
+impl Default for Fnv1a64 {
+    fn default() -> Self {
+        Self(0xcbf29ce484222325)
+    }
+}
+
+impl Hasher for Fnv1a64 {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.0 ^= u64::from(*byte);
+            self.0 = self.0.wrapping_mul(0x100000001b3);
+        }
+    }
 }

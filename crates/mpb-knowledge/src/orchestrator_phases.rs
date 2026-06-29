@@ -14,6 +14,7 @@ use crate::{
     KnowledgeRunPhase, KnowledgeRunStore, ModelSelection, RunBlockerInput, WorkerArtifactInput,
     WorkerEvaluationFixture, WorkerGateOutcome, WorkerRuntimeTask,
 };
+use crate::{ProductCheck, ProductValidationStatus};
 
 pub(crate) fn run_drafting_phase(
     context: &PhaseRunContext<'_>,
@@ -215,10 +216,36 @@ pub(crate) fn run_runtime_verification_phase(
     context: &PhaseRunContext<'_>,
 ) -> Result<PhaseRunStatus, OrchestratorError> {
     let target_fingerprint = current_target_fingerprint(context.store)?;
+    let Some(target_fingerprint_text) = target_fingerprint.clone() else {
+        return Ok(PhaseRunStatus::Blocked {
+            blocker: RunBlockerInput {
+                code: "TARGET_FINGERPRINT_MISSING".to_string(),
+                phase: Some(KnowledgeRunPhase::RuntimeVerification),
+                target_fingerprint: None,
+                message: "Runtime verification requires the exact target fingerprint.".to_string(),
+                detail: json!({"requiredPhase": KnowledgeRunPhase::Fingerprint.as_str()}),
+            },
+        });
+    };
+    let runtime_evidence_artifact =
+        match passed_cloned_runtime_evidence(context.store, &target_fingerprint_text)? {
+            RuntimeEvidenceGate::Passed { artifact_path } => artifact_path,
+            RuntimeEvidenceGate::Blocked { blocker } => {
+                return Ok(PhaseRunStatus::Blocked { blocker });
+            }
+        };
     let Some(plan_ref) = context.store.latest_artifact_ref("experiment-plan")? else {
-        return Ok(PhaseRunStatus::Succeeded {
-            target_fingerprint,
-            detail: json!({"runtimeVerification": "no experiment plan artifact"}),
+        return Ok(PhaseRunStatus::Blocked {
+            blocker: RunBlockerInput {
+                code: "RUNTIME_EXPERIMENT_PLAN_MISSING".to_string(),
+                phase: Some(KnowledgeRunPhase::RuntimeVerification),
+                target_fingerprint,
+                message: "Runtime verification requires a persisted experiment plan, even when no runtime experiments are needed.".to_string(),
+                detail: json!({
+                    "requiredArtifactKind": "experiment-plan",
+                    "runtimeEvidenceArtifact": runtime_evidence_artifact,
+                }),
+            },
         });
     };
     let plan: crate::ExperimentPlan = serde_json::from_slice(&fs::read(&plan_ref.path)?)?;
@@ -229,10 +256,14 @@ pub(crate) fn run_runtime_verification_phase(
         .sum::<usize>();
     if experiment_count == 0 {
         return Ok(PhaseRunStatus::Succeeded {
-            target_fingerprint: Some(plan.fingerprint),
-            detail: json!({"runtimeVerification": "no runtime obligations"}),
+            target_fingerprint,
+            detail: json!({
+                "runtimeVerification": "clone runtime evidence passed; no runtime experiments were planned",
+                "runtimeEvidenceArtifact": runtime_evidence_artifact,
+                "experimentPlanArtifact": plan_ref.path,
+            }),
         });
-    }
+    };
 
     let attempts = context
         .store
@@ -300,7 +331,71 @@ pub(crate) fn run_runtime_verification_phase(
         detail: json!({
             "runtimeVerification": "experiment attempts accepted or within retry policy",
             "attemptArtifactCount": attempts.len(),
+            "runtimeEvidenceArtifact": runtime_evidence_artifact,
         }),
+    })
+}
+
+enum RuntimeEvidenceGate {
+    Passed { artifact_path: String },
+    Blocked { blocker: RunBlockerInput },
+}
+
+fn passed_cloned_runtime_evidence(
+    store: &KnowledgeRunStore,
+    target_fingerprint: &str,
+) -> Result<RuntimeEvidenceGate, OrchestratorError> {
+    let Some(artifact) = store.latest_artifact_ref("cloned-runtime-validation-evidence")? else {
+        return Ok(RuntimeEvidenceGate::Blocked {
+            blocker: RunBlockerInput {
+                code: "CLONED_RUNTIME_VALIDATION_MISSING".to_string(),
+                phase: Some(KnowledgeRunPhase::RuntimeVerification),
+                target_fingerprint: Some(target_fingerprint.to_string()),
+                message: "Runtime verification requires evidence from the real disposable Prism/Minecraft clone before validation can continue.".to_string(),
+                detail: json!({
+                    "requiredArtifactKind": "cloned-runtime-validation-evidence",
+                    "attachCommand": format!(
+                        "mpb-knowledge release attach-runtime-evidence {} <evidence-json> --artifact-root <artifact-root>",
+                        store.run_id()
+                    ),
+                }),
+            },
+        });
+    };
+    if artifact.target_fingerprint.as_deref() != Some(target_fingerprint) {
+        return Ok(RuntimeEvidenceGate::Blocked {
+            blocker: RunBlockerInput {
+                code: "CLONED_RUNTIME_VALIDATION_FINGERPRINT_MISMATCH".to_string(),
+                phase: Some(KnowledgeRunPhase::RuntimeVerification),
+                target_fingerprint: Some(target_fingerprint.to_string()),
+                message: "Cloned runtime validation evidence must be recorded for the exact target fingerprint.".to_string(),
+                detail: json!({
+                    "artifactKind": artifact.artifact_kind,
+                    "evidenceArtifact": artifact.path,
+                    "artifactFingerprint": artifact.target_fingerprint,
+                }),
+            },
+        });
+    }
+    let evidence: ProductCheck = serde_json::from_slice(&fs::read(&artifact.path)?)?;
+    if evidence.status != ProductValidationStatus::Passed {
+        return Ok(RuntimeEvidenceGate::Blocked {
+            blocker: RunBlockerInput {
+                code: "CLONED_RUNTIME_VALIDATION_MISSING".to_string(),
+                phase: Some(KnowledgeRunPhase::RuntimeVerification),
+                target_fingerprint: Some(target_fingerprint.to_string()),
+                message: "Cloned runtime validation evidence must have status passed.".to_string(),
+                detail: json!({
+                    "evidenceArtifact": artifact.path,
+                    "status": evidence.status,
+                    "label": evidence.label,
+                    "artifactPaths": evidence.artifact_paths,
+                }),
+            },
+        });
+    }
+    Ok(RuntimeEvidenceGate::Passed {
+        artifact_path: artifact.path,
     })
 }
 

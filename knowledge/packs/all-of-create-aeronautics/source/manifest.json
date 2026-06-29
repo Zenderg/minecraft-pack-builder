@@ -7,8 +7,8 @@
   "minecraftVersion": "1.21.1",
   "loader": "NeoForge",
   "loaderVersion": "21.1.233",
-  "targetFingerprint": "4cdf224f36c11b8a",
-  "computedFingerprint": "4cdf224f36c11b8a",
+  "targetFingerprint": "ccd83746388f873b",
+  "computedFingerprint": "ccd83746388f873b",
   "builderVersion": "mpb-knowledge-0.1.0",
   "labVersion": "mpb-lab-0.1.0"
 }

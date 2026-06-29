@@ -1,9 +1,13 @@
+use std::fs;
+
 use mpb_knowledge::{
     build_experiment_plan, record_experiment_attempt, summarize_experiment_suite,
     CoverageEvidenceRequirement, CoverageObligation, CoverageObligationKind, ExperimentAttempt,
-    ExperimentAttemptStatus, ExperimentRetryPolicy, KnowledgeRunStore, LabExperimentOperation,
-    LabExperimentStatus, LabObservation, LabObservedState,
+    ExperimentAttemptStatus, ExperimentPlan, ExperimentRetryPolicy, KnowledgeReleaseOrchestrator,
+    KnowledgeRunPhase, KnowledgeRunStore, LabExperimentOperation, LabExperimentStatus,
+    LabObservation, LabObservedState, PhaseCheckpointStatus,
 };
+use serde_json::json;
 
 #[test]
 fn experiment_batches_are_derived_from_runtime_coverage_obligations() {
@@ -128,6 +132,69 @@ fn retry_exhaustion_blocks_release_with_affected_obligations_and_raw_artifacts()
     assert_eq!(blocker.raw_artifact_paths, vec!["raw-1.json", "raw-2.json"]);
 }
 
+#[test]
+fn runtime_verification_blocks_without_real_clone_runtime_evidence_even_when_no_experiments_are_planned(
+) {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let artifact_root = temp.path().join("knowledge");
+    let run_id = "run-runtime-evidence-missing";
+    let store = seed_runtime_verification_run(&artifact_root, run_id, "fingerprint-runtime");
+    write_zero_experiment_plan(&store, "fingerprint-runtime");
+    drop(store);
+
+    let outcome = KnowledgeReleaseOrchestrator::new(&artifact_root)
+        .run_next_required_phase(run_id)
+        .expect("run runtime verification");
+
+    assert_eq!(outcome.phase, Some(KnowledgeRunPhase::RuntimeVerification));
+    assert_eq!(outcome.status.as_str(), "Blocked");
+    let reopened = KnowledgeRunStore::open(&artifact_root, run_id).expect("open store");
+    assert!(reopened
+        .blockers()
+        .expect("blockers")
+        .into_iter()
+        .any(|blocker| blocker.code == "CLONED_RUNTIME_VALIDATION_MISSING"));
+}
+
+#[test]
+fn runtime_verification_accepts_zero_experiment_plan_only_after_passed_clone_runtime_evidence() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let artifact_root = temp.path().join("knowledge");
+    let run_id = "run-runtime-evidence-passed";
+    let store = seed_runtime_verification_run(&artifact_root, run_id, "fingerprint-runtime");
+    write_zero_experiment_plan(&store, "fingerprint-runtime");
+    let evidence_path = store
+        .run_dir()
+        .join("cloned-runtime-validation-evidence.json");
+    fs::write(
+        &evidence_path,
+        serde_json::to_vec_pretty(&json!({
+            "status": "passed",
+            "label": "real cloned Prism runtime",
+            "detail": "operator launched the disposable clone and verified Minecraft reached the MPB runtime",
+            "artifactPaths": ["knowledge/prism-clones/run-runtime-evidence-passed/instance"]
+        }))
+        .expect("evidence json"),
+    )
+    .expect("write runtime evidence");
+    store
+        .record_artifact_ref(
+            "cloned-runtime-validation-evidence",
+            &evidence_path,
+            Some("fingerprint-runtime"),
+            json!({"status": "passed"}),
+        )
+        .expect("record runtime evidence");
+    drop(store);
+
+    let outcome = KnowledgeReleaseOrchestrator::new(&artifact_root)
+        .run_next_required_phase(run_id)
+        .expect("run runtime verification");
+
+    assert_eq!(outcome.phase, Some(KnowledgeRunPhase::RuntimeVerification));
+    assert_eq!(outcome.status.as_str(), "PhaseSucceeded");
+}
+
 fn accepted_observation() -> LabObservation {
     LabObservation {
         id: "obs-pressing".to_string(),
@@ -150,4 +217,62 @@ fn accepted_observation() -> LabObservation {
         limits: Vec::new(),
         required_observation_adapters: Vec::new(),
     }
+}
+
+fn seed_runtime_verification_run(
+    artifact_root: &std::path::Path,
+    run_id: &str,
+    target_fingerprint: &str,
+) -> KnowledgeRunStore {
+    let store = KnowledgeRunStore::open(artifact_root, run_id).expect("open store");
+    store
+        .record_run(
+            Some(target_fingerprint),
+            json!({"createdBy": "runtime verification test"}),
+        )
+        .expect("record run");
+    for phase in [
+        KnowledgeRunPhase::Intake,
+        KnowledgeRunPhase::Preflight,
+        KnowledgeRunPhase::Approvals,
+        KnowledgeRunPhase::Fingerprint,
+        KnowledgeRunPhase::Clone,
+        KnowledgeRunPhase::Extraction,
+        KnowledgeRunPhase::Drafting,
+        KnowledgeRunPhase::ExperimentPlanning,
+        KnowledgeRunPhase::AdapterExpansion,
+    ] {
+        store
+            .record_phase_checkpoint(
+                phase,
+                PhaseCheckpointStatus::Succeeded,
+                Some(target_fingerprint),
+                json!({"seeded": true, "phase": phase.as_str()}),
+            )
+            .expect("record checkpoint");
+    }
+    store
+}
+
+fn write_zero_experiment_plan(store: &KnowledgeRunStore, target_fingerprint: &str) {
+    let plan_dir = store.run_dir().join("lab");
+    fs::create_dir_all(&plan_dir).expect("plan dir");
+    let plan_path = plan_dir.join("experiment-plan.json");
+    fs::write(
+        &plan_path,
+        serde_json::to_vec_pretty(&ExperimentPlan {
+            fingerprint: target_fingerprint.to_string(),
+            batches: Vec::new(),
+        })
+        .expect("plan json"),
+    )
+    .expect("write plan");
+    store
+        .record_artifact_ref(
+            "experiment-plan",
+            &plan_path,
+            Some(target_fingerprint),
+            json!({"batchCount": 0, "experimentCount": 0}),
+        )
+        .expect("record experiment plan");
 }

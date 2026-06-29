@@ -1,10 +1,10 @@
 use std::fs;
 
 use mpb_knowledge::{
-    evaluate_worker_gate, persist_worker_artifacts, ApprovalKind, FineTuningPhaseState,
-    HardwareFit, KnowledgeRunPhase, KnowledgeRunStore, ModelSelection, WorkerArtifactInput,
-    WorkerEvaluationFixture, WorkerGateOutcome, WorkerOutputEnvelope, WorkerRuntimeTask,
-    WorkerTaskKind,
+    evaluate_worker_gate, persist_worker_artifacts, ApprovalKind, CoverageEvaluation,
+    FineTuningPhaseState, HardwareFit, KnowledgeRunPhase, KnowledgeRunStore, ModelSelection,
+    ObligationCoverageSummary, WorkerArtifactInput, WorkerEvaluationFixture, WorkerGateOutcome,
+    WorkerOutputEnvelope, WorkerRuntimeTask, WorkerTaskKind,
 };
 use serde_json::json;
 
@@ -280,6 +280,67 @@ fn orchestrator_drafting_phase_persists_worker_artifacts_and_checkpoint() {
         .latest_artifact_ref("worker-output")
         .expect("worker output artifact")
         .is_some());
+}
+
+#[test]
+fn orchestrator_drafting_phase_requires_worker_model_even_when_deterministic_coverage_is_complete()
+{
+    let temp = tempfile::tempdir().expect("tempdir");
+    let artifact_root = temp.path().join("knowledge");
+    let run_id = "run-drafting-skip";
+    let store = seed_successful_phases(
+        &artifact_root,
+        run_id,
+        &[
+            KnowledgeRunPhase::Intake,
+            KnowledgeRunPhase::Preflight,
+            KnowledgeRunPhase::Approvals,
+            KnowledgeRunPhase::Fingerprint,
+            KnowledgeRunPhase::Clone,
+            KnowledgeRunPhase::Extraction,
+        ],
+    );
+    let coverage_path = store.run_dir().join("coverage/Extraction-summary.json");
+    fs::create_dir_all(coverage_path.parent().expect("coverage parent")).expect("coverage dir");
+    fs::write(
+        &coverage_path,
+        serde_json::to_vec_pretty(&CoverageEvaluation {
+            target_fingerprint: "fingerprint-worker".to_string(),
+            obligations: Vec::new(),
+            blockers: Vec::new(),
+            summary: ObligationCoverageSummary {
+                total_obligations: 0,
+                covered_obligations: 0,
+                deterministic_obligations: 0,
+                runtime_obligations: 0,
+                blocker_count: 0,
+            },
+        })
+        .expect("coverage json"),
+    )
+    .expect("write coverage");
+    store
+        .record_artifact_ref(
+            "coverage-summary",
+            &coverage_path,
+            Some("fingerprint-worker"),
+            json!({"blockerCount": 0, "totalObligations": 0, "coveredObligations": 0}),
+        )
+        .expect("record coverage");
+    drop(store);
+
+    let outcome = mpb_knowledge::KnowledgeReleaseOrchestrator::new(&artifact_root)
+        .run_next_required_phase(run_id)
+        .expect("run drafting");
+
+    assert_eq!(outcome.phase, Some(KnowledgeRunPhase::Drafting));
+    assert_eq!(outcome.status.as_str(), "Blocked");
+    let reopened = KnowledgeRunStore::open(&artifact_root, run_id).expect("open store");
+    assert!(reopened
+        .blockers()
+        .expect("blockers")
+        .into_iter()
+        .any(|blocker| blocker.code == "WORKER_MODEL_MISSING"));
 }
 
 fn seed_successful_phases(

@@ -205,14 +205,14 @@ fn fixture_artifact() -> Result<KnowledgeBundleArtifact, AssetError> {
 fn aoca_artifact() -> Result<KnowledgeBundleArtifact, AssetError> {
     Ok(KnowledgeBundleArtifact {
         pack_id: "all-of-create-aeronautics",
-        exact_fingerprint: "4cdf224f36c11b8a",
+        exact_fingerprint: "ccd83746388f873b",
         schema_version: "mpb-knowledge-v1",
         builder_version: "mpb-knowledge-0.1.0",
         lab_version: "mpb-lab-0.1.0",
         loader: "NeoForge",
         minecraft_version: "1.21.1",
         relative_path: "mpb/knowledge/all-of-create-aeronautics/knowledge-index.json",
-        checksum: "d440d9c4b2dce383",
+        checksum: "ea583f7a678be744",
         payload: KnowledgeBundlePayload::Gzip(AOCA_BUNDLE_GZIP),
     })
 }
@@ -329,7 +329,7 @@ mod tests {
         assert!(aoca_compressed_len() < bytes.len() / 4);
         assert!(bytes.starts_with(b"{"));
         assert_eq!(artifact.pack_id, "all-of-create-aeronautics");
-        assert_eq!(artifact.exact_fingerprint, "4cdf224f36c11b8a");
+        assert_eq!(artifact.exact_fingerprint, "ccd83746388f873b");
         assert_eq!(artifact.checksum, stable_checksum(&bytes));
     }
 

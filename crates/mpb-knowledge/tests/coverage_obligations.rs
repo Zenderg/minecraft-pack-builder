@@ -390,6 +390,72 @@ fn orchestrator_validation_phase_blocks_without_source_pack_after_coverage_passe
         .any(|blocker| blocker.code == "VALIDATION_SOURCE_PACK_MISSING"));
 }
 
+#[test]
+fn orchestrator_validation_phase_accepts_persisted_source_dir_after_coverage_passes() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let artifact_root = temp.path().join("knowledge");
+    let source_dir = temp.path().join("source");
+    let run_id = "run-validation-source-dir";
+    write_minimal_source_dir(&source_dir);
+    let store = seed_successful_phases(
+        &artifact_root,
+        run_id,
+        &[
+            KnowledgeRunPhase::Intake,
+            KnowledgeRunPhase::Preflight,
+            KnowledgeRunPhase::Approvals,
+            KnowledgeRunPhase::Fingerprint,
+            KnowledgeRunPhase::Clone,
+            KnowledgeRunPhase::Extraction,
+            KnowledgeRunPhase::Drafting,
+            KnowledgeRunPhase::ExperimentPlanning,
+            KnowledgeRunPhase::AdapterExpansion,
+            KnowledgeRunPhase::RuntimeVerification,
+        ],
+    );
+    let draft = ExtractionDraft {
+        records: vec![
+            ExtractedDraftRecord::Entity(entity("minecraft:stone")),
+            ExtractedDraftRecord::Evidence(EvidenceSummary {
+                id: "ev-static-stone".to_string(),
+                kind: EvidenceKind::DeterministicSource,
+                summary: "Registry extraction found minecraft:stone.".to_string(),
+                fingerprint: TARGET_FINGERPRINT.to_string(),
+                accepted: true,
+            }),
+            ExtractedDraftRecord::Claim(ClaimRecord {
+                id: "claim-stone-static".to_string(),
+                entity_id: "minecraft:stone".to_string(),
+                kind: ClaimKind::Static,
+                statement: "Stone is present.".to_string(),
+                evidence_ids: vec!["ev-static-stone".to_string()],
+                worker_decision_ids: Vec::new(),
+            }),
+        ],
+        diagnostics: Vec::new(),
+    };
+    let evaluation = evaluate_extraction_coverage(&draft, TARGET_FINGERPRINT);
+    assert!(evaluation.blockers.is_empty());
+    persist_coverage_summary(&store, KnowledgeRunPhase::Extraction, &evaluation)
+        .expect("persist extraction coverage summary");
+    store
+        .record_artifact_ref(
+            "knowledge-source-dir",
+            &source_dir,
+            Some(TARGET_FINGERPRINT),
+            json!({"format": "source-records"}),
+        )
+        .expect("record source dir");
+    drop(store);
+
+    let outcome = KnowledgeReleaseOrchestrator::new(&artifact_root)
+        .run_next_required_phase(run_id)
+        .expect("run validation phase");
+
+    assert_eq!(outcome.phase, Some(KnowledgeRunPhase::Validation));
+    assert_eq!(outcome.status, OrchestratorRunStatus::PhaseSucceeded);
+}
+
 fn entity(id: &str) -> EntityRecord {
     EntityRecord {
         id: id.to_string(),
@@ -400,6 +466,80 @@ fn entity(id: &str) -> EntityRecord {
         interfaces: Vec::new(),
         mechanics: vec!["mining".to_string()],
         covered: true,
+    }
+}
+
+fn write_minimal_source_dir(source_dir: &std::path::Path) {
+    fs::create_dir_all(source_dir).expect("create source dir");
+    fs::write(
+        source_dir.join("manifest.json"),
+        serde_json::to_vec_pretty(&json!({
+            "packId": "coverage-pack",
+            "packVersion": "2026.06.29",
+            "schemaVersion": "mpb-knowledge-v1",
+            "modpackId": "coverage-pack",
+            "modpackVersion": "1.0.0",
+            "minecraftVersion": "1.21.1",
+            "loader": "NeoForge",
+            "loaderVersion": "21.1.233",
+            "targetFingerprint": TARGET_FINGERPRINT,
+            "computedFingerprint": TARGET_FINGERPRINT,
+            "builderVersion": "mpb-knowledge-validation",
+            "labVersion": "mpb-lab-validation"
+        }))
+        .expect("manifest json"),
+    )
+    .expect("write manifest");
+    fs::write(
+        source_dir.join("entities.jsonl"),
+        serde_json::to_string(&json!({
+            "id": "minecraft:stone",
+            "kind": "block",
+            "localizedNames": {"en_us": "Stone"},
+            "tags": [],
+            "useCases": [],
+            "interfaces": [],
+            "mechanics": ["mining"],
+            "covered": true
+        }))
+        .expect("entity json")
+            + "\n",
+    )
+    .expect("write entities");
+    fs::write(
+        source_dir.join("evidence.jsonl"),
+        serde_json::to_string(&json!({
+            "id": "ev-static-stone",
+            "kind": "deterministic_source",
+            "summary": "Registry extraction found minecraft:stone.",
+            "fingerprint": TARGET_FINGERPRINT,
+            "accepted": true
+        }))
+        .expect("evidence json")
+            + "\n",
+    )
+    .expect("write evidence");
+    fs::write(
+        source_dir.join("claims.jsonl"),
+        serde_json::to_string(&json!({
+            "id": "claim-stone-static",
+            "entityId": "minecraft:stone",
+            "kind": "static",
+            "statement": "Stone is present.",
+            "evidenceIds": ["ev-static-stone"],
+            "workerDecisionIds": []
+        }))
+        .expect("claim json")
+            + "\n",
+    )
+    .expect("write claims");
+    for file in [
+        "recipes.jsonl",
+        "relationships.jsonl",
+        "overlays.jsonl",
+        "worker-decisions.jsonl",
+    ] {
+        fs::write(source_dir.join(file), "").expect("write empty jsonl");
     }
 }
 

@@ -69,10 +69,10 @@ The source attachment converted the tracked source records into a persisted extr
 - `Fingerprint`: succeeded with target fingerprint `ccd83746388f873b`.
 - `Clone`: succeeded and created the disposable clone under `knowledge/prism-clones/run-f05439c9-c9f0-4506-990b-31e618e873e3/instance`.
 - `Extraction`: succeeded after source attachment.
-- `Drafting`: succeeded without model download because deterministic extraction coverage was complete and no worker draft was needed.
+- `Drafting`: historically succeeded without model download because deterministic extraction coverage was complete and no worker draft was needed. This is no longer an acceptable production outcome after the pipeline hardening change; production runs now require a selected local worker model and persisted worker artifacts.
 - `ExperimentPlanning`: succeeded with 0 experiment batches and 0 experiment attempts required.
 - `AdapterExpansion`: succeeded with 0 adapter plans and no project-code-change application.
-- `RuntimeVerification`: succeeded because the experiment plan had no runtime attempts to execute.
+- `RuntimeVerification`: historically succeeded because the experiment plan had no runtime attempts to execute. This is no longer an acceptable production outcome after the pipeline hardening change; zero experiment attempts do not replace passed cloned Prism/Minecraft runtime evidence.
 - `Validation`: succeeded after the validation phase accepted the persisted `knowledge-source-dir` artifact.
 - `Bundle`: succeeded and generated the runtime bundle through the orchestrator.
 - `PatcherIntegration`: succeeded with exact-fingerprint product evidence backed by `cargo test -p mpb-assets --test patcher`.
@@ -138,7 +138,7 @@ knowledge/runs/run-f05439c9-c9f0-4506-990b-31e618e873e3/reports/release-report.j
 knowledge/runs/run-f05439c9-c9f0-4506-990b-31e618e873e3/reports/release-report.md
 ```
 
-Resume command after manual validation evidence is attached:
+Resume command after the missing worker model, cloned runtime validation evidence, and product validation evidence are attached:
 
 ```sh
 cargo run -p mpb-knowledge --bin mpb-knowledge -- release resume run-f05439c9-c9f0-4506-990b-31e618e873e3 --artifact-root knowledge
@@ -148,10 +148,11 @@ cargo run -p mpb-knowledge --bin mpb-knowledge -- release resume run-f05439c9-c9
 
 No GitHub release was prepared or published. Publication remains blocked until:
 
-1. A product-validation evidence artifact for fingerprint `ccd83746388f873b` records successful live MCP query validation.
-2. The disposable cloned Prism/Minecraft runtime is launched and validated.
-3. The release Tauri desktop app is run and validated.
-4. `GitHubReleasePublication` approval is explicitly recorded.
+1. A selected local worker model is attached and `Drafting` records worker artifacts for fingerprint `ccd83746388f873b`.
+2. The disposable cloned Prism/Minecraft runtime is launched and passed `cloned-runtime-validation-evidence` is attached for fingerprint `ccd83746388f873b`.
+3. A product-validation evidence artifact for fingerprint `ccd83746388f873b` records successful live MCP query validation.
+4. The release Tauri desktop app is run and validated.
+5. `GitHubReleasePublication` approval is explicitly recorded.
 
 ## Verification Commands
 
