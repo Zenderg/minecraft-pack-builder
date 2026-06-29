@@ -3,6 +3,7 @@
 - Work only in the main branch by default.
 - Do not create or switch to another branch or worktree unless the user explicitly asks for it.
 - If a general workflow guide recommends branch or worktree creation, this repository instruction takes precedence.
+- Subagents may be launched when they are useful for parallel investigation, review, or implementation support.
 - Do not propose MVP, v1, "start simple", or temporary starter solutions by default. Prefer complete, robust, prod-like solutions immediately.
 - Before committing, record any new durable information that surfaced in the current dialogue in an appropriate project file, if such new information exists. This includes product decisions, architecture constraints, technology stack details, OS/tooling quirks, performance findings, debugging lessons, validation requirements, and any other project-specific knowledge that would help future agents avoid repeating the same investigation or mistake.
 - When you need to edit a file that is objectively large and can reasonably be decomposed, decompose the whole file into well-scoped modules, components, hooks, helpers, stylesheets, or other appropriate blocks along meaningful ownership boundaries.
