@@ -59,7 +59,7 @@ Use this checklist before shipping any first-party curated knowledge pack or rel
 - [ ] `cargo test --workspace`
 - [ ] `pnpm test`
 - [ ] `pnpm build`
-- [ ] `mods/mpb-minecraft-mod/build.sh` with the local Gradle/JDK configuration documented in `mods/mpb-minecraft-mod/README.md`
+- [ ] `tools/build-minecraft-mod-container.sh` with the containerized Gradle configuration documented in `mods/mpb-minecraft-mod/README.md`
 
 ## Real Prism Client Smoke
 

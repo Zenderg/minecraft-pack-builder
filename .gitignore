@@ -4,6 +4,7 @@ dist/
 target/
 mods/mpb-minecraft-mod/build/
 mods/mpb-minecraft-mod/.gradle/
+mods/mpb-minecraft-mod/.gradle-container-cache/
 mods/mpb-minecraft-mod/fabric/build/
 mods/mpb-minecraft-mod/forge/build/
 mods/mpb-minecraft-mod/neoforge/build/

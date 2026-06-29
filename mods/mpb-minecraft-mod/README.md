@@ -59,12 +59,20 @@ MPB Manager copies an agent prompt that mirrors this state. With an active pack,
 ## Build
 
 ```bash
+../../tools/build-minecraft-mod-container.sh
+```
+
+The repository-supported path runs the build in the official Gradle Docker image, pinned by `MPB_GRADLE_CONTAINER_IMAGE` and defaulting to `gradle:8.14.3-jdk21`. It keeps Gradle caches and any auto-provisioned toolchains in the ignored `.gradle-container-cache/` directory. Local machines only need a Docker-compatible daemon; they do not need host Java or Gradle installs.
+
+The underlying `build.sh` still supports direct local execution when a developer intentionally provides Gradle:
+
+```bash
 MPB_GRADLE=/path/to/gradle \
 MPB_GRADLE_EXTRA_ARGS='-Porg.gradle.java.installations.paths=/path/to/jdk17' \
 mods/mpb-minecraft-mod/build.sh
 ```
 
-The script requires Gradle and builds through Fabric Loom, ForgeGradle, and NeoForge ModDevGradle. ForgeGradle requires a JDK 17 toolchain for the Minecraft 1.20.1 setup step. The script writes loader-specific jars to `artifacts/generated/` and refreshes:
+The script builds through Fabric Loom, ForgeGradle, and NeoForge ModDevGradle. ForgeGradle requires a JDK 17 toolchain for the Minecraft 1.20.1 setup step. The script writes loader-specific jars to `artifacts/generated/` and refreshes:
 
 - `crates/mpb-assets/src/mpb_mod_fabric_jar.hex`
 - `crates/mpb-assets/src/mpb_mod_forge_jar.hex`
