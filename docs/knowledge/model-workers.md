@@ -1,8 +1,9 @@
 # Model Workers
 
 Model workers are developer-side assistants for first-party knowledge-pack production. They may draft
-classifications, summarize extracted or lab data, detect conflicts, and propose experiments. They are
-never a source of truth.
+classifications, extract candidate claims from local documentation, summarize extracted or lab data,
+detect conflicts, propose experiments, summarize lab logs, and suggest structured JSON/schema
+repairs. They are never a source of truth.
 
 The first worker candidate is `Qwen2.5-Coder-1.5B-Instruct` for structured transformation and
 classification tasks:
@@ -11,17 +12,38 @@ classification tasks:
 - summarization;
 - conflict detection.
 
-`Qwen3-1.7B` and `Qwen3-4B` are reserved for broader reasoning experiments, especially experiment
-proposal drafts, when the first candidate is insufficient.
+`Qwen3-1.7B` and `Qwen3-4B` are examples of broader reasoning candidates, especially experiment
+proposal drafts, when the first candidate is insufficient. The release pipeline records the concrete
+local model identity, path, checksum, and hardware fit during preflight/approval; pack logic must not
+hardcode a model filename.
 
-Every worker output is wrapped in an envelope recording the task kind, model, exact input
-fingerprint, prompt reference, output reference, and fine-tuning decision. Fine-tuning decisions are:
+Every worker output is wrapped in an envelope recording the task kind, model identity, model
+checksum, exact input fingerprint, prompt reference, output reference, and fine-tuning decision.
+The durable run also writes the raw prompt, input, output, model identity, fixture-evaluation
+result, and corrections under:
 
-- no fine-tuning used, with the reason recorded;
-- fine-tuning used for a named worker task, with model, dataset, evaluation threshold, and result;
-- fine-tuning required because worker quality blocks the pack.
+```text
+knowledge/runs/<run-id>/workers/<worker-id>/
+```
 
-Start without fine-tuning. Record prompts, outputs, corrections, and experiment outcomes as future
-training data, but keep raw local traces out of shipped runtime bundles. A worker-only claim cannot
-become trusted knowledge. It must be converted into deterministic extraction or runtime evidence and
-then pass the same strict validation gates as all other source records.
+These files are local ignored artifacts. They can be used for resume, debugging, evaluation, and
+future training data, but they must not be embedded into runtime bundles or committed as release
+evidence.
+
+Worker fixture evaluation must pass before worker output can be consumed by a release run. Worker
+decisions remain untrusted until converted into deterministic extraction evidence or accepted
+runtime lab evidence.
+
+Fine-tuning phase states are:
+
+- `NotUsed`
+- `ProposedBecauseBaseEvaluationFailed`
+- `ApprovedAndRun`
+- `RejectedByUser`
+- `BlockedByHardware`
+
+Start without fine-tuning. A failed base fixture evaluation may propose fine-tuning, but it does not
+run fine-tuning by itself. A local fine-tuning run requires both `FineTuning` approval for the exact
+target fingerprint and a sufficient preflight hardware-fit result. A worker-only claim cannot become
+trusted knowledge. It must be converted into deterministic extraction or runtime evidence and then
+pass the same strict validation gates as all other source records.

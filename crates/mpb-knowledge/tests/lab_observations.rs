@@ -123,6 +123,7 @@ fn accepted_observation() -> LabObservation {
         summary: "create:mechanical_press pressed minecraft:iron_ingot on create:depot into create:iron_sheet"
             .to_string(),
         limits: vec!["single recipe path tested".to_string()],
+        required_observation_adapters: Vec::new(),
     }
 }
 

@@ -21,6 +21,7 @@ public final class MpbLabObservation {
     private final Map<String, String> afterSnapshot;
     private final String summary;
     private final List<String> limits;
+    private final List<String> requiredObservationAdapters;
     private final Instant recordedAt;
 
     public MpbLabObservation(
@@ -35,6 +36,34 @@ public final class MpbLabObservation {
         List<String> limits,
         Instant recordedAt
     ) {
+        this(
+            id,
+            experimentId,
+            fingerprint,
+            status,
+            observedEntityIds,
+            beforeSnapshot,
+            afterSnapshot,
+            summary,
+            limits,
+            List.of(),
+            recordedAt
+        );
+    }
+
+    public MpbLabObservation(
+        String id,
+        String experimentId,
+        String fingerprint,
+        Status status,
+        List<String> observedEntityIds,
+        Map<String, String> beforeSnapshot,
+        Map<String, String> afterSnapshot,
+        String summary,
+        List<String> limits,
+        List<String> requiredObservationAdapters,
+        Instant recordedAt
+    ) {
         this.id = requireText(id, "id");
         this.experimentId = requireText(experimentId, "experimentId");
         this.fingerprint = requireText(fingerprint, "fingerprint");
@@ -44,6 +73,7 @@ public final class MpbLabObservation {
         this.afterSnapshot = Map.copyOf(afterSnapshot);
         this.summary = requireText(summary, "summary");
         this.limits = List.copyOf(limits);
+        this.requiredObservationAdapters = List.copyOf(requiredObservationAdapters);
         this.recordedAt = Objects.requireNonNull(recordedAt, "recordedAt");
     }
 
@@ -81,6 +111,10 @@ public final class MpbLabObservation {
 
     public List<String> limits() {
         return limits;
+    }
+
+    public List<String> requiredObservationAdapters() {
+        return requiredObservationAdapters;
     }
 
     public Instant recordedAt() {

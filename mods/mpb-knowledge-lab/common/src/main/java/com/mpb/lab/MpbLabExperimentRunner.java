@@ -8,6 +8,13 @@ import java.util.Map;
 
 public final class MpbLabExperimentRunner {
     private final Map<String, String> currentSnapshot = new LinkedHashMap<>();
+    private final Map<String, ObservationAdapter> observationAdapters = new LinkedHashMap<>();
+
+    public interface ObservationAdapter {
+        String id();
+
+        Map<String, String> observe(Map<String, String> snapshot);
+    }
 
     public void prepareLabArea(int radius) {
         if (radius <= 0) {
@@ -70,6 +77,26 @@ public final class MpbLabExperimentRunner {
         return changes;
     }
 
+    public void registerObservationAdapter(ObservationAdapter adapter) {
+        if (adapter == null) {
+            throw new IllegalArgumentException("adapter is required");
+        }
+        String adapterId = adapter.id();
+        requireText(adapterId, "adapter.id");
+        observationAdapters.put(adapterId, adapter);
+    }
+
+    public Map<String, String> runObservationAdapter(String adapterId) {
+        requireText(adapterId, "adapterId");
+        ObservationAdapter adapter = observationAdapters.get(adapterId);
+        if (adapter == null) {
+            throw new IllegalArgumentException("observation adapter is not registered: " + adapterId);
+        }
+        Map<String, String> observed = new LinkedHashMap<>(adapter.observe(snapshot()));
+        observed.forEach((key, value) -> currentSnapshot.put("adapter." + adapterId + "." + key, value));
+        return observed;
+    }
+
     public MpbLabObservation recordObservation(
         String id,
         String experimentId,
@@ -78,6 +105,28 @@ public final class MpbLabExperimentRunner {
         Map<String, String> beforeSnapshot,
         String summary,
         List<String> limits
+    ) {
+        return recordObservation(
+            id,
+            experimentId,
+            fingerprint,
+            observedEntityIds,
+            beforeSnapshot,
+            summary,
+            limits,
+            List.copyOf(observationAdapters.keySet())
+        );
+    }
+
+    public MpbLabObservation recordObservation(
+        String id,
+        String experimentId,
+        String fingerprint,
+        List<String> observedEntityIds,
+        Map<String, String> beforeSnapshot,
+        String summary,
+        List<String> limits,
+        List<String> requiredObservationAdapters
     ) {
         return new MpbLabObservation(
             id,
@@ -89,6 +138,7 @@ public final class MpbLabExperimentRunner {
             currentSnapshot,
             summary,
             limits,
+            requiredObservationAdapters,
             Instant.now()
         );
     }

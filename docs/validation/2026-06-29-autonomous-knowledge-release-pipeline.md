@@ -194,3 +194,77 @@ Obligation blocker matrix added in this slice:
 | Decompile-only trust | `decompile_only_trust` |
 | Flaky experiments | `flaky_experiments` |
 | Missing source pack at validation time | `VALIDATION_SOURCE_PACK_MISSING` |
+
+## 2026-06-29 Task 6: Worker Runtime Artifacts, Evaluation, And Fine-Tuning Gate
+
+Red phase:
+
+```text
+cargo test -p mpb-knowledge worker_runtime
+```
+
+Observed result: failed to compile because worker runtime persistence, `WorkerRuntimeTask`, `ModelSelection`, `WorkerEvaluationFixture`, `WorkerGateOutcome`, and fine-tuning phase state APIs were not exported.
+
+Green phase:
+
+```text
+cargo test -p mpb-knowledge --test worker_runtime
+```
+
+Observed result: passed. The command ran 6 tests covering durable worker prompt/input/output/model/evaluation/correction artifacts under `knowledge/runs/<run-id>/workers/`, database artifact references, `ModelDownload` approval blocking for missing local models, base evaluation failure proposing but not running fine-tuning, `FineTuning` approval and hardware-fit gates, untrusted worker envelopes for all runtime tasks, and the orchestrator `Drafting` phase persisting worker artifacts.
+
+The exact plan command was also rerun:
+
+```text
+cargo test -p mpb-knowledge worker_runtime
+```
+
+Observed result: passed compilation, but Cargo treated `worker_runtime` as a test-name filter and ran 0 test cases. The integration test target is verified with `--test worker_runtime` above.
+
+Durable implementation note: concrete model identity and checksum are recorded from a `worker-model` artifact reference. Pack logic does not hardcode a local model filename. Worker output remains draft-only until converted into accepted deterministic extraction evidence or accepted runtime lab evidence.
+
+## 2026-06-29 Task 7: Runtime Experiment Suite, Retry Policy, And Adapter Expansion Plans
+
+Red phase:
+
+```text
+cargo test -p mpb-knowledge experiments
+cargo test -p mpb-knowledge adapter_plan
+```
+
+Observed result: failed to compile because experiment planning, attempt recording, retry summary, adapter expansion planning, and `ProjectCodeChange` application gates were not exported.
+
+Green phase:
+
+```text
+cargo test -p mpb-knowledge --test experiments
+```
+
+Observed result: passed. The command ran 3 tests covering experiment batches derived from runtime coverage obligations, deterministic setup/bounded ticks/snapshot operations/adapter requirements, durable experiment attempt artifacts and events, and retry exhaustion producing `FLAKY_EXPERIMENT_RETRY_EXHAUSTED` with affected obligation ids and raw artifact paths.
+
+```text
+cargo test -p mpb-knowledge --test adapter_plan
+```
+
+Observed result: passed. The command ran 3 tests covering unsupported mechanics producing lab-adapter plans, affected obligation ids in plans, proposed test commands, `ProjectCodeChange` approval requirements, project edits blocked without approval, and extractor/validation-rule plans for non-adapter blockers.
+
+```text
+cargo test -p mpb-knowledge --test lab_observations
+```
+
+Observed result: passed. The command ran 4 tests after adding a defaulted `required_observation_adapters` field to the Rust lab observation contract.
+
+```text
+javac --release 17 -encoding UTF-8 -d /private/tmp/mpb-knowledge-lab-classes mods/mpb-knowledge-lab/common/src/main/java/com/mpb/lab/*.java
+```
+
+Observed result: passed. The Java lab runner now preserves stable generic operations and adds isolated observation-adapter registration/execution hooks. `MpbLabObservation` records required observation adapters while keeping the existing constructor path available.
+
+The exact plan commands were also rerun:
+
+```text
+cargo test -p mpb-knowledge experiments
+cargo test -p mpb-knowledge adapter_plan
+```
+
+Observed result: passed compilation, but Cargo treated the trailing names as test-name filters and ran 0 test cases. The integration test targets are verified with the explicit `--test` commands above.

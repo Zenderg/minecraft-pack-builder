@@ -1,12 +1,15 @@
 //! First-party curated modded-Minecraft knowledge pack schema and tooling.
 
+mod adapter_plan;
 mod approvals;
 mod bundle;
 mod coverage;
+mod experiments;
 mod extract;
 mod fingerprint;
 mod lab;
 mod orchestrator;
+mod orchestrator_phases;
 mod preflight;
 mod run_state;
 mod schema;
@@ -14,6 +17,10 @@ mod target;
 mod validation;
 mod workers;
 
+pub use adapter_plan::{
+    build_adapter_expansion_plans, ensure_project_code_change_allowed, AdapterExpansionKind,
+    AdapterExpansionPlan,
+};
 pub use approvals::{ApprovalError, ApprovalGateError, ApprovalKind, ApprovalRecord};
 pub use bundle::{
     build_runtime_bundle, load_source_pack, read_runtime_bundle, validate_source_dir,
@@ -23,6 +30,12 @@ pub use coverage::{
     evaluate_extraction_coverage, persist_coverage_summary, CoverageBlocker, CoverageEvaluation,
     CoverageEvidenceRequirement, CoverageObligation, CoverageObligationKind,
     ObligationCoverageSummary,
+};
+pub use experiments::{
+    build_experiment_plan, record_experiment_attempt, summarize_experiment_suite,
+    ExperimentAttempt, ExperimentAttemptRecord, ExperimentAttemptStatus, ExperimentBatch,
+    ExperimentError, ExperimentPlan, ExperimentReleaseBlocker, ExperimentRetryPolicy,
+    ExperimentSpec, ExperimentSuiteSummary,
 };
 pub use extract::{
     ExtractedDraftRecord, ExtractionDiagnostic, ExtractionDiagnosticSeverity, ExtractionDraft,
@@ -65,5 +78,8 @@ pub use validation::{
     ValidationReport,
 };
 pub use workers::{
-    FineTuningDecision, WorkerOutputEnvelope, WorkerOutputEnvelopeError, WorkerTaskKind,
+    evaluate_worker_gate, persist_worker_artifacts, FineTuningDecision, FineTuningPhaseState,
+    ModelSelection, WorkerArtifactInput, WorkerArtifactRecord, WorkerEvaluationFixture,
+    WorkerGateOutcome, WorkerOutputEnvelope, WorkerOutputEnvelopeError, WorkerRuntime,
+    WorkerRuntimeError, WorkerRuntimeTask, WorkerTaskKind,
 };

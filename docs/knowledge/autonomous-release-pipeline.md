@@ -77,7 +77,7 @@ Status output includes `latestSuccessfulPhase`, `nextPhase`, blockers, approval 
 - `Release`
 - `Report`
 
-Implemented phases are idempotent. Preflight reuses an existing `preflight-report` artifact, clone resume reuses an existing `target-clone` artifact instead of deleting and recreating the disposable clone, and unsupported future phases create a blocking report under `knowledge/runs/<run-id>/reports/` rather than pretending the release is complete.
+Implemented phases are idempotent. Preflight reuses an existing `preflight-report` artifact, clone resume reuses an existing `target-clone` artifact instead of deleting and recreating the disposable clone, worker drafting reuses an existing `worker-output` artifact, experiment planning reuses an existing `experiment-plan` artifact, and adapter expansion reuses an existing `adapter-expansion-plan` artifact. Unsupported future phases create a blocking report under `knowledge/runs/<run-id>/reports/` rather than pretending the release is complete.
 
 ## Coverage Obligations
 
@@ -93,6 +93,47 @@ Accepted evidence requirements are strict:
 - Worker output, internet-only sources, decompile-only sources, stale-fingerprint artifacts, partial extraction, missing clone/runtime validation, invalid bundle query indexes, and flaky experiments are blocking release conditions.
 
 The `Extraction` phase reads a persisted `extraction-draft` artifact, writes the coverage summary, and stops with a blocking report when any obligation is uncovered. The `Validation` phase rereads the persisted coverage summary after runtime verification and stops with the same specific blocker code if obligations remain uncovered.
+
+## Worker Runtime
+
+Worker runtime work is local, resumable, and untrusted by default. The `Drafting` phase requires a selected `worker-model` artifact reference with a model identity, checksum, file path, and hardware-fit detail. If the referenced model file is missing, `ModelDownload` approval is required before any download or preparation can occur. The phase records:
+
+- `worker-prompt`
+- `worker-input`
+- `worker-output`
+- `worker-model-identity`
+- `worker-evaluation`
+- `worker-corrections`
+
+Each artifact is stored under `knowledge/runs/<run-id>/workers/<worker-id>/` and linked in the run database. Fixture evaluation must pass before worker output can be used by the pipeline. Base-evaluation failure may produce a fine-tuning proposal, but local fine-tuning cannot run unless the exact target fingerprint has `FineTuning` approval and preflight reports sufficient hardware fit.
+
+Worker tasks are intentionally broad enough for the release workflow:
+
+- draft classification
+- local documentation claim extraction
+- conflict detection
+- experiment proposal
+- lab-log summarization
+- structured JSON/schema repair suggestions
+
+Worker decisions remain draft-only. Validation still blocks worker-only claims, trusted worker decisions, and converted evidence ids that do not point to accepted non-worker evidence.
+
+## Runtime Experiments And Adapter Plans
+
+The `ExperimentPlanning` phase derives deterministic experiment batches from uncovered runtime coverage obligations. Each experiment records deterministic setup, bounded ticks, before/after snapshot operations, retry policy, and required observation adapters. The generic lab operation contract stays stable; mechanic-specific behavior belongs in isolated observation adapters.
+
+Experiment attempts are durable `experiment-attempt` artifacts under `knowledge/runs/<run-id>/lab/`. Each attempt records its experiment id, attempt number, accepted/rejected/failed status, optional accepted observation, raw artifact path, and message. If all attempts are retryable failures and the retry policy is exhausted, the pipeline records `FLAKY_EXPERIMENT_RETRY_EXHAUSTED` with affected obligation ids and raw artifact paths.
+
+The `AdapterExpansion` phase can prepare proposed code-change plans without editing project code. Plans include:
+
+- files to change;
+- affected obligation ids;
+- proposed test command;
+- required approval kind.
+
+Any later implementation of extractor, lab adapter, test, or validation-rule support requires `ProjectCodeChange` approval. Without that approval, the pipeline can report the required plan but must not apply project edits.
+
+When PrismLauncher, Minecraft, or the operating system requires manual client interaction, the runtime experiment workflow must persist the prompt/status and resume command rather than substituting browser-only validation.
 
 ## Preflight
 

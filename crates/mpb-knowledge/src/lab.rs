@@ -18,6 +18,8 @@ pub struct LabObservation {
     pub observed_entity_ids: Vec<String>,
     pub summary: String,
     pub limits: Vec<String>,
+    #[serde(default)]
+    pub required_observation_adapters: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

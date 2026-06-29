@@ -8,12 +8,16 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::coverage::PARTIAL_EXTRACTION;
+use crate::orchestrator_phases::{
+    run_adapter_expansion_phase, run_drafting_phase, run_experiment_planning_phase,
+    run_runtime_verification_phase,
+};
 use crate::{
     evaluate_extraction_coverage, persist_coverage_summary, run_preflight, validate_source_pack,
     ApprovalError, ApprovalGateError, ApprovalKind, ArtifactRef, CoverageBlocker,
     CoverageEvaluation, ExtractionDraft, KnowledgePackSource, KnowledgeRunPhase, KnowledgeRunStore,
     PhaseCheckpoint, PhaseCheckpointStatus, PreflightError, RunBlocker, RunBlockerInput,
-    RunStateError, TargetError, TargetManager,
+    RunStateError, TargetError, TargetManager, WorkerRuntimeError,
 };
 
 const MISSING_LONG_RUN_APPROVAL: &str = "MISSING_LONG_RUN_APPROVAL";
@@ -27,6 +31,8 @@ pub enum OrchestratorError {
     Preflight(#[from] PreflightError),
     #[error("target operation failed: {0}")]
     Target(#[from] TargetError),
+    #[error("worker runtime failed: {0}")]
+    WorkerRuntime(#[from] WorkerRuntimeError),
     #[error("approval operation failed: {0}")]
     Approval(#[from] ApprovalError),
     #[error("approval gate failed: {0}")]
@@ -297,6 +303,10 @@ impl KnowledgePhaseRunner for DefaultPhaseRunner {
             KnowledgeRunPhase::Fingerprint => run_fingerprint_phase(context),
             KnowledgeRunPhase::Clone => run_clone_phase(context),
             KnowledgeRunPhase::Extraction => run_extraction_phase(context),
+            KnowledgeRunPhase::Drafting => run_drafting_phase(context),
+            KnowledgeRunPhase::ExperimentPlanning => run_experiment_planning_phase(context),
+            KnowledgeRunPhase::AdapterExpansion => run_adapter_expansion_phase(context),
+            KnowledgeRunPhase::RuntimeVerification => run_runtime_verification_phase(context),
             KnowledgeRunPhase::Validation => run_validation_phase(context),
             _ => Ok(PhaseRunStatus::Blocked {
                 blocker: RunBlockerInput {
@@ -768,7 +778,7 @@ fn intake_instance_path(store: &KnowledgeRunStore) -> Result<PathBuf, Orchestrat
         .ok_or(OrchestratorError::MissingIntakeInstancePath)
 }
 
-fn current_target_fingerprint(
+pub(crate) fn current_target_fingerprint(
     store: &KnowledgeRunStore,
 ) -> Result<Option<String>, OrchestratorError> {
     if let Some(run) = store.run()? {
