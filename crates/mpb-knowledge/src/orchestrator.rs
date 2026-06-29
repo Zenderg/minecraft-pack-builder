@@ -7,10 +7,13 @@ use serde_json::{json, Value};
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::coverage::PARTIAL_EXTRACTION;
 use crate::{
-    run_preflight, ApprovalError, ApprovalGateError, ApprovalKind, ArtifactRef, KnowledgeRunPhase,
-    KnowledgeRunStore, PhaseCheckpoint, PhaseCheckpointStatus, PreflightError, RunBlocker,
-    RunBlockerInput, RunStateError, TargetError, TargetManager,
+    evaluate_extraction_coverage, persist_coverage_summary, run_preflight, validate_source_pack,
+    ApprovalError, ApprovalGateError, ApprovalKind, ArtifactRef, CoverageBlocker,
+    CoverageEvaluation, ExtractionDraft, KnowledgePackSource, KnowledgeRunPhase, KnowledgeRunStore,
+    PhaseCheckpoint, PhaseCheckpointStatus, PreflightError, RunBlocker, RunBlockerInput,
+    RunStateError, TargetError, TargetManager,
 };
 
 const MISSING_LONG_RUN_APPROVAL: &str = "MISSING_LONG_RUN_APPROVAL";
@@ -293,6 +296,8 @@ impl KnowledgePhaseRunner for DefaultPhaseRunner {
             KnowledgeRunPhase::Approvals => run_approvals_phase(context),
             KnowledgeRunPhase::Fingerprint => run_fingerprint_phase(context),
             KnowledgeRunPhase::Clone => run_clone_phase(context),
+            KnowledgeRunPhase::Extraction => run_extraction_phase(context),
+            KnowledgeRunPhase::Validation => run_validation_phase(context),
             _ => Ok(PhaseRunStatus::Blocked {
                 blocker: RunBlockerInput {
                     code: PHASE_NOT_IMPLEMENTED.to_string(),
@@ -550,6 +555,153 @@ fn run_clone_phase(context: &PhaseRunContext<'_>) -> Result<PhaseRunStatus, Orch
         target_fingerprint: Some(clone.fingerprint_after.clone()),
         detail: serde_json::to_value(clone)?,
     })
+}
+
+fn run_extraction_phase(
+    context: &PhaseRunContext<'_>,
+) -> Result<PhaseRunStatus, OrchestratorError> {
+    let Some(draft_ref) = context.store.latest_artifact_ref("extraction-draft")? else {
+        return Ok(PhaseRunStatus::Blocked {
+            blocker: RunBlockerInput {
+                code: PARTIAL_EXTRACTION.to_string(),
+                phase: Some(KnowledgeRunPhase::Extraction),
+                target_fingerprint: current_target_fingerprint(context.store)?,
+                message: "Extraction cannot continue without a persisted extraction draft."
+                    .to_string(),
+                detail: json!({
+                    "requiredArtifactKind": "extraction-draft",
+                    "resumeCommand": format!(
+                        "mpb-knowledge release resume {} --artifact-root {}",
+                        context.store.run_id(),
+                        context.artifact_root.display()
+                    ),
+                }),
+            },
+        });
+    };
+    let target_fingerprint = current_target_fingerprint(context.store)?
+        .or(draft_ref.target_fingerprint.clone())
+        .unwrap_or_else(|| "unknown".to_string());
+    let draft: ExtractionDraft = serde_json::from_slice(&fs::read(&draft_ref.path)?)?;
+    let evaluation = evaluate_extraction_coverage(&draft, &target_fingerprint);
+    let summary_artifact =
+        persist_coverage_summary(context.store, KnowledgeRunPhase::Extraction, &evaluation)?;
+    if let Some(blocker) = evaluation.blockers.first() {
+        return Ok(PhaseRunStatus::Blocked {
+            blocker: coverage_blocker_input(
+                KnowledgeRunPhase::Extraction,
+                Some(target_fingerprint),
+                blocker,
+                &evaluation,
+                Some(&summary_artifact.path),
+            ),
+        });
+    }
+    Ok(PhaseRunStatus::Succeeded {
+        target_fingerprint: Some(target_fingerprint),
+        detail: json!({
+            "coverageSummaryArtifact": summary_artifact.path,
+            "summary": evaluation.summary,
+        }),
+    })
+}
+
+fn run_validation_phase(
+    context: &PhaseRunContext<'_>,
+) -> Result<PhaseRunStatus, OrchestratorError> {
+    let Some(summary_ref) = context.store.latest_artifact_ref("coverage-summary")? else {
+        return Ok(PhaseRunStatus::Blocked {
+            blocker: RunBlockerInput {
+                code: PARTIAL_EXTRACTION.to_string(),
+                phase: Some(KnowledgeRunPhase::Validation),
+                target_fingerprint: current_target_fingerprint(context.store)?,
+                message: "Validation requires a persisted coverage summary from extraction."
+                    .to_string(),
+                detail: json!({"requiredArtifactKind": "coverage-summary"}),
+            },
+        });
+    };
+    let evaluation: CoverageEvaluation = serde_json::from_slice(&fs::read(&summary_ref.path)?)?;
+    if let Some(blocker) = evaluation.blockers.first() {
+        return Ok(PhaseRunStatus::Blocked {
+            blocker: coverage_blocker_input(
+                KnowledgeRunPhase::Validation,
+                Some(evaluation.target_fingerprint.clone()),
+                blocker,
+                &evaluation,
+                Some(&summary_ref.path),
+            ),
+        });
+    }
+
+    let Some(source_ref) = context.store.latest_artifact_ref("knowledge-source-pack")? else {
+        return Ok(PhaseRunStatus::Blocked {
+            blocker: RunBlockerInput {
+                code: "VALIDATION_SOURCE_PACK_MISSING".to_string(),
+                phase: Some(KnowledgeRunPhase::Validation),
+                target_fingerprint: Some(evaluation.target_fingerprint.clone()),
+                message: "Validation requires a persisted knowledge-source-pack artifact."
+                    .to_string(),
+                detail: json!({
+                    "requiredArtifactKind": "knowledge-source-pack",
+                    "coverageSummaryArtifact": summary_ref.path,
+                }),
+            },
+        });
+    };
+    let pack: KnowledgePackSource = serde_json::from_slice(&fs::read(&source_ref.path)?)?;
+    if let Err(error) = validate_source_pack(&pack) {
+        let failure = error
+            .failures()
+            .first()
+            .expect("validation error should contain at least one failure");
+        return Ok(PhaseRunStatus::Blocked {
+            blocker: RunBlockerInput {
+                code: failure.code.as_str().to_ascii_uppercase(),
+                phase: Some(KnowledgeRunPhase::Validation),
+                target_fingerprint: Some(evaluation.target_fingerprint.clone()),
+                message: failure.message.clone(),
+                detail: json!({
+                    "validationCode": failure.code.as_str(),
+                    "sourcePackArtifact": source_ref.path,
+                    "coverageSummaryArtifact": summary_ref.path,
+                }),
+            },
+        });
+    }
+
+    let validation_artifact =
+        persist_coverage_summary(context.store, KnowledgeRunPhase::Validation, &evaluation)?;
+    Ok(PhaseRunStatus::Succeeded {
+        target_fingerprint: Some(evaluation.target_fingerprint),
+        detail: json!({
+            "coverageSummaryArtifact": validation_artifact.path,
+            "sourcePackValidation": "passed",
+            "summary": evaluation.summary,
+        }),
+    })
+}
+
+fn coverage_blocker_input(
+    phase: KnowledgeRunPhase,
+    target_fingerprint: Option<String>,
+    blocker: &CoverageBlocker,
+    evaluation: &CoverageEvaluation,
+    coverage_summary_artifact: Option<&str>,
+) -> RunBlockerInput {
+    RunBlockerInput {
+        code: blocker.code.clone(),
+        phase: Some(phase),
+        target_fingerprint,
+        message: blocker.message.clone(),
+        detail: json!({
+            "obligationId": blocker.obligation_id.clone(),
+            "affectedEvidenceIds": blocker.affected_evidence_ids.clone(),
+            "coverageSummaryArtifact": coverage_summary_artifact,
+            "summary": evaluation.summary.clone(),
+            "blockers": evaluation.blockers.clone(),
+        }),
+    }
 }
 
 fn write_blocking_report(

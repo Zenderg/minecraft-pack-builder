@@ -86,6 +86,52 @@ fn behavioral_claim_requires_accepted_runtime_evidence() {
         .contains(&ValidationCode::BehavioralClaimWithoutRuntimeEvidence));
 }
 
+#[test]
+fn release_validation_blocks_partial_extraction_and_untrusted_source_paths() {
+    let mut pack = valid_pack();
+    pack.coverage.partial_extraction = true;
+    pack.coverage
+        .unsupported_source_kinds
+        .push("config:create-client.toml".to_string());
+    pack.coverage.clone_runtime_validated = false;
+    pack.coverage
+        .flaky_experiment_ids
+        .push("exp-create-kinetics-flaky".to_string());
+    pack.claims[0].evidence_ids = vec!["ev-internet-only".to_string()];
+    pack.evidence.push(EvidenceSummary {
+        id: "ev-internet-only".to_string(),
+        kind: EvidenceKind::InternetSource,
+        summary: "A web page says stone is a solid block.".to_string(),
+        fingerprint: "fingerprint-fixture".to_string(),
+        accepted: true,
+    });
+    pack.claims.push(ClaimRecord {
+        id: "claim-decompile-only".to_string(),
+        entity_id: "minecraft:stone".to_string(),
+        kind: ClaimKind::Static,
+        statement: "A private implementation detail exists.".to_string(),
+        evidence_ids: vec!["ev-decompile-only".to_string()],
+        worker_decision_ids: Vec::new(),
+    });
+    pack.evidence.push(EvidenceSummary {
+        id: "ev-decompile-only".to_string(),
+        kind: EvidenceKind::DecompileOutput,
+        summary: "A decompiler showed one branch in a mod class.".to_string(),
+        fingerprint: "fingerprint-fixture".to_string(),
+        accepted: true,
+    });
+
+    let error = validate_source_pack(&pack).expect_err("release blockers must fail validation");
+    let codes = error.codes();
+
+    assert!(codes.contains(&ValidationCode::PartialExtraction));
+    assert!(codes.contains(&ValidationCode::UnsupportedSourceKind));
+    assert!(codes.contains(&ValidationCode::MissingCloneRuntimeValidation));
+    assert!(codes.contains(&ValidationCode::InternetOnlyTrust));
+    assert!(codes.contains(&ValidationCode::DecompileOnlyTrust));
+    assert!(codes.contains(&ValidationCode::FlakyExperiments));
+}
+
 pub fn valid_pack() -> KnowledgePackSource {
     KnowledgePackSource {
         manifest: KnowledgeManifest {
@@ -208,6 +254,10 @@ pub fn valid_pack() -> KnowledgePackSource {
                 "mechanic_details".to_string(),
                 "evidence".to_string(),
             ],
+            clone_runtime_validated: true,
+            partial_extraction: false,
+            unsupported_source_kinds: Vec::new(),
+            flaky_experiment_ids: Vec::new(),
         },
         worker_decisions: Vec::new(),
     }

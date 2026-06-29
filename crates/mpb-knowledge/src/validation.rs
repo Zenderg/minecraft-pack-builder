@@ -17,6 +17,12 @@ pub enum ValidationCode {
     TrustedWorkerOutput,
     RuntimeBundleQueryGaps,
     MissingManifestMetadata,
+    UnsupportedSourceKind,
+    PartialExtraction,
+    MissingCloneRuntimeValidation,
+    InternetOnlyTrust,
+    DecompileOnlyTrust,
+    FlakyExperiments,
 }
 
 impl ValidationCode {
@@ -33,6 +39,12 @@ impl ValidationCode {
             Self::TrustedWorkerOutput => "trusted_worker_output",
             Self::RuntimeBundleQueryGaps => "runtime_bundle_query_gaps",
             Self::MissingManifestMetadata => "missing_manifest_metadata",
+            Self::UnsupportedSourceKind => "unsupported_source_kind",
+            Self::PartialExtraction => "partial_extraction",
+            Self::MissingCloneRuntimeValidation => "missing_clone_runtime_validation",
+            Self::InternetOnlyTrust => "internet_only_trust",
+            Self::DecompileOnlyTrust => "decompile_only_trust",
+            Self::FlakyExperiments => "flaky_experiments",
         }
     }
 }
@@ -91,6 +103,7 @@ pub fn validate_source_pack(
     check_manifest(pack, &mut failures);
     check_fingerprints(pack, &mut failures);
     check_coverage(pack, &mut failures);
+    check_release_coverage_gates(pack, &mut failures);
     check_overlays(pack, &mut failures);
     check_claims(pack, &mut failures);
     check_dependencies(pack, &mut failures);
@@ -106,6 +119,33 @@ pub fn validate_source_pack(
         })
     } else {
         Err(KnowledgeValidationError::new(failures))
+    }
+}
+
+fn check_release_coverage_gates(pack: &KnowledgePackSource, failures: &mut Vec<ValidationFailure>) {
+    if pack.coverage.partial_extraction {
+        failures.push(ValidationFailure {
+            code: ValidationCode::PartialExtraction,
+            message: "coverage summary marks extraction as partial".to_string(),
+        });
+    }
+    for source in &pack.coverage.unsupported_source_kinds {
+        failures.push(ValidationFailure {
+            code: ValidationCode::UnsupportedSourceKind,
+            message: format!("unsupported source kind {source} affects discovered content"),
+        });
+    }
+    if !pack.coverage.clone_runtime_validated {
+        failures.push(ValidationFailure {
+            code: ValidationCode::MissingCloneRuntimeValidation,
+            message: "clone/runtime validation evidence is required".to_string(),
+        });
+    }
+    for experiment in &pack.coverage.flaky_experiment_ids {
+        failures.push(ValidationFailure {
+            code: ValidationCode::FlakyExperiments,
+            message: format!("experiment {experiment} exceeded flake tolerance"),
+        });
     }
 }
 
@@ -245,6 +285,23 @@ fn check_claims(pack: &KnowledgePackSource, failures: &mut Vec<ValidationFailure
                 message: format!("claim {} is backed only by worker output", claim.id),
             });
         }
+
+        if claim_backed_only_by(pack, &claim.evidence_ids, EvidenceKind::InternetSource) {
+            failures.push(ValidationFailure {
+                code: ValidationCode::InternetOnlyTrust,
+                message: format!(
+                    "claim {} is backed only by internet-sourced evidence",
+                    claim.id
+                ),
+            });
+        }
+
+        if claim_backed_only_by(pack, &claim.evidence_ids, EvidenceKind::DecompileOutput) {
+            failures.push(ValidationFailure {
+                code: ValidationCode::DecompileOnlyTrust,
+                message: format!("claim {} is backed only by decompiler output", claim.id),
+            });
+        }
     }
 }
 
@@ -375,4 +432,18 @@ fn all_evidence_accepted(pack: &KnowledgePackSource, ids: &[String]) -> bool {
 fn evidence_accepted_non_worker(pack: &KnowledgePackSource, id: &str) -> bool {
     evidence_by_id(pack, id)
         .is_some_and(|evidence| evidence.accepted && evidence.kind != EvidenceKind::WorkerOutput)
+}
+
+fn claim_backed_only_by(pack: &KnowledgePackSource, ids: &[String], kind: EvidenceKind) -> bool {
+    if ids.is_empty() {
+        return false;
+    }
+    let evidence_records = ids
+        .iter()
+        .filter_map(|id| evidence_by_id(pack, id))
+        .collect::<Vec<_>>();
+    evidence_records.len() == ids.len()
+        && evidence_records
+            .iter()
+            .all(|evidence| evidence.accepted && evidence.kind == kind)
 }

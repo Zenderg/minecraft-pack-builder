@@ -2,6 +2,7 @@
 
 mod approvals;
 mod bundle;
+mod coverage;
 mod extract;
 mod fingerprint;
 mod lab;
@@ -18,8 +19,14 @@ pub use bundle::{
     build_runtime_bundle, load_source_pack, read_runtime_bundle, validate_source_dir,
     BundleBuildError, RuntimeBundle, RuntimeBundleManifest, RuntimeBundleQuery,
 };
+pub use coverage::{
+    evaluate_extraction_coverage, persist_coverage_summary, CoverageBlocker, CoverageEvaluation,
+    CoverageEvidenceRequirement, CoverageObligation, CoverageObligationKind,
+    ObligationCoverageSummary,
+};
 pub use extract::{
-    ExtractionDiagnostic, ExtractionDiagnosticSeverity, ExtractionDraft, ExtractionSourceKind,
+    ExtractedDraftRecord, ExtractionDiagnostic, ExtractionDiagnosticSeverity, ExtractionDraft,
+    ExtractionSourceKind,
 };
 pub use fingerprint::{
     collect_fingerprint_document, compute_target_fingerprint, FingerprintDocument,

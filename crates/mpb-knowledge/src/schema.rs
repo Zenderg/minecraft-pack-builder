@@ -112,6 +112,8 @@ pub enum EvidenceKind {
     RuntimeObservation,
     WorkerOutput,
     ManualDocumentation,
+    InternetSource,
+    DecompileOutput,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -179,6 +181,14 @@ pub struct CoverageSummary {
     pub covered_entity_ids: Vec<String>,
     #[serde(default)]
     pub runtime_bundle_query_indexes: Vec<String>,
+    #[serde(default)]
+    pub clone_runtime_validated: bool,
+    #[serde(default)]
+    pub partial_extraction: bool,
+    #[serde(default)]
+    pub unsupported_source_kinds: Vec<String>,
+    #[serde(default)]
+    pub flaky_experiment_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

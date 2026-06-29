@@ -366,6 +366,10 @@ fn coverage_from_records(entities: &[EntityRecord]) -> CoverageSummary {
             "mechanic_details".to_string(),
             "evidence".to_string(),
         ],
+        clone_runtime_validated: true,
+        partial_extraction: false,
+        unsupported_source_kinds: Vec::new(),
+        flaky_experiment_ids: Vec::new(),
     }
 }
 

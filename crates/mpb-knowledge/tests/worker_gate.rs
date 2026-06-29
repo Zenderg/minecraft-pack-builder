@@ -173,6 +173,10 @@ fn valid_worker_pack() -> KnowledgePackSource {
                 "mechanic_details".to_string(),
                 "evidence".to_string(),
             ],
+            clone_runtime_validated: true,
+            partial_extraction: false,
+            unsupported_source_kinds: Vec::new(),
+            flaky_experiment_ids: Vec::new(),
         },
         worker_decisions: Vec::new(),
     }

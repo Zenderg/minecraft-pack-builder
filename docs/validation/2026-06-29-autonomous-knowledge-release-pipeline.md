@@ -141,3 +141,56 @@ Sample `release status` shape after `release start` blocks at the approval gate:
 ```
 
 Durable implementation note: the orchestrator computes progress by scanning successful checkpoints in the stable phase order. It intentionally does not use the newest successful checkpoint row as the source of truth, because launch probes or other diagnostics may append a later checkpoint for an earlier phase.
+
+## 2026-06-29 Task 5: Coverage Obligations And Strict Extraction Blocking
+
+Red phase:
+
+```text
+cargo test -p mpb-knowledge coverage_obligations
+cargo test -p mpb-knowledge validation_gates
+```
+
+Observed result: failed to compile because `evaluate_extraction_coverage`, `persist_coverage_summary`, `ExtractedDraftRecord`, new `CoverageSummary` release-gate fields, new `EvidenceKind` trust-source variants, and new `ValidationCode` blocker variants did not exist yet.
+
+Green phase:
+
+```text
+cargo test -p mpb-knowledge --test coverage_obligations
+```
+
+Observed result: passed. The command ran 8 tests covering unsupported config diagnostics, unknown mechanics, incomplete relationships, behavioral claims without runtime observations, stale fingerprints, durable `coverage-summary` persistence, `Extraction` phase blocking reports, and `Validation` phase blocking from persisted uncovered obligations.
+
+Post-review expansion: the command now runs 9 tests, adding a guard that `Validation` blocks with `VALIDATION_SOURCE_PACK_MISSING` when coverage obligations pass but no persisted `knowledge-source-pack` artifact exists.
+
+The exact plan commands were also rerun after implementation:
+
+```text
+cargo test -p mpb-knowledge coverage_obligations
+cargo test -p mpb-knowledge validation_gates
+```
+
+Observed result: passed. Cargo treats these trailing arguments as test-name filters, so the targeted integration test files are verified with the explicit `--test` commands above.
+
+```text
+cargo test -p mpb-knowledge --test validation_gates
+```
+
+Observed result: passed. The command ran 5 tests covering the existing validation gates plus partial extraction, unsupported source kinds, missing clone/runtime validation, internet-only trust, decompile-only trust, and flaky experiment blockers.
+
+Obligation blocker matrix added in this slice:
+
+| Condition | Blocking code |
+| --- | --- |
+| Unsupported source diagnostic affecting discovered content | `UNSUPPORTED_SOURCE_KIND` |
+| Unknown mechanic requiring adapter support | `UNKNOWN_MECHANIC` |
+| Relationship with missing entities or missing/rejected evidence | `INCOMPLETE_RELATIONSHIP` |
+| Behavioral claim without accepted runtime observation | `BEHAVIORAL_CLAIM_WITHOUT_RUNTIME_EVIDENCE` |
+| Static claim without accepted deterministic evidence | `STATIC_CLAIM_WITHOUT_DETERMINISTIC_EVIDENCE` |
+| Stale-fingerprint evidence | `STALE_FINGERPRINT` |
+| Partial recipe/overlay/trait extraction | `PARTIAL_EXTRACTION` |
+| Missing clone/runtime validation | `missing_clone_runtime_validation` |
+| Internet-only trust | `internet_only_trust` |
+| Decompile-only trust | `decompile_only_trust` |
+| Flaky experiments | `flaky_experiments` |
+| Missing source pack at validation time | `VALIDATION_SOURCE_PACK_MISSING` |

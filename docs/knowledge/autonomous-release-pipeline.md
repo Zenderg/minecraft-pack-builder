@@ -79,6 +79,21 @@ Status output includes `latestSuccessfulPhase`, `nextPhase`, blockers, approval 
 
 Implemented phases are idempotent. Preflight reuses an existing `preflight-report` artifact, clone resume reuses an existing `target-clone` artifact instead of deleting and recreating the disposable clone, and unsupported future phases create a blocking report under `knowledge/runs/<run-id>/reports/` rather than pretending the release is complete.
 
+## Coverage Obligations
+
+Extraction produces durable coverage obligations for discovered entities, mechanics, relationships, recipes, traits, overlays, configs, datapacks, scripts, resources, guide/manual/tooltip content, static claims, and behavioral claims. The pipeline persists the obligation summary as a `coverage-summary` artifact under `knowledge/runs/<run-id>/coverage/` and records a `coverage.summary` event in the run database.
+
+Extraction diagnostics that affect discovered content are release blockers. A blocking diagnostic for a config, datapack, script, resource pack, guidebook, manual, tooltip, registry, blockstate, recipe, tag, or language source is recorded as `UNSUPPORTED_SOURCE_KIND` until deterministic collector support exists for that source.
+
+Accepted evidence requirements are strict:
+
+- Static claims require accepted deterministic local source evidence, or accepted local manual/documentation evidence that has been converted into deterministic extraction evidence.
+- Behavioral claims require accepted runtime observations from the exact target fingerprint.
+- Relationships, overlays, mechanic traits, and recipes must reference accepted evidence and complete entity chains.
+- Worker output, internet-only sources, decompile-only sources, stale-fingerprint artifacts, partial extraction, missing clone/runtime validation, invalid bundle query indexes, and flaky experiments are blocking release conditions.
+
+The `Extraction` phase reads a persisted `extraction-draft` artifact, writes the coverage summary, and stops with a blocking report when any obligation is uncovered. The `Validation` phase rereads the persisted coverage summary after runtime verification and stops with the same specific blocker code if obligations remain uncovered.
+
 ## Preflight
 
 Run preflight before any long-running or mutating pipeline work:

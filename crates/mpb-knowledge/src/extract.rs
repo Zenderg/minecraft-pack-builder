@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{ClaimRecord, EntityRecord, EvidenceSummary, RecipeRecord};
+use crate::{
+    ClaimRecord, EntityRecord, EvidenceSummary, MechanicOverlay, RecipeRecord, RelationshipRecord,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -50,6 +52,8 @@ pub enum ExtractedDraftRecord {
     Claim(ClaimRecord),
     Evidence(EvidenceSummary),
     Recipe(RecipeRecord),
+    Relationship(RelationshipRecord),
+    Overlay(MechanicOverlay),
 }
 
 impl ExtractionDraft {
