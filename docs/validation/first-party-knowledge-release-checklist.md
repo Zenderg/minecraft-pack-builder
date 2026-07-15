@@ -1,5 +1,10 @@
 # First-Party Knowledge Release Checklist
 
+This checklist is the source of truth for release gates that every first-party curated knowledge
+pack must pass. Pack-specific identities and current results belong in the pack README and focused
+validation summary; pipeline architecture, bundle formats, and raw run evidence belong in
+[`docs/knowledge`](../knowledge/README.md) and the ignored `knowledge/runs/` artifact tree.
+
 Use this checklist before shipping any first-party curated knowledge pack or release package that contains one.
 
 ## Pack Identity
@@ -71,6 +76,11 @@ Use this checklist before shipping any first-party curated knowledge pack or rel
 - [ ] Connect an external MCP client or scripted JSON-RPC probe to the running `/mcp` endpoint.
 - [ ] Run `mpb_knowledge_status`.
 - [ ] Run at least one representative entity search, entity card lookup, recipe/dependency graph lookup, mechanic lookup, and evidence lookup.
-- [ ] Record the endpoint, commands/probes, results, and any unavailable manual steps in the pack-specific validation note under `docs/validation/`.
+- [ ] Record the endpoint, commands/probes, results, generated evidence paths, and any unavailable manual steps in the pack-specific validation summary under `docs/validation/`.
 
 Browser-only validation is not a release substitute for this product. If desktop or Minecraft validation cannot be run on the current machine, stop release packaging and record the exact unavailable steps, environment limitation, and required follow-up owner in `docs/validation/`.
+
+Related contracts: [knowledge overview](../knowledge/README.md),
+[fingerprints](../knowledge/fingerprints.md), [runtime bundle](../knowledge/runtime-bundle-format.md),
+[pipeline operator guide](../knowledge/autonomous-release-pipeline.md), and
+[Minecraft runtime](../../mods/mpb-minecraft-mod/README.md).

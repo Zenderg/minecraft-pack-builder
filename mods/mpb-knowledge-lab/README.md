@@ -1,5 +1,10 @@
 # MPB Knowledge Lab
 
+This document is the source of truth for the developer-only MPB Knowledge Lab module: its isolation
+boundary, command contract, and local build. End-to-end release orchestration belongs in the
+[knowledge pipeline guide](../../docs/knowledge/autonomous-release-pipeline.md), and end-user runtime
+behavior belongs in the [Minecraft mod documentation](../mpb-minecraft-mod/README.md).
+
 This tree is a developer-only lab runner scaffold for first-party modded knowledge production.
 It is intentionally separate from `mods/mpb-minecraft-mod`, is not referenced by patcher artifacts,
 and must not be installed by `apply_mpb_patch`.

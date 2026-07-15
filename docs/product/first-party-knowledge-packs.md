@@ -1,6 +1,9 @@
 # Minecraft Pack Builder: First-Party Modded Knowledge Packs
 
-Date: 2026-06-27
+This document is the source of truth for the product-level support and trust contract of
+first-party modded knowledge packs. Exact formats, fingerprint computation, worker policy, runtime
+bundle layout, and release operations belong in the focused [`docs/knowledge`](../knowledge/README.md)
+documents; patcher and runtime behavior belongs in the [core product contract](patcher-and-minecraft-mod.md).
 
 ## 1. Purpose
 
@@ -309,17 +312,15 @@ These are rejected for this design:
 - pairwise testing every entity against every other entity without a mechanic reason;
 - requiring a separate desktop app or daemon during agent use.
 
-## 16. Implementation Boundaries
+## 16. Ownership Boundaries
 
-This design should become several implementation plans rather than one monolithic task:
+The production contract is divided across focused subsystem ownership:
 
-- knowledge source schema and validation gates;
-- dev-only lab mod and batch experiment runner;
-- deterministic extractors and fingerprinting;
-- model-worker harness and worker-output rejection/evidence conversion;
-- runtime bundle builder;
-- MPB Minecraft mod read-only knowledge query tools;
-- patcher installation/update/repair/unpatch integration for knowledge bundles;
-- `All of Create - Aeronautics` first-party pack production run.
+- source schema, fingerprinting, worker policy, runtime bundles, and release operations belong in [`docs/knowledge`](../knowledge/README.md);
+- the dev-only lab and batch experiment command contract belongs in the [Knowledge Lab README](../../mods/mpb-knowledge-lab/README.md);
+- Minecraft read-only knowledge tools and bundle loading belong in the [runtime README](../../mods/mpb-minecraft-mod/README.md);
+- patcher installation, update, repair, and unpatch behavior belongs in the [core product contract](patcher-and-minecraft-mod.md);
+- pack identity and source records belong under `knowledge/packs/<pack-id>/`;
+- repeatable release gates and concise current results belong under [`docs/validation`](../validation/README.md).
 
-Each implementation plan must preserve the production contract above. An experimental local build may exist during development, but it must not be described as production-ready or shipped as trusted knowledge.
+Experimental local output must not be described as production-ready or shipped as trusted knowledge.

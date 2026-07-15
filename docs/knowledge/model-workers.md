@@ -1,5 +1,10 @@
 # Model Workers
 
+This document is the source of truth for model-worker roles, trust boundaries, evaluation
+requirements, artifact envelopes, and fine-tuning policy. Pipeline sequencing and approvals belong
+in the [operator guide](autonomous-release-pipeline.md); raw local traces follow the retention rules
+in [`knowledge/worker-decisions`](../../knowledge/worker-decisions/README.md).
+
 Model workers are developer-side assistants for first-party knowledge-pack production. They may draft
 classifications, extract candidate claims from local documentation, summarize extracted or lab data,
 detect conflicts, propose experiments, summarize lab logs, and suggest structured JSON/schema

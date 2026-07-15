@@ -2,14 +2,14 @@
 
 Minecraft Pack Builder is a tool layer for AI-assisted building in modded Minecraft. It patches a PrismLauncher instance with an in-game MPB runtime so an external AI agent can create build schemes, while Minecraft remains the real visual and mechanical environment.
 
-Minecraft Pack Builder now centers on two pieces:
+Minecraft Pack Builder consists of two pieces:
 
 - **MPB Patcher:** a Tauri desktop GUI that discovers PrismLauncher Launcher Roots, lists Prism instances, and applies/repairs/removes the managed MPB Minecraft mod patch.
 - **MPB Minecraft Mod:** buildable client-only Fabric, Forge, and NeoForge jars for Minecraft 1.20+, with instance-local schemes and MCP on `/mcp`.
 
-The long-term modded direction is first-party curated knowledge packs: MPB developers can ship evidence-backed knowledge for exact supported modpack fingerprints so connected agents can reason about modded blocks, items, recipes, and mechanics without guessing.
+Curated modded support uses first-party knowledge packs: MPB developers can ship evidence-backed knowledge for exact supported modpack fingerprints so connected agents can reason about modded blocks, items, recipes, and mechanics without guessing.
 
-Minecraft itself is the visual environment. The old desktop 3D viewer and global SQLite scheme library have been removed from the active project.
+Minecraft itself is the visual environment. MPB does not maintain a second desktop 3D renderer or a global SQLite scheme library.
 
 Runtime data lives in each Prism instance:
 
@@ -50,10 +50,17 @@ pnpm tauri dev
 
 The desktop host is a Tauri app in `src-tauri`. Rust domain crates live under `crates/`, and the React/Vite frontend lives under `src/`.
 
-The Minecraft mod runtime source lives under `mods/mpb-minecraft-mod/`.
+The Minecraft mod runtime source lives under `mods/mpb-minecraft-mod/`:
 
 ```bash
 tools/build-minecraft-mod-container.sh
 ```
 
-The containerized mod build uses official Gradle Docker images by default, so local machines only need a working Docker-compatible daemon. It runs the real loader toolchains: Fabric Loom, ForgeGradle, and NeoForge ModDevGradle. It produces loader-specific jars in `mods/mpb-minecraft-mod/artifacts/generated/` and refreshes the hex-encoded bundled artifacts consumed by `mpb-assets`. Fabric and NeoForge run in a JDK 21 Gradle image, while Forge runs in a JDK 17 Gradle image because ForgeGradle's Minecraft 1.20.1 setup step requires Java 17. The host system does not need local Java or Gradle installs for this gate.
+See the [Minecraft runtime module documentation](mods/mpb-minecraft-mod/README.md) for loader,
+toolchain, and artifact details. The developer-only experiment runner is documented in the
+[Knowledge Lab README](mods/mpb-knowledge-lab/README.md).
+
+## Documentation
+
+The [documentation index](docs/README.md) links the current product, architecture, curated
+knowledge, and release-validation sources of truth.

@@ -1,6 +1,9 @@
-# Autonomous Knowledge Release Pipeline Design
+# Autonomous Knowledge Release Pipeline Requirements
 
-Date: 2026-06-29
+This document is the source of truth for the safety, trust, and acceptance requirements of the
+developer-side knowledge release pipeline. Commands, artifact layout, resume procedures, and
+operator actions belong in the [pipeline operator guide](autonomous-release-pipeline.md); generated
+report fields belong in the [report schema](release-report-schema.md).
 
 ## 1. Purpose
 
@@ -330,12 +333,12 @@ The pipeline is accepted only when:
 - No trusted claims from internet pages alone.
 - No trusted claims from decompiled code alone.
 - No release with known uncovered discovered mechanics.
-- No separate knowledge bundle download flow in the first version of this pipeline.
+- No separate knowledge bundle download flow; trusted bundles ship through the patcher release path.
 - No dedicated human-facing UI for knowledge production unless a later design chooses to add one.
 
-## 10. Implementation Planning Commitments
+## 10. Architecture Commitments
 
-The implementation plan must use these concrete commitments:
+The pipeline uses these concrete commitments:
 
 - Local ignored artifacts live under `knowledge/runs/`, `knowledge/lab-artifacts/`,
   `knowledge/model-cache/`, `knowledge/model-datasets/`, and `knowledge/prism-clones/`.

@@ -1,7 +1,10 @@
 # Worker Decisions
 
-This directory records durable metadata about developer-side model-worker experiments for curated
-knowledge packs.
+This document is the source of truth for ownership and retention rules for developer-side
+worker-decision artifacts under `knowledge/worker-decisions/`. Worker trust and evaluation policy
+belongs in [`docs/knowledge/model-workers.md`](../../docs/knowledge/model-workers.md), release
+sequencing in the [pipeline operator guide](../../docs/knowledge/autonomous-release-pipeline.md), and
+pack-specific reviewable decisions in each pack's `source/worker-decisions.jsonl`.
 
 Workers are assistants only. Their prompts, raw outputs, corrections, and experiment outcomes may be
 used as future training data, but worker output is not trusted knowledge. Trusted claims must be

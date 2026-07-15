@@ -1,6 +1,22 @@
 # Curated Knowledge Packs
 
+This directory is the source of truth for stable design and operational contracts shared by all
+first-party curated knowledge packs. Cross-cutting trust and data-flow rules belong here;
+pack-specific identity belongs under [`knowledge/packs`](../../knowledge/README.md), product support
+guarantees in the [product contract](../product/first-party-knowledge-packs.md), and current release
+results in [validation summaries](../validation/README.md).
+
 MPB first-party knowledge packs are reviewable source records plus generated read-only runtime bundles. Source records live under `knowledge/packs/<pack-id>/source/`; generated bundles are rebuilt under `knowledge/packs/<pack-id>/bundle/`. Large uncompressed generated bundles are local artifacts and should not be committed; compressed embedded artifacts may be committed when the patcher includes them directly.
+
+## Document Map
+
+- [Exact fingerprints](fingerprints.md) owns fingerprint inputs, normalization, exclusions, and mismatch behavior.
+- [Runtime bundle format](runtime-bundle-format.md) owns the generated `knowledge-index.json` schema.
+- [Model workers](model-workers.md) owns worker roles, trust, evaluation, and artifact policy.
+- [Release-pipeline requirements](release-pipeline-requirements.md) owns safety, trust, and acceptance requirements.
+- [Release-pipeline operator guide](autonomous-release-pipeline.md) owns commands, phases, approvals, artifacts, and resume procedures.
+- [Release report schema](release-report-schema.md) owns blocking and release report fields.
+- [First-party release checklist](../validation/first-party-knowledge-release-checklist.md) owns the human-reviewed gates required before shipping.
 
 The production contract is strict:
 
@@ -47,7 +63,9 @@ End users do not manage source records or lab artifacts. Their flow is: download
 
 ## Release Gates
 
-No first-party pack is trusted or shipped until all of these gates pass:
+No first-party pack is trusted or shipped until the
+[first-party release checklist](../validation/first-party-knowledge-release-checklist.md) is complete.
+The core automated gates are:
 
 - `cargo run -p mpb-knowledge --bin mpb-knowledge -- validate-source <pack>/source` passes with zero unresolved coverage, placeholders, stale fingerprints, incomplete overlays, incomplete dependency chains, behavioral claims without runtime evidence, trusted worker-only claims, missing manifest metadata, or runtime bundle query gaps.
 - `cargo run -p mpb-knowledge --bin mpb-knowledge -- build-bundle <pack>/source <pack>/bundle` produces the local runtime bundle from validated source records.

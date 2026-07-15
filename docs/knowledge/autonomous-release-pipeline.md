@@ -1,5 +1,11 @@
 # Autonomous Knowledge Release Pipeline
 
+This document is the source of truth for operating and resuming the local curated-knowledge release
+pipeline, including phases, approvals, artifacts, validation gates, and publication preparation.
+Safety and acceptance requirements belong in [release-pipeline requirements](release-pipeline-requirements.md),
+format schemas and worker policy in their focused sibling documents, and generated run results under
+the ignored [`knowledge/runs`](../../knowledge/README.md) artifact tree.
+
 The autonomous knowledge release pipeline is a local developer-side workflow for turning a supported PrismLauncher instance into a validated embedded MPB knowledge bundle and release report. It keeps the original Prism instance as read-only input; durable run state and large transient artifacts live under the local `knowledge/` artifact tree.
 
 ## Artifact Layout
@@ -77,7 +83,7 @@ Status output includes `latestSuccessfulPhase`, `nextPhase`, blockers, approval 
 - `Release`
 - `Report`
 
-Implemented phases are idempotent. Preflight reuses an existing `preflight-report` artifact, clone resume reuses an existing `target-clone` artifact instead of deleting and recreating the disposable clone, worker drafting reuses an existing `worker-output` artifact, experiment planning reuses an existing `experiment-plan` artifact, and adapter expansion reuses an existing `adapter-expansion-plan` artifact. Unsupported future phases create a blocking report under `knowledge/runs/<run-id>/reports/` rather than pretending the release is complete. Production runs must not skip `Drafting` just because deterministic extraction coverage is complete; the phase still requires an exact-fingerprint local `worker-model` artifact and persists worker prompt/input/output/model/evaluation/correction artifacts.
+Resumable phases are idempotent. Preflight reuses an existing `preflight-report` artifact, clone resume reuses an existing `target-clone` artifact instead of deleting and recreating the disposable clone, worker drafting reuses an existing `worker-output` artifact, experiment planning reuses an existing `experiment-plan` artifact, and adapter expansion reuses an existing `adapter-expansion-plan` artifact. An unavailable phase creates a blocking report under `knowledge/runs/<run-id>/reports/` rather than pretending the release is complete. Production runs must not skip `Drafting` just because deterministic extraction coverage is complete; the phase still requires an exact-fingerprint local `worker-model` artifact and persists worker prompt/input/output/model/evaluation/correction artifacts.
 
 ## Bundle Embedding And Product Validation
 

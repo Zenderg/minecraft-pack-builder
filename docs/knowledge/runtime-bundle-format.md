@@ -1,5 +1,10 @@
 # Runtime Bundle Format
 
+This document is the source of truth for the generated `knowledge-index.json` runtime bundle schema
+and validation invariants. Source-pack authoring belongs in the [knowledge overview](README.md),
+runtime loading behavior in the [Minecraft mod documentation](../../mods/mpb-minecraft-mod/README.md),
+and release sequencing in the [pipeline operator guide](autonomous-release-pipeline.md).
+
 Runtime bundles are generated JSON files named `knowledge-index.json`. They are read-only runtime artifacts: no raw lab logs, model traces, notebooks, or generation tooling are present in the bundle.
 
 Top-level fields:

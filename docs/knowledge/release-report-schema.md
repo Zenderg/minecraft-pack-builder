@@ -1,5 +1,10 @@
 # Knowledge Release Report Schema
 
+This document is the source of truth for generated blocking and release report fields and GitHub
+publication-preparation semantics. Report generation commands and phase behavior belong in the
+[pipeline operator guide](autonomous-release-pipeline.md); raw generated reports remain under the
+ignored [`knowledge/runs`](../../knowledge/README.md) artifact tree.
+
 The autonomous release pipeline writes report pairs under `knowledge/runs/<run-id>/reports/`. Every report has a pretty JSON file for machines and a Markdown companion for operators.
 
 ## BlockingReport

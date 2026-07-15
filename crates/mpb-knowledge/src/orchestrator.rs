@@ -330,7 +330,7 @@ impl KnowledgePhaseRunner for DefaultPhaseRunner {
                     ),
                     detail: json!({
                         "phase": phase.as_str(),
-                        "plannedBy": "docs/superpowers/plans/2026-06-29-autonomous-knowledge-release-pipeline.md",
+                        "plannedBy": "docs/knowledge/release-pipeline-requirements.md",
                         "resumeCommand": format!(
                             "mpb-knowledge release resume {} --artifact-root {}",
                             context.store.run_id(),

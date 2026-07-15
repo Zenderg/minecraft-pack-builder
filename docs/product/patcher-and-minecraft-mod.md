@@ -1,6 +1,9 @@
-# Minecraft Pack Builder: Patcher And Minecraft Mod Pivot
+# Minecraft Pack Builder: Patcher And Minecraft Mod
 
-Date: 2026-06-25
+This document is the source of truth for MPB's product boundary and user-visible contract across
+the desktop patcher and client-only Minecraft mod. Repository structure belongs in the
+[architecture overview](../architecture/README.md), build details in component READMEs, and curated
+knowledge formats and release operations under [`docs/knowledge`](../knowledge/README.md).
 
 ## 1. Product Direction
 
@@ -299,7 +302,7 @@ Export:
 
 ## 9. Explicit Non-Goals
 
-The new product does not include:
+The product does not include:
 
 - desktop 3D viewer as a core workflow;
 - global app-owned scheme library;
@@ -313,9 +316,9 @@ The new product does not include:
 - auto-update of the patcher itself;
 - MCP access to player world state, anchor, active progress, import, or export.
 
-## 10. Validation Focus
+## 10. Validation Contract
 
-The first implementation plan should validate the highest-risk assumptions:
+Every release validates these high-risk product contracts:
 
 - multi-loader architecture for Fabric, Forge, and NeoForge on Minecraft 1.20+;
 - MPB mod can start a Streamable HTTP MCP server from the main menu;
@@ -326,3 +329,5 @@ The first implementation plan should validate the highest-risk assumptions:
 - patcher can discover Prism roots/instances and safely apply/unpatch managed files;
 - patcher dependency conflict handling protects preexisting mods.
 
+The repeatable release procedure is owned by the
+[patcher and runtime checklist](../validation/patcher-runtime-release-checklist.md).
