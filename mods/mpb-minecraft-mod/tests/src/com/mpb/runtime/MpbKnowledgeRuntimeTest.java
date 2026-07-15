@@ -81,7 +81,9 @@ public final class MpbKnowledgeRuntimeTest {
                         + "\"minecraftVersion\":\"1.21.1\","
                         + "\"installedAt\":\"test\","
                         + "\"knowledgePackId\":\"fixture-minimal\","
-                        + "\"knowledgeFingerprint\":\"58ef12bb4c001755\","
+                        + "\"knowledgeFingerprint\":"
+                        + MpbJson.quote(bundleFingerprint(paths))
+                        + ","
                         + "\"knowledgeSchemaVersion\":\"mpb-knowledge-v1\","
                         + "\"files\":["
                         + "{\"path\":\"mods/mpb-minecraft-mod.jar\",\"checksum\":\"unused\",\"owner\":\"managed\"},"
@@ -91,6 +93,16 @@ public final class MpbKnowledgeRuntimeTest {
                         + "]"
                         + "}",
                 StandardCharsets.UTF_8);
+    }
+
+    private static String bundleFingerprint(MpbRuntimePaths paths) throws Exception {
+        Path bundle = paths.knowledgeDirectory().resolve("fixture-minimal").resolve("knowledge-index.json");
+        String fingerprint = MpbJson.flatFields(Files.readString(bundle, StandardCharsets.UTF_8))
+                .get("exactFingerprint");
+        if (fingerprint == null || fingerprint.isBlank()) {
+            throw new IllegalStateException("Fixture knowledge bundle has no exact fingerprint.");
+        }
+        return fingerprint;
     }
 
     private static String toolCall(String name, String extraArguments) {

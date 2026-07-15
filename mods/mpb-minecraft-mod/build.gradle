@@ -5,4 +5,9 @@ plugins {
 allprojects {
     group = providers.gradleProperty('mod_group').get()
     version = providers.gradleProperty('mod_version').get()
+
+    tasks.withType(org.gradle.api.tasks.bundling.AbstractArchiveTask).configureEach {
+        preserveFileTimestamps = false
+        reproducibleFileOrder = true
+    }
 }

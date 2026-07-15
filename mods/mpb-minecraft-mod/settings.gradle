@@ -13,6 +13,17 @@ plugins {
 }
 
 rootProject.name = 'mpb-minecraft-mod'
-include 'fabric'
-include 'forge'
-include 'neoforge'
+
+def requestedLoaders = (System.getenv('MPB_MOD_LOADERS') ?: 'fabric forge neoforge')
+    .split(/\s+/)
+    .findAll { !it.isBlank() } as Set
+
+if (requestedLoaders.contains('fabric')) {
+    include 'fabric'
+}
+if (requestedLoaders.contains('forge')) {
+    include 'forge'
+}
+if (requestedLoaders.contains('neoforge')) {
+    include 'neoforge'
+}

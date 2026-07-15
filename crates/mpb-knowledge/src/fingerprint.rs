@@ -44,13 +44,13 @@ pub struct FingerprintInput {
     pub checksum: String,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
 struct MmcPack {
     #[serde(default)]
     components: Vec<MmcComponent>,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
 struct MmcComponent {
     uid: String,
     version: Option<String>,
@@ -86,7 +86,7 @@ pub fn collect_fingerprint_document(
     let mut inputs = Vec::new();
 
     collect_optional_file(instance_path, "metadata", "instance.cfg", &mut inputs)?;
-    collect_optional_file(instance_path, "metadata", "mmc-pack.json", &mut inputs)?;
+    collect_mmc_pack_file(instance_path, &mut inputs)?;
     for (role, relative) in [
         ("mods", "mods"),
         ("config", "config"),
@@ -206,6 +206,32 @@ fn collect_optional_file(
     if path.is_file() {
         inputs.push(file_input(role, Path::new(relative), &path)?);
     }
+    Ok(())
+}
+
+fn collect_mmc_pack_file(
+    instance_path: &Path,
+    inputs: &mut Vec<FingerprintInput>,
+) -> Result<(), FingerprintError> {
+    let path = instance_path.join("mmc-pack.json");
+    if !path.is_file() {
+        return Ok(());
+    }
+
+    let mut pack = read_mmc_pack(path)?;
+    pack.components.sort_by(|left, right| {
+        left.uid
+            .cmp(&right.uid)
+            .then_with(|| left.version.cmp(&right.version))
+    });
+    let canonical =
+        serde_json::to_vec(&pack).map_err(|error| FingerprintError::Parse(error.to_string()))?;
+    inputs.push(FingerprintInput {
+        role: "metadata".to_string(),
+        path: "mmc-pack.json".to_string(),
+        byte_len: canonical.len() as u64,
+        checksum: stable_checksum(&canonical),
+    });
     Ok(())
 }
 

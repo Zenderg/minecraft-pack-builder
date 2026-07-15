@@ -1,2 +1,2 @@
-{"id":"ev-static-stone","kind":"deterministic_source","summary":"Registry and language extraction identify minecraft:stone as Stone.","fingerprint":"58ef12bb4c001755","accepted":true}
-{"id":"ev-runtime-drop","kind":"runtime_observation","summary":"Lab observation mined stone and observed cobblestone output.","fingerprint":"58ef12bb4c001755","accepted":true}
+{"id":"ev-static-stone","kind":"deterministic_source","summary":"Registry and language extraction identify minecraft:stone as Stone.","fingerprint":"bc986558e54f6a24","accepted":true}
+{"id":"ev-runtime-drop","kind":"runtime_observation","summary":"Lab observation mined stone and observed cobblestone output.","fingerprint":"bc986558e54f6a24","accepted":true}

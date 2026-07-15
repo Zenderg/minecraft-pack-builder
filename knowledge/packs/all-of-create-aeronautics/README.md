@@ -9,7 +9,7 @@ First-party curated knowledge pack for the selected local PrismLauncher instance
 - Knowledge schema: `mpb-knowledge-v1`
 - Builder version: `mpb-knowledge-0.1.0`
 - Lab version: `mpb-lab-0.1.0`
-- Exact patch-target fingerprint: `4cdf224f36c11b8a`
+- Exact patch-target fingerprint: `b16b2b58a198088e`
 
 The patch-target fingerprint excludes the MPB managed runtime mod file
 `mods/mpb-minecraft-mod.jar`. The patcher also excludes that file during compatibility checks so

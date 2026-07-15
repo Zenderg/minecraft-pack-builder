@@ -148,6 +148,36 @@ fn target_fingerprint_changes_when_exact_inputs_change() {
 }
 
 #[test]
+fn target_fingerprint_ignores_prism_cached_component_fields() {
+    let temp = tempdir().expect("temp dir");
+    let instance = temp.path().join("Instance");
+    fs::create_dir_all(instance.join(".minecraft").join("mods")).expect("mods");
+    fs::write(instance.join("instance.cfg"), "name=Exact Pack\n").expect("cfg");
+    fs::write(
+        instance.join(".minecraft").join("mods").join("create.jar"),
+        b"mod",
+    )
+    .expect("mod");
+    fs::write(
+        instance.join("mmc-pack.json"),
+        r#"{"components":[{"uid":"org.lwjgl3","version":"3.3.3","cachedName":"LWJGL 3","cachedVersion":"3.3.3","cachedVolatile":true},{"uid":"net.minecraft","version":"1.21.1"}]}"#,
+    )
+    .expect("pack");
+
+    let first = compute_target_fingerprint(&instance, "builder-1", "lab-1", "schema-1")
+        .expect("fingerprint");
+    fs::write(
+        instance.join("mmc-pack.json"),
+        r#"{"components":[{"uid":"net.minecraft","version":"1.21.1"},{"uid":"org.lwjgl3","version":"3.3.3","cachedName":"LWJGL 3","cachedVersion":"3.3.3"}]}"#,
+    )
+    .expect("rewritten pack");
+    let rewritten = compute_target_fingerprint(&instance, "builder-1", "lab-1", "schema-1")
+        .expect("rewritten fingerprint");
+
+    assert_eq!(first.fingerprint, rewritten.fingerprint);
+}
+
+#[test]
 fn extractor_reports_unsupported_inputs_as_blocking_diagnostics() {
     let draft = ExtractionDraft::from_sources(vec![ExtractionSourceKind::Guidebook]);
 

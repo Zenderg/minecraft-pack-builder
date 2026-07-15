@@ -197,7 +197,7 @@ fn installs_repairs_and_removes_matching_curated_knowledge_bundle() {
     );
     assert_eq!(
         manifest.knowledge_fingerprint.as_deref(),
-        Some("58ef12bb4c001755")
+        Some("bc986558e54f6a24")
     );
     assert_eq!(
         manifest.knowledge_schema_version.as_deref(),

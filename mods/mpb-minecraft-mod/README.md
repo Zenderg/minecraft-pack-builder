@@ -62,7 +62,7 @@ MPB Manager copies an agent prompt that mirrors this state. With an active pack,
 ../../tools/build-minecraft-mod-container.sh
 ```
 
-The repository-supported path runs the build in the official Gradle Docker image, pinned by `MPB_GRADLE_CONTAINER_IMAGE` and defaulting to `gradle:8.14.3-jdk21`. It keeps Gradle caches and any auto-provisioned toolchains in the ignored `.gradle-container-cache/` directory. Local machines only need a Docker-compatible daemon; they do not need host Java or Gradle installs.
+The repository-supported path runs the build in official Gradle Docker images. Fabric and NeoForge use `MPB_GRADLE_CONTAINER_JDK21_IMAGE` (default `gradle:8.14.3-jdk21`), while Forge uses `MPB_GRADLE_CONTAINER_JDK17_IMAGE` (default `gradle:8.14.3-jdk17`) because ForgeGradle's Minecraft 1.20.1 setup step requires a Java 17 toolchain. `MPB_GRADLE_CONTAINER_IMAGE` remains a compatibility alias for the JDK 21 image. The wrapper keeps Gradle caches in the ignored `.gradle-container-cache/` directory. Gradle archive tasks use reproducible file ordering and timestamps, and every supported hex encoder writes 128-byte rows so rebuilding unchanged jars does not create metadata-only or line-wrapping diffs. Local machines only need a Docker-compatible daemon; they do not need host Java or Gradle installs.
 
 The underlying `build.sh` still supports direct local execution when a developer intentionally provides Gradle:
 

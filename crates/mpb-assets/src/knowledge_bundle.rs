@@ -17,8 +17,11 @@ pub(crate) struct KnowledgeBundleArtifact {
     pub pack_id: &'static str,
     pub exact_fingerprint: &'static str,
     pub schema_version: &'static str,
+    pub fingerprint_schema_version: &'static str,
     pub builder_version: &'static str,
+    pub fingerprint_builder_version: &'static str,
     pub lab_version: &'static str,
+    pub fingerprint_lab_version: &'static str,
     pub loader: &'static str,
     pub minecraft_version: &'static str,
     pub relative_path: &'static str,
@@ -103,9 +106,9 @@ pub(crate) fn bundled_knowledge_for_instance(
     for artifact in bundled_artifacts()? {
         let computed = compute_patch_target_fingerprint(
             &instance.instance_path,
-            artifact.builder_version,
-            artifact.lab_version,
-            artifact.schema_version,
+            artifact.fingerprint_builder_version,
+            artifact.fingerprint_lab_version,
+            artifact.fingerprint_schema_version,
         )
         .map_err(|error| AssetError::Patch(format!("Knowledge fingerprint failed: {error}")))?;
         let matched = computed == artifact.exact_fingerprint
@@ -190,14 +193,17 @@ fn bundled_artifacts() -> Result<Vec<KnowledgeBundleArtifact>, AssetError> {
 fn fixture_artifact() -> Result<KnowledgeBundleArtifact, AssetError> {
     Ok(KnowledgeBundleArtifact {
         pack_id: "fixture-minimal",
-        exact_fingerprint: "58ef12bb4c001755",
+        exact_fingerprint: "bc986558e54f6a24",
         schema_version: "mpb-knowledge-v1",
+        fingerprint_schema_version: "mpb-knowledge-v1",
         builder_version: "mpb-knowledge-test",
+        fingerprint_builder_version: "mpb-knowledge-test",
         lab_version: "mpb-lab-test",
+        fingerprint_lab_version: "mpb-lab-test",
         loader: "NeoForge",
         minecraft_version: "1.21.1",
         relative_path: "mpb/knowledge/fixture-minimal/knowledge-index.json",
-        checksum: "3f7ed3918a41d958",
+        checksum: "755b0e88d7c6f64a",
         payload: KnowledgeBundlePayload::Hex(FIXTURE_BUNDLE_HEX),
     })
 }
@@ -205,14 +211,17 @@ fn fixture_artifact() -> Result<KnowledgeBundleArtifact, AssetError> {
 fn aoca_artifact() -> Result<KnowledgeBundleArtifact, AssetError> {
     Ok(KnowledgeBundleArtifact {
         pack_id: "all-of-create-aeronautics",
-        exact_fingerprint: "ccd83746388f873b",
+        exact_fingerprint: "b16b2b58a198088e",
         schema_version: "mpb-knowledge-v1",
+        fingerprint_schema_version: "mpb-knowledge-schema",
         builder_version: "mpb-knowledge-0.1.0",
+        fingerprint_builder_version: "0.1.0",
         lab_version: "mpb-lab-0.1.0",
+        fingerprint_lab_version: "mpb-knowledge-lab",
         loader: "NeoForge",
         minecraft_version: "1.21.1",
         relative_path: "mpb/knowledge/all-of-create-aeronautics/knowledge-index.json",
-        checksum: "ea583f7a678be744",
+        checksum: "b1e5727da8531fde",
         payload: KnowledgeBundlePayload::Gzip(AOCA_BUNDLE_GZIP),
     })
 }
@@ -329,7 +338,9 @@ mod tests {
         assert!(aoca_compressed_len() < bytes.len() / 4);
         assert!(bytes.starts_with(b"{"));
         assert_eq!(artifact.pack_id, "all-of-create-aeronautics");
-        assert_eq!(artifact.exact_fingerprint, "ccd83746388f873b");
+        assert_eq!(artifact.exact_fingerprint, "b16b2b58a198088e");
+        assert_eq!(artifact.schema_version, "mpb-knowledge-v1");
+        assert_eq!(artifact.fingerprint_schema_version, "mpb-knowledge-schema");
         assert_eq!(artifact.checksum, stable_checksum(&bytes));
     }
 

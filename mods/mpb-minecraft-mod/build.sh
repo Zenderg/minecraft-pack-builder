@@ -7,8 +7,13 @@ BUILD_DIR="$ROOT/build"
 GENERATED_DIR="$ROOT/artifacts/generated"
 ASSET_DIR="$ROOT/../../crates/mpb-assets/src"
 GRADLE_BIN="${MPB_GRADLE:-}"
+LOADERS="${MPB_MOD_LOADERS:-fabric forge neoforge}"
+CLEAN="${MPB_CLEAN:-true}"
+RUN_JAVA_TESTS="${MPB_RUN_JAVA_TESTS:-true}"
 
-if [ -z "$GRADLE_BIN" ] && command -v gradle >/dev/null 2>&1; then
+if [ -n "$GRADLE_BIN" ] && ! [ -x "$GRADLE_BIN" ] && command -v "$GRADLE_BIN" >/dev/null 2>&1; then
+  GRADLE_BIN="$(command -v "$GRADLE_BIN")"
+elif [ -z "$GRADLE_BIN" ] && command -v gradle >/dev/null 2>&1; then
   GRADLE_BIN="$(command -v gradle)"
 fi
 if [ -z "$GRADLE_BIN" ] || [ ! -x "$GRADLE_BIN" ]; then
@@ -16,8 +21,15 @@ if [ -z "$GRADLE_BIN" ] || [ ! -x "$GRADLE_BIN" ]; then
   exit 1
 fi
 
-rm -rf "$BUILD_DIR" "$GENERATED_DIR"
+if [ "$CLEAN" = "true" ]; then
+  rm -rf "$BUILD_DIR" "$GENERATED_DIR"
+fi
 mkdir -p "$BUILD_DIR" "$GENERATED_DIR"
+
+builds_loader() {
+  local requested="$1"
+  [[ " $LOADERS " == *" $requested "* ]]
+}
 
 copy_artifact() {
   local loader="$1"
@@ -27,37 +39,52 @@ copy_artifact() {
 
   cp "$jar_file" "$output_file"
   if command -v xxd >/dev/null 2>&1; then
-    xxd -p -c 256 "$output_file" > "$hex_file"
+    xxd -p -c 128 "$output_file" > "$hex_file"
   elif command -v node >/dev/null 2>&1; then
     node -e "const fs=require('fs'); const [input, output]=process.argv.slice(1); const hex=fs.readFileSync(input).toString('hex').match(/.{1,256}/g)?.join('\n') ?? ''; fs.writeFileSync(output, hex + (hex ? '\n' : ''));" "$output_file" "$hex_file"
+  elif command -v od >/dev/null 2>&1 && command -v fold >/dev/null 2>&1; then
+    od -An -tx1 -v "$output_file" | tr -d ' \n' | fold -w 256 > "$hex_file"
+    if [ -s "$hex_file" ]; then
+      printf '\n' >> "$hex_file"
+    fi
   else
-    echo "MPB mod production build requires xxd or node to refresh embedded hex assets." >&2
+    echo "MPB mod production build requires xxd, node, or od/fold to refresh embedded hex assets." >&2
     exit 1
   fi
 }
 
-"$GRADLE_BIN" -p "$ROOT" --no-daemon ${MPB_GRADLE_EXTRA_ARGS:-} :fabric:build
-"$GRADLE_BIN" -p "$ROOT" --no-daemon ${MPB_GRADLE_EXTRA_ARGS:-} :forge:build
-"$GRADLE_BIN" -p "$ROOT" --no-daemon ${MPB_GRADLE_EXTRA_ARGS:-} :neoforge:build
-copy_artifact fabric "$ROOT/fabric/build/libs/mpb-minecraft-mod-fabric-$VERSION.jar"
-copy_artifact forge "$ROOT/forge/build/libs/mpb-minecraft-mod-forge-$VERSION.jar"
-copy_artifact neoforge "$ROOT/neoforge/build/libs/mpb-minecraft-mod-neoforge-$VERSION.jar"
+if builds_loader fabric; then
+  "$GRADLE_BIN" -p "$ROOT" --no-daemon ${MPB_GRADLE_EXTRA_ARGS:-} :fabric:build
+  copy_artifact fabric "$ROOT/fabric/build/libs/mpb-minecraft-mod-fabric-$VERSION.jar"
+fi
 
-test_classes_dir="$BUILD_DIR/tests/classes"
-mkdir -p "$test_classes_dir"
-test_sources=()
-while IFS= read -r source; do
-  test_sources+=("$source")
-done < <(find "$ROOT/common/src/main/java" "$ROOT/tests/src" -name '*.java' | sort)
-javac --release 17 -encoding UTF-8 -d "$test_classes_dir" "${test_sources[@]}"
-java -cp "$test_classes_dir" com.mpb.runtime.MpbMcpToolCatalogTest
-java -cp "$test_classes_dir" com.mpb.runtime.MpbKnowledgeRuntimeTest
-java -cp "$test_classes_dir" com.mpb.runtime.MpbMcpCompatibilityTest
-java -cp "$test_classes_dir" com.mpb.runtime.MpbRuntimeConfigTest
-java -cp "$test_classes_dir" com.mpb.runtime.MpbGuideSchemeTest
+if builds_loader forge; then
+  "$GRADLE_BIN" -p "$ROOT" --no-daemon ${MPB_GRADLE_EXTRA_ARGS:-} :forge:build
+  copy_artifact forge "$ROOT/forge/build/libs/mpb-minecraft-mod-forge-$VERSION.jar"
+fi
 
-cat > "$GENERATED_DIR/manifest.txt" <<EOF
+if builds_loader neoforge; then
+  "$GRADLE_BIN" -p "$ROOT" --no-daemon ${MPB_GRADLE_EXTRA_ARGS:-} :neoforge:build
+  copy_artifact neoforge "$ROOT/neoforge/build/libs/mpb-minecraft-mod-neoforge-$VERSION.jar"
+fi
+
+if [ "$RUN_JAVA_TESTS" = "true" ]; then
+  test_classes_dir="$BUILD_DIR/tests/classes"
+  mkdir -p "$test_classes_dir"
+  test_sources=()
+  while IFS= read -r source; do
+    test_sources+=("$source")
+  done < <(find "$ROOT/common/src/main/java" "$ROOT/tests/src" -name '*.java' | sort)
+  javac --release 17 -encoding UTF-8 -d "$test_classes_dir" "${test_sources[@]}"
+  java -cp "$test_classes_dir" com.mpb.runtime.MpbMcpToolCatalogTest
+  java -cp "$test_classes_dir" com.mpb.runtime.MpbKnowledgeRuntimeTest
+  java -cp "$test_classes_dir" com.mpb.runtime.MpbMcpCompatibilityTest
+  java -cp "$test_classes_dir" com.mpb.runtime.MpbRuntimeConfigTest
+  java -cp "$test_classes_dir" com.mpb.runtime.MpbGuideSchemeTest
+
+  cat > "$GENERATED_DIR/manifest.txt" <<EOF
 mpb-minecraft-mod $VERSION
 generated-by=mods/mpb-minecraft-mod/build.sh
 loaders=fabric,forge,neoforge
 EOF
+fi

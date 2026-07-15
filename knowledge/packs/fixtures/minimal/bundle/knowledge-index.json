@@ -2,12 +2,12 @@
   "manifest": {
     "packId": "fixture-minimal",
     "packVersion": "1.0.0",
-    "exactFingerprint": "58ef12bb4c001755",
+    "exactFingerprint": "bc986558e54f6a24",
     "schemaVersion": "mpb-knowledge-v1",
     "builderVersion": "mpb-knowledge-test",
     "labVersion": "mpb-lab-test",
     "validationCommand": "mpb-knowledge validate-source knowledge/packs/fixtures/minimal/source",
-    "validationTimestamp": "unix:1782643115",
+    "validationTimestamp": "unix:1782742303",
     "coverage": {
       "expectedEntityIds": [
         "minecraft:stone",
@@ -27,7 +27,11 @@
         "recipe_graph",
         "mechanic_details",
         "evidence"
-      ]
+      ],
+      "cloneRuntimeValidated": true,
+      "partialExtraction": false,
+      "unsupportedSourceKinds": [],
+      "flakyExperimentIds": []
     }
   },
   "indexes": {
@@ -191,14 +195,14 @@
         "id": "ev-runtime-drop",
         "kind": "runtime_observation",
         "summary": "Lab observation mined stone and observed cobblestone output.",
-        "fingerprint": "58ef12bb4c001755",
+        "fingerprint": "bc986558e54f6a24",
         "accepted": true
       },
       "ev-static-stone": {
         "id": "ev-static-stone",
         "kind": "deterministic_source",
         "summary": "Registry and language extraction identify minecraft:stone as Stone.",
-        "fingerprint": "58ef12bb4c001755",
+        "fingerprint": "bc986558e54f6a24",
         "accepted": true
       }
     },
@@ -230,7 +234,7 @@
   "checksums": [
     {
       "path": "source/manifest.json",
-      "checksum": "e4cdf562e41f5966"
+      "checksum": "586b647978e7dcf0"
     },
     {
       "path": "source/entities.jsonl",
@@ -242,7 +246,7 @@
     },
     {
       "path": "source/evidence.jsonl",
-      "checksum": "a80064a6c34e5c79"
+      "checksum": "5909b5a5a75564ad"
     },
     {
       "path": "source/recipes.jsonl",
@@ -258,7 +262,7 @@
     },
     {
       "path": "knowledge-index.json",
-      "checksum": "86928bfbac2561ac"
+      "checksum": "985a921a80cfb267"
     }
   ]
 }

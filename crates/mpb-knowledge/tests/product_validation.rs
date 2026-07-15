@@ -9,7 +9,7 @@ use mpb_knowledge::{
 };
 use serde_json::json;
 
-const FIXTURE_FINGERPRINT: &str = "58ef12bb4c001755";
+const FIXTURE_FINGERPRINT: &str = "bc986558e54f6a24";
 
 #[test]
 fn product_validation_bundle_phase_builds_validated_runtime_bundle_and_records_checksum_size() {

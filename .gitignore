@@ -10,6 +10,7 @@ mods/mpb-minecraft-mod/forge/build/
 mods/mpb-minecraft-mod/neoforge/build/
 mods/mpb-minecraft-mod/artifacts/generated/
 mods/mpb-knowledge-lab/build/
+mods/mpb-knowledge-lab/bin/
 mods/mpb-knowledge-lab/.gradle/
 knowledge/lab-artifacts/
 knowledge/runs/
